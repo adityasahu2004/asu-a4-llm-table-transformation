@@ -1,0 +1,8 @@
+{
+  "reason": "Stale API connection across overnight system sleep; controller restarted.",
+  "prompt_written_utc": "2026-11-19T21:37:52.822458+00:00",
+  "interrupted_utc": "2026-11-20T15:17:52.173162+00:00",
+  "calendar_wait_seconds": 63599.350704193115,
+  "active_wait_seconds": null,
+  "note": "Active request duration could not be recovered; not included in active-time aggregates. No completion/usage was received."
+}

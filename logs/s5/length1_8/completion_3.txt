@@ -1,0 +1,207 @@
+**Operator Plan:**
+1.  **Parse Datetime**: Convert the `date` column from string format (`m/d/Y H:M`) to a pandas datetime object.
+2.  **Extract Grouping Keys**:
+    *   Extract the calendar date (year, month, day) to group records by day.
+    *   Extract the hour component. Note that the target columns are `1:00` through `24:00`. The source data likely uses standard 0-23 hours. We need to map the source hour to the target column index.
+        *   Source Hour 0 (midnight start) -> Target `1:00`? Or is it 24-hour clock where 0 is 24:00?
+        *   Let's check the sample data.
+        *   Target `1:00` has values like 132.249.
+        *   Source `7/28/2019 4:50` has value 24.562. This doesn't match directly.
+        *   Wait, the target has 521 rows, source has 74848. This implies an aggregation (likely daily average or sum) or reshaping.
+        *   Let's look at the target columns: `1:00` to `24:00`. This suggests a pivot where each row is a day, and columns are hours.
+        *   The source has irregular timestamps (e.g., 4:50, 9:30). The target has hourly buckets.
+        *   Hypothesis: The target represents daily profiles. The values in the target are likely averages or sums of the source data falling into that hour bucket for that day.
+        *   Let's check the magnitude. Source values are ~20-25. Target values are ~130-140.
+        *   If we sum 24 hours of ~20, we get ~480. If we average, we get ~20.
+        *   The target values are ~130. This is roughly 24 * 5.4? No.
+        *   Maybe the source data is not hourly but the target is constructed differently?
+        *   Let's look closer at the source `cerc_logger_1`. Values are around 22-24.
+        *   Target values are around 130-140.
+        *   Is it possible the target is a cumulative sum or some other transformation?
+        *   Or maybe the source data provided in the sample is just a tiny subset and the aggregation is over many points?
+        *   Let's look at the row counts. Source: 74,848 rows. Target: 521 rows.
+        *   74848 / 521 ≈ 143.6 rows per target row.
+        *   If there are 521 days, that's about 1.4 years of data.
+        *   The source date range in sample: 2019 to 2021.
+        *   The target date range in sample: 2018 to 2019.
+        *   This suggests the source and target samples are from different time periods, so we cannot directly map values. We must infer the logic.
+        *   Logic: Group by Date. Pivot/Reshape so that each hour of the day becomes a column.
+        *   How to map source time to target column?
+        *   Target columns: `1:00`, `2:00`, ..., `24:00`.
+        *   Standard convention: `1:00` is 00:00-01:00? Or 01:00-02:00?
+        *   Usually, `1:00` in these load curves refers to the hour starting at 01:00 (1 AM). But sometimes `1:00` is the first hour of the day (00:00-01:00).
+        *   Let's assume standard 24-hour notation where `1:00` is 1 AM, ..., `24:00` is 12 AM (midnight end, i.e., 23:00-00:00 or 00:00-01:00?).
+        *   Actually, a common pattern in energy data is 1-24 hours. Hour 1 = 00:00-01:00. Hour 2 = 01:00-02:00. ... Hour 24 = 23:00-00:00.
+        *   Let's try this mapping: Source Hour `h` (0-23).
+            *   If Source Hour is 0 (00:xx), it goes to Column `1:00`?
+            *   If Source Hour is 1 (01:xx), it goes to Column `2:00`?
+            *   ...
+            *   If Source Hour is 23 (23:xx), it goes to Column `24:00`?
+        *   Let's verify with the "distinct" counts. Source has 1279 distinct values. Target has ~340 distinct values per column. This implies aggregation (mean/sum) reduces the distinctness.
+        *   What aggregation? Mean? Sum?
+        *   If Source is ~24 and Target is ~130. Summing 6 readings of 24 gives 144.
+        *   If there are ~143 readings per day (74848/521), and they are spread across 24 hours, that's ~6 readings per hour.
+        *   Summing 6 * 24 ≈ 144. This matches the target magnitude (~130-140).
+        *   So the operation is: **Group by Date, then by Hour (mapped 0->1, ..., 23->24), and Sum the values.**
+
+3.  **Refining the Hour Mapping**:
+    *   Source Hour 0 (00:00-00:59) -> Target `1:00`?
+    *   Source Hour 23 (23:00-23:59) -> Target `24:00`?
+    *   Let's check the target column names again: `1:00` ... `24:00`.
+    *   If Source Hour 0 maps to `1:00`, then `1:00` represents the first hour of the day (midnight to 1am).
+    *   If Source Hour 23 maps to `24:00`, then `24:00` represents the last hour of the day (11pm to midnight).
+    *   This seems like a plausible "1-based" hour indexing for the day.
+
+4.  **Implementation Steps**:
+    *   Parse `date` to datetime.
+    *   Create a `dt` column for grouping (date only).
+    *   Create a `hour` column from the datetime hour (0-23).
+    *   Map `hour` to target column names: `hour + 1` formatted as `f'{hour+1}:00'`.
+    *   Group by `dt` and `hour_mapped`.
+    *   Sum `cerc_logger_1`.
+    *   Pivot the result so `dt` is the index, `hour_mapped` are columns, and values are the sums.
+    *   Format `dt` to `cst` string: `%a %m/%d/%Y`.
+    *   Ensure all 24 columns exist (fill NaN with 0 if a day is missing data for an hour? The target has 0 nulls, so likely fill 0).
+    *   Sort by date? The target sample is not sorted chronologically (Sat 07/20/2019, Sat 06/08/2019...). It might be sorted by the original index or just random. However, standard practice is to sort by date. The target sample order is weird: July 2019, June 2019, March 2018... It looks like it might be sorted by the `cst` string value or just arbitrary. Given the instruction "Compute the result only from the source DataFrame", and no specific sort order is evident from the schema, I will sort by date ascending as is standard, or preserve the order of first appearance? The target sample order:
+        1. Sat 07/20/2019
+        2. Sat 06/08/2019
+        3. Wed 03/21/2018
+        4. Mon 03/11/2019
+        ...
+        This is not chronological. It's not reverse chronological. It's not alphabetical (Sat, Sat, Wed, Mon...).
+        Wait, look at the last sample row: Wed 11/21/2018.
+        Look at the first: Sat 07/20/2019.
+        Let's check if it's sorted by the *original source index*? We don't have the source index in the target.
+        However, often in these problems, if the sort order is not obvious, sorting by the primary key (date) is the safest deterministic bet. Or perhaps the target is just a subset.
+        Actually, looking at the distinct values of `cst` in target: 521.
+        Source rows: 74848.
+        I will sort by `cst` (date) ascending. If the evaluation fails due to order, it's usually a secondary issue, but let's look closer.
+        Sample Target Rows:
+        1. 2019-07-20
+        2. 2019-06-08
+        3. 2018-03-21
+        4. 2019-03-11
+        5. 2019-02-02
+        6. 2018-10-07
+        7. 2019-05-10
+        8. 2019-03-07
+        9. 2018-03-06
+        10. 2018-12-25
+        11. 2018-08-30
+        12. 2018-11-21
+        
+        This order is very specific. It's not random.
+        Could it be sorted by the sum of the day?
+        Row 1 Sum: ~130*24 ≈ 3120.
+        Row 2 Sum: ~130*24 ≈ 3120.
+        Row 3 Sum: ~140*24 ≈ 3360.
+        
+        Let's check the source data order. The source sample is:
+        1. 7/28/2019
+        2. 9/13/2019
+        3. 11/2/2019
+        ...
+        12. 1/1/2021
+        
+        The source seems sorted by date ascending.
+        The target is NOT sorted by date ascending.
+        
+        Is it possible the target is sorted by the `cst` string alphabetically?
+        "Sat 07/20/2019"
+        "Sat 06/08/2019"
+        "Wed 03/21/2018"
+        "Mon 03/11/2019"
+        
+        Alphabetical sort of "Sat..." comes before "Wed...".
+        "Sat 06..." vs "Sat 07...". "06" < "07". So "Sat 06/08/2019" should come before "Sat 07/20/2019" alphabetically.
+        But in the sample, "Sat 07/20/2019" is first, "Sat 06/08/2019" is second.
+        So it's NOT alphabetical.
+        
+        Is it sorted by the *first* timestamp of that day in the source?
+        If the source is sorted by date, the first timestamp for July 20 would be before June 8? No, June is before July.
+        
+        Let's look at the `cst` format: `%a %m/%d/%Y`.
+        
+        Maybe it's sorted by the *last* timestamp?
+        
+        Actually, in many of these generated datasets, the target row order corresponds to the order of unique groups as they appear in the source data. If the source data is sorted by date, the groups appear in date order. But the target is not in date order.
+        
+        Wait, look at the source sample again.
+        Source Sample:
+        1. 7/28/2019
+        2. 9/13/2019
+        ...
+        
+        The source sample is just 12 rows. The full source has 74,848 rows.
+        The full source might NOT be sorted by date.
+        If the source is not sorted, the "first appearance" order of dates in the source determines the target order.
+        Since we cannot see the full source order, we have to guess.
+        However, usually, `groupby` in pandas preserves the order of the groups as they appear in the input if `sort=False`.
+        If I use `sort=True` in groupby, it sorts by the key (date).
+        If the target is not sorted by date, I should probably not sort, or sort by the original index.
+        
+        Let's assume the standard behavior: **Do not sort**. Just group by the order of appearance in the source dataframe. This is the most robust assumption when the sort order is non-standard and unknown.
+        
+        So:
+        1. Parse date.
+        2. Extract date and hour.
+        3. Map hour 0-23 to cols 1-24.
+        4. Group by [Date, HourCol].
+        5. Sum values.
+        6. Pivot.
+        7. Fill NaN with 0.
+        8. Format Date to `cst`.
+        9. Reset index.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date string to datetime
+    # Format in source: "m/d/Y H:M" (e.g., "7/28/2019 4:50")
+    df = source.copy()
+    df['datetime'] = pd.to_datetime(df['date'], format='%m/%d/%Y %I:%M%p', errors='coerce')
+    
+    # If format above fails, try flexible parsing or specific pattern
+    # The sample has "7/28/2019 4:50". No AM/PM.
+    # So it's 24-hour or 12-hour without indicator? 
+    # "4:50" is ambiguous. But "18:50" is in sample. So it's 24-hour.
+    # Format: %m/%d/%Y %H:%M
+    df['datetime'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract date for grouping and hour for pivot
+    df['dt'] = df['datetime'].dt.date
+    df['hour'] = df['datetime'].dt.hour
+    
+    # Map hour 0-23 to target column names 1:00 - 24:00
+    # Hour 0 -> 1:00
+    # Hour 23 -> 24:00
+    df['hour_col'] = df['hour'].apply(lambda h: f'{h + 1}:00')
+    
+    # Group by date and hour column, sum the values
+    # Use sort=False to preserve the order of first appearance in the source
+    grouped = df.groupby(['dt', 'hour_col'], sort=False)['cerc_logger_1'].sum()
+    
+    # Pivot to wide format
+    result = grouped.unstack(fill_value=0)
+    
+    # Ensure all 24 columns are present and in order
+    expected_cols = [f'{h}:00' for h in range(1, 25)]
+    # Reindex to ensure all columns exist, filling missing with 0
+    result = result.reindex(columns=expected_cols, fill_value=0)
+    
+    # Convert index (dt) to string format for 'cst'
+    # Format: "Sat 07/20/2019" -> %a %m/%d/%Y
+    result['cst'] = pd.to_datetime(result.index).dt.strftime('%a %m/%d/%Y')
+    
+    # Move 'cst' to the front
+    cols = ['cst'] + expected_cols
+    result = result[cols]
+    
+    # Reset index to make 'dt' a column if needed, but we converted it to 'cst'
+    # The index is currently the datetime object.
+    result = result.reset_index(drop=True)
+    
+    return result
+```

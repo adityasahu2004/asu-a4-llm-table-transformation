@@ -1,0 +1,110 @@
+Operator plan:
+1. Parse the `date` column into datetime objects to extract month and day.
+2. Map the AM/PM hour columns to 24-hour integers (1-24). Specifically:
+   - "1:00 AM" -> 1, ..., "11:00 AM" -> 11
+   - "12:00 PM" -> 12
+   - "1:00 PM" -> 13, ..., "11:00 PM" -> 23
+   - "12:00 AM" -> 24
+3. Melt the dataframe to long format, keeping `date`, `hour`, and `value`.
+4. Filter out rows where the month is not present in the target schema's non-null months if necessary, but looking at the target, it includes all 12 months. However, the sample data shows `null` for Aug-Dec. The source data only contains Jul-Dec 2014. The target schema implies a wider date range might exist in evaluation, or we just pivot what we have. The target sample shows `null` for months not in the source data (Aug-Dec in sample output are null because source is Jul-Dec 2014? No, source is Jul-Dec 2014. Target sample has Jul data but Aug-Dec are null. Wait, the source sample has Jul, Aug, Sep, Oct, Nov, Dec. The target sample has Jul data, but Aug-Dec are null. This suggests the target might be aggregating across years or specific years.
+   - Let's look closer. Source: 182 rows, Jul-Dec 2014.
+   - Target: 24 rows. Columns: hour, january... december.
+   - Target sample data: `july` has values. `august` to `december` are null.
+   - Why? The source data *has* Aug-Dec.
+   - Maybe the target is aggregating by *hour* and *month*, but only for a specific year? Or maybe the "evaluation source" will have more years?
+   - If I simply group by `hour` and `month` and take the mean (or sum?), let's check the values.
+   - Source `1:00 AM` on 7/3/2014 is 1.035932.
+   - Target `hour` 1, `july` is 0.995003.
+   - Source `11:00 AM` on 7/3/2014 is 0.253739. Target `hour` 11, `july` is 0.261593.
+   - It looks like an average.
+   - Why are Aug-Dec null in the target sample? The source sample *contains* Aug-Dec data.
+   - Perhaps the target sample provided is just a subset of the *evaluation* target, or the transformation logic filters for a specific condition?
+   - Or maybe the "note" implies the source row count is just a sample.
+   - Let's look at the distinct values in Target `july`: 24 distinct values (one per hour).
+   - If I group by hour and month, I get averages.
+   - Why are Aug-Dec null? In the provided target sample, they are null. But the source has data.
+   - Is it possible the target corresponds to a different year? E.g., 2013? The source is 2014.
+   - If the evaluation source has data for 2013-2016, and the target expects 2013 data, then 2014 data would be ignored.
+   - However, I cannot assume a year filter unless evident.
+   - Let's re-read the target sample. `july` has values. `august` is null.
+   - Source has `8/4/2014`, `8/21/2014`.
+   - If I calculate the mean for August 1:00 AM from source:
+     - 8/4/2014: 0.536586
+     - 8/21/2014: 0.307012
+     - Mean: ~0.42. Not null.
+   - Therefore, the target sample's nulls for Aug-Dec must mean those months are *not* in the specific dataset being evaluated in the sample, OR there is a filter I'm missing.
+   - Wait, look at the target `first_last_non_null` for columns. It's not provided for months.
+   - Look at `distinct` for `july`: 24. `august`: 0 (nulls: 24).
+   - This strongly implies that for the specific evaluation case that generated this sample, there was no data for Aug-Dec.
+   - Since the *source* provided in the prompt *does* have Aug-Dec, but the *target* sample does not, there is a contradiction unless:
+     1. The source sample and target sample are not aligned (i.e., the target sample comes from a different evaluation run where Aug-Dec were missing).
+     2. There is a filter.
+   - Given "Source row count describes a training sample only, not the evaluation input", it is highly likely that the target sample corresponds to an evaluation input that *lacked* Aug-Dec data, or the transformation is simply `groupby(['hour', 'month']).mean()`.
+   - If I implement `groupby(['hour', 'month']).mean()`, and the evaluation input has data for all months, it will produce values. If it lacks data, it will produce nulls (if using `dropna=False` in unstack or similar).
+   - I will assume the transformation is: Parse date, map hours, melt, group by hour and month, calculate mean, unstack to wide format with month names.
+
+Step-by-step:
+1. Parse `date` to datetime.
+2. Create `month` name from datetime.
+3. Map hour columns to 1-24.
+4. Melt to long format.
+5. Group by `hour` and `month_name`, calculate mean.
+6. Unstack `month_name` to columns.
+7. Rename columns to lowercase month names.
+8. Ensure `hour` is integer.
+9. Sort by `hour`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date
+    source['dt'] = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    source['month_name'] = source['dt'].dt.month_name().str.lower()
+    source['hour_num'] = source['dt'].dt.hour # This gives 0-23. We need 1-24 mapping based on AM/PM cols.
+    
+    # The source has columns like "1:00 AM", "12:00 PM".
+    # Let's map them manually to 1-24.
+    hour_map = {}
+    # AM hours: 1-11
+    for h in range(1, 12):
+        hour_map[f"{h}:00 AM"] = h
+    # 12:00 PM is 12
+    hour_map["12:00 PM"] = 12
+    # PM hours: 1-11 become 13-23
+    for h in range(1, 12):
+        hour_map[f"{h}:00 PM"] = h + 12
+    # 12:00 AM is 24
+    hour_map["12:00 AM"] = 24
+    
+    # Identify hour columns
+    hour_cols = [c for c in source.columns if c in hour_map]
+    
+    # Melt
+    long_df = source.melt(id_vars=['month_name'], value_vars=hour_cols, var_name='hour_label', value_name='value')
+    long_df['hour'] = long_df['hour_label'].map(hour_map)
+    long_df = long_df.dropna(subset=['hour']) # Should not happen if map is correct
+    
+    # Group by hour and month, calculate mean
+    grouped = long_df.groupby(['hour', 'month_name'])['value'].mean().reset_index()
+    
+    # Pivot to wide
+    result = grouped.pivot(index='hour', columns='month_name', values='value').reset_index()
+    
+    # Rename columns
+    result.columns.name = None
+    # Ensure all month columns exist, even if null
+    all_months = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december']
+    for m in all_months:
+        if m not in result.columns:
+            result[m] = np.nan
+            
+    # Select and order columns
+    result = result[['hour'] + all_months]
+    
+    # Sort by hour
+    result = result.sort_values('hour').reset_index(drop=True)
+    
+    return result
+```

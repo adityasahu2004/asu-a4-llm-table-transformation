@@ -1,0 +1,73 @@
+[
+  {
+    "index": 0,
+    "finish_reason": "stop",
+    "path": "generated/s3/length1_3/candidates/0.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "",
+      "seconds": 0.6237877499988826,
+      "shape": [
+        182,
+        25
+      ],
+      "fingerprint": "1c4930626d19e3005818deffe522068a7ce00c80087427cb0cb57b98e0e6850f"
+    }
+  },
+  {
+    "index": 1,
+    "finish_reason": "length",
+    "execution": {
+      "status": "extraction_error",
+      "error": "No fenced Python block"
+    }
+  },
+  {
+    "index": 2,
+    "finish_reason": "stop",
+    "path": "generated/s3/length1_3/candidates/2.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "",
+      "seconds": 0.5640261249973264,
+      "shape": [
+        182,
+        25
+      ],
+      "fingerprint": "f50f635dc93aedb5623fa76645f0821dae198a73d55c66fb5b66bf223c4be786"
+    }
+  },
+  {
+    "index": 3,
+    "finish_reason": "stop",
+    "path": "generated/s3/length1_3/candidates/3.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "",
+      "seconds": 0.5623567910006386,
+      "shape": [
+        182,
+        25
+      ],
+      "fingerprint": "1c4930626d19e3005818deffe522068a7ce00c80087427cb0cb57b98e0e6850f"
+    }
+  },
+  {
+    "index": 4,
+    "finish_reason": "stop",
+    "path": "generated/s3/length1_3/candidates/4.py",
+    "execution": {
+      "status": "execution_error",
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "Traceback (most recent call last):\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py\", line 17, in <module>\n    output = namespace['transform'](source)\n  File \"transform.py\", line 101, in transform\n    result = result.sort_values(by='sort_key').reset_index(drop=True)\n             ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/frame.py\", line 9330, in sort_values\n    k = self._get_label_or_level_values(by[0], axis=axis)\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/generic.py\", line 1708, in _get_label_or_level_values\n    raise KeyError(key)\nKeyError: 'sort_key'\n",
+      "seconds": 0.5678039170015836
+    }
+  }
+]

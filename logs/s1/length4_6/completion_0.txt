@@ -1,0 +1,370 @@
+### Operator Plan
+
+1.  **Parse Date**: Convert the `Date` column from string format (`M/D/YYYY`) to a datetime object, then format it as a string `YYYY-MM-DD 00:00:00` to match the target `date` column.
+2.  **Aggregate Data**: The source has 2190 rows (6 rate codes * 365 days) and the target has 365 rows (1 per day). This implies an aggregation across the different rate codes for each day. Looking at the sample data:
+    *   Source Row 1 (R4, 1/1/2014): Hr 1 = 2.43675
+    *   Source Row 2 (R4, 7/19/2014): Hr 1 = 1.15144
+    *   ...
+    *   Target Row 1 (2014-01-01): 1:00 AM = 0.9188
+    *   Let's check the relationship. The target values are significantly different from individual source rows.
+    *   Let's look at the distinct counts. Source `Hr 1` has 1127 distinct values. Target `1:00 AM` has 2166 distinct values. Wait, the target has *more* distinct values than the source column? No, the source has 2190 rows. The target has 365 rows.
+    *   Let's re-examine the target sample.
+        *   Target `1:00 AM` for `2014-01-01` is `0.9188`.
+        *   Source rows for `1/1/2014`: There are 6 rows (one for each Rate Code).
+        *   Let's sum the `Hr 1` values for `1/1/2014`?
+            *   We only see one row for `1/1/2014` in the sample (R4, A5/A6, 2.43675).
+            *   We need to infer the aggregation. Common aggregations are Sum, Mean, Max, Min.
+            *   Let's look at `2014-07-19`. Source sample has R4 (1.15144). Target is 0.63071.
+            *   Let's look at `2014-02-03`. Source sample has S1 (16.6457). Target is 7.96519.
+            *   Let's look at `2014-08-21`. Source sample has S1 (15.3275). Target is 7.79271.
+            *   Let's look at `2014-03-08`. Source sample has S2 (4.64371). Target is 692.34719. This is a huge jump.
+            *   Let's look at `2014-09-23`. Source sample has S2 (4.85318). Target is 659.39735.
+            *   Let's look at `2014-04-10`. Source sample has S3 (0.80181). Target is 0.50435.
+            *   Let's look at `2014-10-26`. Source sample has S3 (0.86164). Target is 0.53196.
+            *   Let's look at `2014-05-13`. Source sample has T1 (1.27021). Target is 0.55524.
+            *   Let's look at `2014-11-28`. Source sample has T1 (1.27097). Target is 0.48242.
+            *   Let's look at `2014-06-15`. Source sample has T2 (110.91961). Target is 0.65257.
+            *   Let's look at `2014-12-31`. Source sample has T2 (120.64422). Target is 1.74263.
+
+    *   The target values don't seem to be a simple sum or mean of the visible source rows.
+    *   However, notice the pattern in the target columns: `1:00 AM`, `2:00 AM`, ..., `12:00 PM`, `1:00 PM`, ..., `11:00 PM`.
+    *   The source columns are `Hr 1`, `Hr 2`, ..., `Hr 24`.
+    *   Mapping:
+        *   `Hr 1` -> `1:00 AM`
+        *   `Hr 2` -> `2:00 AM`
+        *   ...
+        *   `Hr 12` -> `12:00 PM`? Or `12:00 AM`?
+        *   Standard 24-hour clock:
+            *   Hr 1 = 00:00-01:00 -> 1:00 AM? Or 12:00 AM?
+            *   Usually, Hr 1 is 12:00 AM - 1:00 AM. But the target label is `1:00 AM`.
+            *   Let's check the order in the target: `1:00 AM`, `2:00 AM` ... `11:00 AM`, `12:00 AM`, `1:00 PM` ...
+            *   Wait, the target column order is:
+                1.  `1:00 AM`
+                2.  `2:00 AM`
+                3.  `3:00 AM`
+                4.  `4:00 AM`
+                5.  `5:00 AM`
+                6.  `6:00 AM`
+                7.  `7:00 AM`
+                8.  `8:00 AM`
+                9.  `9:00 AM`
+                10. `10:00 AM`
+                11. `11:00 AM`
+                12. `12:00 AM`  <-- This is likely Noon (12:00 PM) or Midnight? Given the sequence, it's between 11 AM and 1 PM. So it's Noon. But labeled `12:00 AM`? That's weird. Usually 12:00 PM is Noon. Let's look at the next one.
+                13. `1:00 PM`
+                14. `2:00 PM`
+                ...
+                24. `12:00 PM` <-- This is at the end. Between 11 PM and ...?
+            
+            Let's re-read the target columns carefully.
+            `1:00 AM` ... `11:00 AM`, `12:00 AM`, `1:00 PM` ... `11:00 PM`, `12:00 PM`.
+            
+            This labeling is non-standard or potentially erroneous in the problem description, but we must follow the mapping.
+            Source `Hr 1` corresponds to the first hour of the day.
+            Target `1:00 AM` is the first column.
+            Source `Hr 12` corresponds to the 12th hour.
+            Target `12:00 AM` is the 12th column.
+            Source `Hr 13` corresponds to the 13th hour.
+            Target `1:00 PM` is the 13th column.
+            ...
+            Source `Hr 24` corresponds to the 24th hour.
+            Target `12:00 PM` is the 24th column.
+
+            So the mapping is direct by position:
+            `Hr 1` -> `1:00 AM`
+            `Hr 2` -> `2:00 AM`
+            ...
+            `Hr 12` -> `12:00 AM`
+            `Hr 13` -> `1:00 PM`
+            ...
+            `Hr 24` -> `12:00 PM`
+
+    *   Now, back to the aggregation.
+        The target has 365 rows. The source has 2190 rows (6 rates * 365 days).
+        We need to combine the 6 rates for each day.
+        Let's look at the values again.
+        Day `2014-03-08`:
+        Source S2 Hr 1: 4.64371.
+        Target `1:00 AM`: 692.34719.
+        
+        Day `2014-09-23`:
+        Source S2 Hr 1: 4.85318.
+        Target `1:00 AM`: 659.39735.
+
+        Day `2014-06-15`:
+        Source T2 Hr 1: 110.91961.
+        Target `1:00 AM`: 0.65257.
+
+        Day `2014-12-31`:
+        Source T2 Hr 1: 120.64422.
+        Target `1:00 AM`: 1.74263.
+
+        There is no obvious linear relationship between a single source row and the target.
+        However, if we assume the target is the **Sum** of all 6 rates for that hour:
+        For `2014-03-08`, we only have S2. We don't have the other 5 rates in the sample.
+        But wait, look at the distinct values.
+        Source `Hr 1` distinct: 1127.
+        Target `1:00 AM` distinct: 2166.
+        
+        If it were a sum, the distinct count would likely be lower or similar, not double.
+        If it were a mean, similar.
+        
+        Let's look at the structure again.
+        Source: 2190 rows.
+        Target: 365 rows.
+        
+        Is it possible the target is not an aggregation, but a **pivot** of a different dataset? No, the instructions say "Compute the result only from the source DataFrame".
+        
+        Let's look at the values for `2014-01-01`.
+        Source R4 Hr 1: 2.43675.
+        Target `1:00 AM`: 0.9188.
+        
+        Let's look at `2014-07-19`.
+        Source R4 Hr 1: 1.15144.
+        Target `1:00 AM`: 0.63071.
+        
+        Let's look at `2014-02-03`.
+        Source S1 Hr 1: 16.6457.
+        Target `1:00 AM`: 7.96519.
+        
+        Let's look at `2014-08-21`.
+        Source S1 Hr 1: 15.3275.
+        Target `1:00 AM`: 7.79271.
+        
+        Let's look at `2014-04-10`.
+        Source S3 Hr 1: 0.80181.
+        Target `1:00 AM`: 0.50435.
+        
+        Let's look at `2014-10-26`.
+        Source S3 Hr 1: 0.86164.
+        Target `1:00 AM`: 0.53196.
+        
+        Let's look at `2014-05-13`.
+        Source T1 Hr 1: 1.27021.
+        Target `1:00 AM`: 0.55524.
+        
+        Let's look at `2014-11-28`.
+        Source T1 Hr 1: 1.27097.
+        Target `1:00 AM`: 0.48242.
+        
+        Let's look at `2014-06-15`.
+        Source T2 Hr 1: 110.91961.
+        Target `1:00 AM`: 0.65257.
+        
+        Let's look at `2014-12-31`.
+        Source T2 Hr 1: 120.64422.
+        Target `1:00 AM`: 1.74263.
+
+        There is a massive discrepancy for T2 and S1/S2 vs the others.
+        However, notice that for S1, S2, S3, T1, T2, the values in the source are often constant for many hours (e.g., S1 on 2/3/2014 is 16.6457 for Hr 1-6, then 0, then 16.6457 again).
+        
+        Is it possible the target is the **Average** of the 6 rates?
+        If S1 is 16.6, and others are small, the average would be around 3-4.
+        Target for S1 day (2/3/2014) is 7.96.
+        
+        Let's try to find the other 5 rates for `2014-01-01`.
+        We don't have them.
+        
+        Let's look at the distinct counts again.
+        Source `Hr 1`: 1127 distinct.
+        Target `1:00 AM`: 2166 distinct.
+        
+        This suggests that the target values are NOT derived from a simple aggregation of the source values in a way that reduces cardinality.
+        
+        Wait, look at the target sample data again.
+        Row 1: `2014-01-01`, `1:00 AM` = 0.9188.
+        Row 2: `2014-07-19`, `1:00 AM` = 0.63071.
+        
+        Is it possible the target is simply the **Source Data** but reshaped?
+        No, row counts differ.
+        
+        Let's look at the `Company` column. It's always "Boston Edison".
+        
+        Let's look at the `Rate` and `Rate Code`.
+        
+        Maybe the target is the **Sum** of all rates, but the sample source rows are just a subset?
+        If I sum 6 rates, and one is 110 (T2), the sum would be > 110.
+        Target for T2 day (6/15/2014) is 0.65.
+        This contradicts the Sum hypothesis.
+        
+        What if the target is the **Mean**?
+        Mean of 110 and 5 small numbers (~1-2) would be ~20.
+        Target is 0.65.
+        
+        What if the target is the **Median**?
+        
+        Let's look at the values for `2014-06-15` (T2).
+        Source T2 Hr 1: 110.91961.
+        Target `1:00 AM`: 0.65257.
+        
+        Let's look at `2014-12-31` (T2).
+        Source T2 Hr 1: 120.64422.
+        Target `1:00 AM`: 1.74263.
+        
+        Let's look at `2014-01-01` (R4).
+        Source R4 Hr 1: 2.43675.
+        Target `1:00 AM`: 0.9188.
+        
+        Let's look at `2014-07-19` (R4).
+        Source R4 Hr 1: 1.15144.
+        Target `1:00 AM`: 0.63071.
+        
+        There seems to be no consistent mathematical operation between the single visible source row and the target row.
+        
+        **Hypothesis**: The target DataFrame is the **Average** of the 6 rates for each hour, but the sample source data provided in the prompt is **not** the full set of 6 rates for those days, or the values in the sample are not representative of the full aggregation.
+        
+        However, I must write code that works on the *evaluation* source. The evaluation source will have 2190 rows (6 rates * 365 days).
+        
+        Let's assume the standard operation for this type of problem (multiple rates per day -> single daily profile) is **Mean** or **Sum**.
+        
+        Let's check the distinct counts again.
+        Source `Hr 1` distinct: 1127.
+        Target `1:00 AM` distinct: 2166.
+        
+        If we take the Mean of 6 values, the distinct count usually decreases or stays similar. It rarely doubles.
+        
+        What if the target is **not** an aggregation?
+        What if the target is a **pivot** of the source, but the source in the evaluation set is different?
+        No, the schema says Source has 2190 rows, Target has 365.
+        
+        Let's look at the target column names again.
+        `1:00 AM`, `2:00 AM` ...
+        
+        Is it possible the target is the **Sum** of the rates, but the rates in the source are **normalized** or **scaled** differently?
+        
+        Let's look at the `S1` rate.
+        Source S1 Hr 1 (2/3/2014): 16.6457.
+        Target `1:00 AM` (2/3/2014): 7.96519.
+        
+        Source S1 Hr 1 (8/21/2014): 15.3275.
+        Target `1:00 AM` (8/21/2014): 7.79271.
+        
+        Ratio: 7.96519 / 16.6457 = 0.4785.
+        Ratio: 7.79271 / 15.3275 = 0.5084.
+        
+        Let's look at `R4`.
+        Source R4 Hr 1 (1/1/2014): 2.43675.
+        Target `1:00 AM` (1/1/2014): 0.9188.
+        Ratio: 0.377.
+        
+        Source R4 Hr 1 (7/19/2014): 1.15144.
+        Target `1:00 AM` (7/19/2014): 0.63071.
+        Ratio: 0.547.
+        
+        The ratios are not constant.
+        
+        **Alternative Hypothesis**: The target is the **Sum** of all 6 rates.
+        For `2014-01-01`, if R4 is 2.43, and the target is 0.91, then the other 5 rates must sum to -1.52? Unlikely for energy prices.
+        
+        **Alternative Hypothesis**: The target is the **Mean** of all 6 rates.
+        For `2014-01-01`, if R4 is 2.43, and the target is 0.91, then the other 5 rates must sum to (0.91*6 - 2.43) = 3.03. Average of others = 0.6. Plausible.
+        
+        For `2014-06-15` (T2), Source T2 is 110.9. Target is 0.65.
+        If Target is Mean, then Sum of all 6 = 0.65 * 6 = 3.9.
+        But T2 alone is 110.9. This is impossible.
+        
+        **CRITICAL INSIGHT**:
+        Look at the `Rate` and `Rate Code` columns.
+        R4, S1, S2, S3, T1, T2.
+        
+        Look at the values for T2.
+        Hr 1: 110.91961.
+        Hr 2: 107.95552.
+        
+        Look at the values for R4.
+        Hr 1: 2.43675.
+        
+        The T2 values are ~50x larger than R4.
+        
+        Is it possible the target is **not** an aggregation of the source rows provided in the sample, but the sample source rows are **not** the only rows for that day?
+        Yes, there are 6 rates per day.
+        
+        But the T2 value is so large that it dominates any mean or sum.
+        Unless... the T2 values in the source are **not** in the same units as the target?
+        Or the T2 values are **not** included in the target calculation?
+        
+        Let's look at the target distinct counts again.
+        Target `1:00 AM` distinct: 2166.
+        Source `Hr 1` distinct: 1127.
+        
+        If we exclude T2, we have 5 rates.
+        
+        Let's look at the `S1` values.
+        S1 is ~16.
+        R4 is ~2.
+        S2 is ~4.
+        S3 is ~0.8.
+        T1 is ~1.2.
+        T2 is ~110.
+        
+        If we sum R4, S1, S2, S3, T1:
+        2 + 16 + 4 + 0.8 + 1.2 = ~24.
+        
+        Target for S1 day (2/3/2014) is 7.96.
+        Target for R4 day (1/1/2014) is 0.91.
+        
+        This doesn't match a sum.
+        
+        What if the target is the **Mean** of R4, S1, S2, S3, T1 (excluding T2)?
+        Mean of ~24 / 5 = ~4.8.
+        Target for S1 day is 7.96.
+        Target for R4 day is 0.91.
+        
+        Still doesn't match.
+        
+        **Let's step back.**
+        The problem asks to infer the transformation.
+        The target has 365 rows.
+        The source has 2190 rows.
+        
+        The most common transformation is `groupby('Date').mean()` or `groupby('Date').sum()`.
+        
+        Let's look at the target column `12:00 AM` (12th column).
+        Source `Hr 12`.
+        
+        Let's look at the target column `12:00 PM` (24th column).
+        Source `Hr 24`.
+        
+        The mapping of columns is:
+        `Hr 1` -> `1:00 AM`
+        `Hr 2` -> `2:00 AM`
+        ...
+        `Hr 12` -> `12:00 AM`
+        `Hr 13` -> `1:00 PM`
+        ...
+        `Hr 24` -> `12:00 PM`
+        
+        This mapping is fixed.
+        
+        The aggregation is the unknown.
+        
+        Given the constraints and the typical nature of these problems, **Mean** is the most likely aggregation if the values are comparable. But T2 is not comparable.
+        
+        However, if I look at the target values for `2014-06-15` (T2 day), the value is 0.65.
+        The source T2 value is 110.
+        
+        If the target is the **Mean** of all 6 rates, and T2 is 110, the mean would be ~20.
+        
+        If the target is the **Median**, and the other 5 rates are ~1-16, the median would be one of those.
+        
+        If the target is the **Mode**?
+        
+        Let's look at the `S1` day (2/3/2014).
+        Source S1: 16.6.
+        Target: 7.96.
+        
+        If the other 5 rates are:
+        R4: ~2
+        S2: ~4
+        S3: ~0.8
+        T1: ~1.2
+        T2: ~110
+        
+        Sorted: 0.8, 1.2, 2, 4, 16.6, 110.
+        Median: (2+4)/2 = 3.
+        Target: 7.96.
+        
+        This doesn't match Median either.
+        
+        **Is it possible the target is the Sum of R4, S1, S2, S3, T1, T2, but T2 is divided by 100?**
+        110 / 1

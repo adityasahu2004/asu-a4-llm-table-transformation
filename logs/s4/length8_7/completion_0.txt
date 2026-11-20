@@ -1,0 +1,90 @@
+**Operator Plan:**
+
+1.  **Parse Dates**: Convert the `Date` column to datetime objects to extract the month.
+2.  **Filter/Melt**: The source contains hourly data (columns "1" to "24"). The target aggregates this by hour and month. We need to unpivot (melt) the hourly columns into a long format with columns `hour` (int) and `value` (float), while keeping the parsed date information.
+3.  **Extract Month**: Determine the month name from the parsed date.
+4.  **Aggregate**: Group by `hour` and `month` (name) and calculate the mean of the `value` for each group. Note: The sample target shows specific hours (1, 11, 13, etc.) and specific months (Jan-Jul). The source sample only has data from July 2013 to Dec 2013. However, the target schema implies a full year structure or at least a pivot by month. Looking closely at the target sample data:
+    *   Target has columns for all 12 months.
+    *   Target has rows for specific hours (1, 11, 13, 15, 17, 19, 20, 22, 24, 4, 6, 9).
+    *   The values in the target sample for `january` through `july` are non-null. `august` through `december` are null.
+    *   Wait, the source sample *only* has dates from July 2013 to December 2013.
+    *   The target sample has values for Jan-Jul. This implies the *evaluation* source will likely contain a full year (or more) of data, or the transformation logic must handle whatever months are present in the source.
+    *   The target structure is a pivot table: Rows = Hour, Columns = Month Name. Values = Average hourly value for that hour/month combination.
+5.  **Pivot**: Pivot the aggregated data so that `hour` is the index, month names are columns, and values are the means.
+6.  **Format**:
+    *   Ensure column names are lowercase month names (`january`, `february`, etc.).
+    *   Ensure the `hour` column is an integer.
+    *   Sort the index by `hour`? The sample target is not strictly sorted (1, 11, 13... 24, 4, 6, 9). However, standard pivot operations usually result in sorted indices or the order of appearance. Let's look at the sample target order: 1, 11, 13, 15, 17, 19, 20, 22, 24, 4, 6, 9. This looks like a specific subset or unsorted. But usually, we return a standard DataFrame. The prompt says "Infer a general transformation". A pivot table is the most logical general transformation. I will sort the index by hour to be deterministic, or just let pandas handle the pivot order (which sorts columns and index by default). The sample target's row order is weird, but likely just a sample extraction. I will produce a standard pivot table.
+    *   The target columns are specifically named `january`, `february`, etc. I need to map month numbers to these names.
+
+**Refined Plan:**
+1.  Parse `Date` to datetime.
+2.  Extract `month` name from `Date`.
+3.  Melt the DataFrame from wide (hourly cols) to long (`hour`, `value`).
+4.  Group by `hour` and `month` name, taking the mean.
+5.  Pivot so `hour` is index, `month` names are columns.
+6.  Reset index to make `hour` a column.
+7.  Ensure column order/names match target: `hour` + 12 month columns. If a month is missing in source, it should be NaN (which pivot handles if we ensure all month columns exist or just let the pivot create what exists). The target schema shows all 12 months. I should probably ensure all 12 month columns exist, filled with NaN if not present in source.
+8.  The target sample shows `hour` as `int64`.
+
+Let's check the month mapping:
+1 -> january, 2 -> february, ... 12 -> december.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse Date
+    source = source.copy()
+    source['parsed_date'] = pd.to_datetime(source['Date'], format='%m/%d/%Y')
+    
+    # 2. Extract Month Name
+    # Map month number to lowercase name
+    month_names = {
+        1: 'january', 2: 'february', 3: 'march', 4: 'april', 
+        5: 'may', 6: 'june', 7: 'july', 8: 'august', 
+        9: 'september', 10: 'october', 11: 'november', 12: 'december'
+    }
+    source['month_name'] = source['parsed_date'].dt.month.map(month_names)
+    
+    # 3. Melt hourly columns
+    # Identify hourly columns (1-24)
+    hour_cols = [str(i) for i in range(1, 25)]
+    
+    melted = source.melt(
+        id_vars=['month_name'], 
+        value_vars=hour_cols, 
+        var_name='hour_str', 
+        value_name='value'
+    )
+    
+    # Convert hour_str to int
+    melted['hour'] = melted['hour_str'].astype(int)
+    
+    # 4. Aggregate
+    # Group by hour and month_name, calculate mean
+    aggregated = melted.groupby(['hour', 'month_name'])['value'].mean().reset_index()
+    
+    # 5. Pivot
+    # Pivot to get hours as rows, months as columns
+    pivoted = aggregated.pivot_table(index='hour', columns='month_name', values='value')
+    
+    # 6. Ensure all month columns exist and order them
+    all_months = [month_names[i] for i in range(1, 13)]
+    
+    # Reindex columns to ensure all months are present, filling missing with NaN
+    pivoted = pivoted.reindex(columns=all_months)
+    
+    # 7. Reset index to make 'hour' a column
+    result = pivoted.reset_index()
+    
+    # 8. Ensure 'hour' is int64
+    result['hour'] = result['hour'].astype('int64')
+    
+    # 9. Select and order columns: hour + months
+    final_cols = ['hour'] + all_months
+    result = result[final_cols]
+    
+    return result
+```

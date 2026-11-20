@@ -1,0 +1,145 @@
+Operator plan:
+1. Parse the "Time Period" column to extract the month number (1-12). If the string doesn't match a known month name, result is NaN.
+2. Use "Hour Ending" as the `hour` column.
+3. Initialize all target end-use columns (`hvac`, `water_heating`, `refrigerator`, etc.) to 0.0 or 0.
+4. Map the "End Use" and "End Use Category" strings to the specific target columns.
+   - "Remaining Load" -> `hvac`
+   - "Water Heater" -> `water_heating`
+   - "Refrigerator" / "Freezer" -> `refrigerator`
+   - "Clothes Washer" -> `clothes_washer`
+   - "Clothes Dryer - Electric" -> `clothes_dryer`
+   - "Dishwasher" -> `dishwasher`
+   - "Cooking Range" / "Oven" -> `cooking_range`
+   - "Pool Pump" / "Spa Pump" -> `pool_spa_pumps`
+   - "Interior Lighting" -> `interior_lighting`
+   - "Exterior Lighting" -> `exterior_lighting`
+   - "Lighting" (generic) -> `lighting`
+   - "Plug Load" / "TV" / "Computer" / "Misc Metered" -> `plug`
+   - "Pool Heater" / "Spa Heater" -> `pool_spa_heater`
+5. For the identified column, assign the value from "Average Demand Per Home With This End Use [kW]".
+6. Return the DataFrame with the specified column order.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Map month names to numbers
+    month_map = {
+        'January': 1, 'February': 2, 'March': 3, 'April': 4,
+        'May': 5, 'June': 6, 'July': 7, 'August': 8,
+        'September': 9, 'October': 10, 'November': 11, 'December': 12
+    }
+    
+    # Create output dataframe
+    out = pd.DataFrame(index=source.index)
+    
+    # Month column
+    out['month'] = source['Time Period'].map(month_map).astype(float)
+    
+    # Hour column
+    out['hour'] = source['Hour Ending'].astype(int)
+    
+    # Initialize all end use columns to 0
+    end_uses = [
+        'hvac', 'water_heating', 'refrigerator', 'clothes_washer', 'clothes_dryer',
+        'dishwasher', 'cooking_range', 'pool_spa_pumps', 'interior_lighting',
+        'exterior_lighting', 'lighting', 'plug', 'pool_spa_heater'
+    ]
+    for col in end_uses:
+        out[col] = 0
+        
+    # Get the demand values
+    demand = source['Average Demand Per Home With This End Use [kW]'].astype(float)
+    end_use = source['End Use']
+    end_use_cat = source['End Use Category']
+    
+    # Mapping logic
+    # HVAC / Remaining Load
+    mask_hvac = (end_use_cat == 'Remaining Load')
+    out.loc[mask_hvac, 'hvac'] = demand[mask_hvac]
+    
+    # Water Heating
+    mask_wh = (end_use == 'Water Heater')
+    out.loc[mask_wh, 'water_heating'] = demand[mask_wh]
+    
+    # Refrigerator
+    mask_ref = (end_use == 'Refrigerator') | (end_use == 'Freezer')
+    out.loc[mask_ref, 'refrigerator'] = demand[mask_ref]
+    
+    # Clothes Washer
+    mask_washer = (end_use == 'Clothes Washer')
+    out.loc[mask_washer, 'clothes_washer'] = demand[mask_washer]
+    
+    # Clothes Dryer
+    mask_dryer = (end_use == 'Clothes Dryer - Electric')
+    out.loc[mask_dryer, 'clothes_dryer'] = demand[mask_dryer]
+    
+    # Dishwasher
+    mask_dish = (end_use == 'Dishwasher')
+    out.loc[mask_dish, 'dishwasher'] = demand[mask_dish]
+    
+    # Cooking Range
+    mask_cook = (end_use == 'Cooking Range') | (end_use == 'Oven')
+    out.loc[mask_cook, 'cooking_range'] = demand[mask_cook]
+    
+    # Pool/Spa Pumps
+    mask_pump = (end_use == 'Pool Pump') | (end_use == 'Spa Pump')
+    out.loc[mask_pump, 'pool_spa_pumps'] = demand[mask_pump]
+    
+    # Interior Lighting
+    mask_int_light = (end_use == 'Interior Lighting')
+    out.loc[mask_int_light, 'interior_lighting'] = demand[mask_int_light]
+    
+    # Exterior Lighting
+    mask_ext_light = (end_use == 'Exterior Lighting')
+    out.loc[mask_ext_light, 'exterior_lighting'] = demand[mask_ext_light]
+    
+    # Generic Lighting
+    mask_light = (end_use == 'Lighting') & (end_use_cat == 'Lighting')
+    out.loc[mask_light, 'lighting'] = demand[mask_light]
+    
+    # Plug Loads (TV, Computer, Misc Metered, Plug Load)
+    mask_plug = (end_use == 'Primary TV and Peripherals') | \
+                (end_use == 'Primary Desktop Computer') | \
+                (end_use == 'Misc Metered') | \
+                (end_use == 'Plug Load')
+    out.loc[mask_plug, 'plug'] = demand[mask_plug]
+    
+    # Pool/Spa Heater
+    mask_heater = (end_use == 'Pool Heater') | (end_use == 'Spa Heater')
+    out.loc[mask_heater, 'pool_spa_heater'] = demand[mask_heater]
+    
+    # Ensure dtypes match target exactly where specified as int in distinct_values 0
+    # The target schema shows:
+    # hvac: float64
+    # water_heating: float64
+    # refrigerator: int64
+    # clothes_washer: int64
+    # clothes_dryer: int64
+    # dishwasher: int64
+    # cooking_range: int64
+    # pool_spa_pumps: int64
+    # interior_lighting: int64
+    # exterior_lighting: int64
+    # lighting: int64
+    # plug: int64
+    # pool_spa_heater: int64
+    
+    # Convert the 'zero' initialized columns to int64 as per target schema distinct_values [0]
+    int_cols = [
+        'refrigerator', 'clothes_washer', 'clothes_dryer', 'dishwasher',
+        'cooking_range', 'pool_spa_pumps', 'interior_lighting',
+        'exterior_lighting', 'lighting', 'plug', 'pool_spa_heater'
+    ]
+    for col in int_cols:
+        out[col] = out[col].astype(int)
+        
+    # Ensure float columns are float
+    float_cols = ['hvac', 'water_heating']
+    for col in float_cols:
+        out[col] = out[col].astype(float)
+        
+    # Reset index to ensure clean output
+    return out.reset_index(drop=True)
+```

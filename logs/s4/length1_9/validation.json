@@ -1,0 +1,133 @@
+{
+  "case": "length1_9",
+  "length": 1,
+  "strategy": "s4",
+  "model": "qwen36-27b",
+  "is_demo": false,
+  "parameters": {
+    "output": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment",
+    "model": "qwen36-27b",
+    "base_url": "https://openai.rc.asu.edu/v1",
+    "max_tokens": 6000,
+    "reasoning_effort": "none",
+    "k": 5,
+    "sample_rows": 12,
+    "timeout": 120,
+    "api_timeout": 3600,
+    "replay_only": true,
+    "strategy": "s4",
+    "python": "3.14.4 (main, Apr  7 2026, 13:13:20) [Clang 21.0.0 (clang-2100.0.123.102)]",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "pandas": "3.1.1",
+    "held_out": [
+      "length1_1",
+      "length1_2",
+      "length1_3",
+      "length2_1",
+      "length3_1"
+    ],
+    "benchmark": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split"
+  },
+  "prompt_path": "logs/s4/length1_9/prompt.json",
+  "completion_path": "logs/s4/length1_9/response.json",
+  "execution": {
+    "status": "ok",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+    "seconds": 0.5611858339980245,
+    "shape": [
+      2,
+      25
+    ],
+    "fingerprint": "95f71ca96f3c7a759d872d185b44303491c21672bd5169415a42626f5894176a"
+  },
+  "autopipeline": {
+    "accuracy": 0.0,
+    "is_correct": false,
+    "similarities": {},
+    "info": []
+  },
+  "hard_match": {
+    "accuracy": 0.48,
+    "is_correct": false,
+    "similarities": [
+      1.0,
+      0.0,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.0
+    ],
+    "info": [
+      "cst"
+    ]
+  },
+  "hard_match_provenance": "course-provided hard_match.py and utils.py",
+  "exact_schema": true,
+  "generation": {
+    "request_hash": "585542374ccafcc475bbe3210780726ca288b215b5e166e3a766a62a045f70e0",
+    "usage": {
+      "completion_tokens": 15267,
+      "prompt_tokens": 39943,
+      "total_tokens": 55210,
+      "completion_tokens_details": null,
+      "prompt_tokens_details": {
+        "audio_tokens": null,
+        "cache_write_tokens": null,
+        "cached_tokens": 39424,
+        "image_tokens": null,
+        "text_tokens": null,
+        "created_cache_tokens": 0,
+        "multimodal_tokens": null
+      },
+      "co2_g": 6.934646,
+      "energy_wh": 20.577585
+    },
+    "latency_seconds": 224.77791612500005,
+    "api_attempts": 1,
+    "cached": true,
+    "candidate_count": 5,
+    "api_timeout_seconds": 600,
+    "reasoning_effort_header": "none",
+    "selected_index": 0,
+    "clusters": {
+      "454d84091deb84c8c87ea939263c0035acd5c86aa5658fbab670827dc82133ef": [
+        0
+      ],
+      "7caff5344616c89560edc20de73ec413972422ee7f051ea55c0a2585cb6c81ab": [
+        1
+      ],
+      "1c11a07a9a3133bfa11bc16fc7e497e8361400f984e3b56a469e3577b2a5deef": [
+        2
+      ],
+      "8b4e5c88285b814015126db267a57becd642bb7b127a8f8c1e6b4296ba03fe7c": [
+        3
+      ],
+      "83720563005911d67d3868b2335e8c827c6c37675c5f6e3abeab2492766253e7": [
+        4
+      ]
+    }
+  },
+  "wall_seconds": 228.4517267500014,
+  "replay_wall_seconds": 3.636395082998206
+}

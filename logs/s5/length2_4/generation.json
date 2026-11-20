@@ -1,0 +1,85 @@
+{
+  "candidate_count": 6,
+  "selected_index": 0,
+  "baseline_index": 0,
+  "selection_reason": "SC winner retained: no strict constraint improvement",
+  "constraints": {
+    "columns": [
+      "dt_strata",
+      "dow",
+      "pct_hourly_0100",
+      "pct_hourly_0200",
+      "pct_hourly_0300",
+      "pct_hourly_0400",
+      "pct_hourly_0500",
+      "pct_hourly_0600",
+      "pct_hourly_0700",
+      "pct_hourly_0800",
+      "pct_hourly_0900",
+      "pct_hourly_1000",
+      "pct_hourly_1100",
+      "pct_hourly_1200",
+      "pct_hourly_1300",
+      "pct_hourly_1400",
+      "pct_hourly_1500",
+      "pct_hourly_1600",
+      "pct_hourly_1700",
+      "pct_hourly_1800",
+      "pct_hourly_1900",
+      "pct_hourly_2000",
+      "pct_hourly_2100",
+      "pct_hourly_2200",
+      "pct_hourly_2300",
+      "pct_hourly_2400",
+      "pct_hourly_2500"
+    ],
+    "relations": [
+      {
+        "date_column": "dt_strata",
+        "weekday_column": "dow",
+        "convention": "sunday0",
+        "support_rows": 12
+      }
+    ]
+  },
+  "policy": {
+    "version": "schema-weekday-v1",
+    "pool": "five few-shot SC samples + one greedy few-shot sample",
+    "constraints": [
+      "exact target schema",
+      "uniquely identified date-to-weekday relation"
+    ],
+    "target_rows": "the same 12-row prompt sample as the baselines",
+    "output_rows": "up to 128 evenly spaced training-output rows",
+    "selection": "strictly lower lexicographic constraint loss; preserve SC winner on ties",
+    "forbidden_inputs": [
+      "test_0.csv",
+      "validator results",
+      "case-specific rules",
+      "target row counts"
+    ]
+  },
+  "usage": {
+    "prompt_tokens": 90256,
+    "completion_tokens": 19865,
+    "total_tokens": 110121
+  },
+  "api_attempts": 2,
+  "marginal_api_attempts": 0,
+  "latency_seconds": 463.3683777500046,
+  "inherited_api_seconds": 463.3683777500046,
+  "clusters": {
+    "d99b07b5add8a5d010c94e46732bb8d1d01ce742575c4066b73ec3287a4e8eec": [
+      0,
+      3
+    ],
+    "3e081535bf0f70e7bd8d9a3d9f47f7aac57e14319a9e34ac2ab81c655eb8de38": [
+      1
+    ],
+    "4f272ea7ad2dff5ed467279b26d793f328cc59738a9983c0a87c433cdec283d4": [
+      2,
+      4
+    ]
+  },
+  "cost_basis": "standalone logical pool cost; reused requests have zero marginal API cost"
+}

@@ -1,0 +1,214 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `date` column from string format (`%m/%d/%Y`) to datetime objects to extract month information.
+2.  **Extract Month**: Create a new column `month` containing the integer month (1-12) from the parsed dates.
+3.  **Melt/Unpivot**: Transform the wide format (columns `Hour 1` to `Hour 24`) into a long format.
+    *   Identify columns starting with "Hour ".
+    *   Extract the hour number (1-24) from the column names to create a new column `hour`.
+    *   Stack the values into a single column `value`.
+4.  **Group and Aggregate**: Group the data by `hour` and `month`.
+    *   The target schema implies a single value per hour/month combination. Looking at the source data, for a specific date, the values are constant or vary slightly. However, the target has distinct values like `0.0002398657` and `0.0001199328`.
+    *   Let's look at the target sample: `hour` 1 has `0.0002398657` for Jan-Jul. `hour` 11 has `0.0` for Jan-Jul.
+    *   In the source, `Hour 1` is always `0.0002398657`. `Hour 11` is always `0`.
+    *   It seems the transformation aggregates the values for each hour across all dates in that month. Since the values for a specific hour seem consistent or we need a representative value, and the target has no nulls for months with data, we likely need to take the **mean** or **mode** or simply the value if it's constant.
+    *   Wait, looking closely at `Hour 6`: Source has `0.0001199328` and `0.0002398657`. Target `june` for `hour` 6 is `0.0001199328`. Target `july` for `hour` 6 is `0.0001199328`.
+    *   Let's check `Hour 7`: Source has `0.0`, `0.0001199328`, `0.0002398657`. Target `january` for `hour` 7 is `0.0`.
+    *   Actually, let's look at the distinct values in the target.
+        *   `january`: `0.0002398657`, `0.0`, `0.0001199328`.
+        *   `hour` 1 in Jan: `0.0002398657`.
+        *   `hour` 11 in Jan: `0.0`.
+        *   `hour` 17 in Jan: `0.0001199328`.
+    *   The source data has multiple rows per month (e.g., 12 rows for July in the sample, but likely more in full data).
+    *   If we group by `hour` and `month`, we get multiple values. We need to reduce them to one.
+    *   Let's check if the value is constant per hour per month.
+        *   Source `Hour 1` is always `0.0002398657`.
+        *   Source `Hour 11` is always `0`.
+        *   Source `Hour 6` varies. In the sample:
+            *   7/3/2015 (July): 0.0001199328
+            *   7/19/2015 (July): 0.0001199328
+            *   8/4/2015 (Aug): 0.0001199328
+            *   8/21/2015 (Aug): 0.0002398657
+            *   9/6/2015 (Sep): 0.0002398657
+            *   9/23/2015 (Sep): 0.0002398657
+            *   10/9/2015 (Oct): 0.0002398657
+            *   10/26/2015 (Oct): 0.0002398657
+            *   11/11/2015 (Nov): 0.0002398657
+            *   11/28/2015 (Nov): 0.0002398657
+            *   12/14/2015 (Dec): 0.0002398657
+            *   12/31/2015 (Dec): 0.0002398657
+        *   Target `july` for `hour` 6 is `0.0001199328`.
+        *   Target `august` is null (no data in sample for Aug? No, sample has Aug dates but target Aug is null. Wait, the target sample shows `null` for Aug-Dec. This suggests the target might only contain data for months present in a specific subset, OR the aggregation results in NaN for some reason?
+        *   Actually, look at the target schema: `august` has 24 nulls. `september` has 24 nulls.
+        *   But the source has data for August, September, etc.
+        *   Why are they null?
+        *   Maybe the target is only showing a subset of rows in the sample? The target has 24 rows. The sample data shows 12 rows.
+        *   The target columns are `hour`, `january`...`december`.
+        *   The target sample data has `null` for `august` through `december`.
+        *   This implies that for the specific evaluation or the logic inferred, months 8-12 are either not present or aggregated to NaN.
+        *   However, the source has data for them.
+        *   Let's re-read the target schema. `distinct_values` for `august` is `[null]`.
+        *   This is strange. If I aggregate all source data, I should get values for August.
+        *   Is it possible the target is pivoted such that if there is *any* NaN in the group, it becomes NaN? No, source has no nulls.
+        *   Is it possible the target only includes months 1-7? No, columns exist for 8-12.
+        *   Let's look at the `hour` column in target. It has 24 distinct values.
+        *   The sample data for target shows hours: 1, 11, 13, 15, 17, 19, 20, 22, 24, 4, 6, 9. These are not sorted.
+        *   The values for `january` in the sample:
+            *   Hour 1: 0.0002398657
+            *   Hour 11: 0.0
+            *   Hour 13: 0.0
+            *   Hour 15: 0.0
+            *   Hour 17: 0.0001199328
+            *   Hour 19: 0.0002398657
+            *   Hour 20: 0.0002398657
+            *   Hour 22: 0.0002398657
+            *   Hour 24: 0.0002398657
+            *   Hour 4: 0.0002398657
+            *   Hour 6: 0.0002398657
+            *   Hour 9: 0.0
+        *   Let's check source for January. The source sample doesn't have January dates. It starts July 2015.
+        *   Wait, the source sample provided in the prompt is just a *sample*. The source schema says `first_last_non_null` for date is `7/3/2015` to `12/31/2015`.
+        *   So the source *only* contains data from July to December 2015.
+        *   Therefore, months January through June have **no data** in the source.
+        *   But the target has values for January through July!
+        *   This implies the target is NOT derived solely from the provided source sample rows, but from the general transformation logic applied to a dataset that *would* contain those months, OR the "source" in the prompt description is a subset, but the transformation must handle the general case.
+        *   HOWEVER, the prompt says: "Compute the result only from the source DataFrame." and "The evaluation source contains different rows".
+        *   If the evaluation source only has July-Dec, then Jan-Jun will be empty/NaN.
+        *   But the target schema shows `january` has distinct values `0.0002398657`, `0.0`, `0.0001199328`. This means the *evaluation* target has data for January. This implies the *evaluation source* will have data for January.
+        *   The sample source provided in the prompt is just for schema inference. It happens to only have Jul-Dec.
+        *   So, the transformation is:
+            1.  Parse date.
+            2.  Extract month.
+            3.  Melt hours.
+            4.  Group by `hour` and `month`.
+            5.  Aggregate. What aggregation?
+                *   If a month has multiple rows, and the values for a specific hour are identical, `mean`, `first`, `last`, `mode` all work.
+                *   If they vary, we need to know which one.
+                *   In the source sample, `Hour 6` for July is `0.0001199328` for both July dates.
+                *   `Hour 6` for August is `0.0001199328` and `0.0002398657`.
+                *   If the evaluation source has varying values, what is the rule?
+                *   Usually, in these problems, if the values are constant per hour per month in the "true" data, `mean` or `first` is safe. If they vary, `mean` is a common default.
+                *   Let's check `Hour 7` in source.
+                    *   7/3: 0.0
+                    *   7/19: 0.0
+                    *   8/4: 0.0
+                    *   8/21: 0.0
+                    *   9/6: 0.0
+                    *   9/23: 0.0001199328
+                    *   10/9: 0.0002398657
+                    *   10/26: 0.0002398657
+                    *   11/11: 0.0001199328
+                    *   11/28: 0.0001199328
+                    *   12/14: 0.0002398657
+                    *   12/31: 0.0001199328
+                *   If we group by Month and Hour 7:
+                    *   July: 0.0, 0.0 -> Mean 0.0.
+                    *   August: 0.0, 0.0 -> Mean 0.0.
+                    *   September: 0.0, 0.0001199328 -> Mean 0.0000599664.
+                    *   October: 0.0002398657, 0.0002398657 -> Mean 0.0002398657.
+                    *   November: 0.0001199328, 0.0001199328 -> Mean 0.0001199328.
+                    *   December: 0.0002398657, 0.0001199328 -> Mean 0.00017989925.
+                *   The target distinct values are `0.0002398657`, `0.0`, `0.0001199328`. These are the *original* values, not averages of mixed values.
+                *   This suggests that for any given Hour and Month, the values are **constant** in the full dataset, or we should pick one (e.g., `first` or `mode`).
+                *   Given the "untrusted data" and "deterministic" constraints, and the fact that `mean` of mixed values would produce a new distinct value not in the source distinct list, it is highly likely that the values are constant per (Hour, Month) in the evaluation data, or we should use `first`/`last`/`mode`.
+                *   `mode` is safest if there's noise, but `first` is deterministic. `mean` is standard for aggregation.
+                *   However, if the values are truly constant, `mean` == `first`.
+                *   Let's assume `mean` as it's the standard aggregation for "summarizing" a group of floats, and if they are constant, it preserves the value. If they are not constant, `mean` is the most logical mathematical reduction. But wait, if the target distinct values are *only* the source distinct values, `mean` of `0.0` and `0.0001199328` would be `0.0000599664`, which is NOT in the target distinct values.
+                *   Therefore, the values MUST be constant per (Hour, Month) in the evaluation data, OR the aggregation is `mode` or `first`.
+                *   Let's use `first` (or `mean` if we assume constant). `first` is safer against the "distinct values" constraint if the data is constant. If the data is not constant, `first` is arbitrary. `mode` is better.
+                *   Actually, let's look at `Hour 6` in August again. `0.0001199328` and `0.0002398657`. If the evaluation data has this mix, and the target only allows the original values, then `mean` is wrong.
+                *   But the target schema for `august` is all nulls in the sample. This is because the *sample source* has no January-June data, and the *sample target* reflects the aggregation of the *sample source*?
+                *   No, the sample target has Jan-Jul data. The sample source has Jul-Dec data.
+                *   This is a contradiction if the target is derived from the source.
+                *   Resolution: The "sample" blocks are illustrative of the *schema* and *format*, not necessarily consistent with each other in terms of content overlap. The transformation logic must be general.
+                *   General Logic:
+                    1.  Parse Date.
+                    2.  Extract Month.
+                    3.  Melt Hours.
+                    4.  Group by Hour and Month.
+                    5.  Aggregate. Since the target distinct values match the source distinct values exactly, and `mean` would create new values, the aggregation is likely `first`, `last`, or `mode`. `first` is deterministic.
+                    6.  Pivot the result so `month` becomes columns `january`...`december`.
+                    7.  Ensure `hour` is integer.
+                    8.  Sort by `hour`? The target sample is not sorted. The target schema doesn't specify order. Usually, we sort by the index or key. The target sample has `hour` 1, 11, 13... It's not sorted. But standard practice is to return sorted or original order. I will sort by `hour` to be clean, or just let pandas pivot handle it. The target sample order is weird. I'll sort by `hour` ascending as it's the most logical default for a "hour" index.
+
+5.  **Pivot**:
+    *   Index: `hour`
+    *   Columns: `month` (mapped to names `january`, `february`, etc.)
+    *   Values: `value`
+    *   Fill NaNs? The target has nulls for months with no data. `pivot` naturally produces NaNs.
+
+6.  **Column Naming**:
+    *   Map month integers 1-12 to lowercase month names: `january`, `february`, ..., `december`.
+
+7.  **Final Output**:
+    *   Reset index to make `hour` a column.
+    *   Ensure column order: `hour`, `january`, ..., `december`.
+
+### Assumptions
+*   The aggregation function is `first` (or `mean` if values are constant). Given the distinct values constraint, `first` is safer to preserve exact values if they are constant. If they vary, `first` is arbitrary but deterministic. `mode` is also good. I will use `first` for simplicity and determinism.
+*   The date format is `%m/%d/%Y`.
+*   The hour columns are `Hour 1` to `Hour 24`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse dates and extract month
+    source = source.copy()
+    source['date'] = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    source['month'] = source['date'].dt.month
+    
+    # 2. Identify hour columns and melt
+    hour_cols = [col for col in source.columns if col.startswith('Hour ')]
+    
+    # Extract hour number from column names
+    # Create a mapping or just melt and parse
+    melted = source.melt(
+        id_vars=['month'], 
+        value_vars=hour_cols, 
+        var_name='hour_col', 
+        value_name='value'
+    )
+    
+    # Extract integer hour from 'Hour X'
+    melted['hour'] = melted['hour_col'].str.extract(r'(\d+)').astype(int)
+    melted = melted.drop(columns=['hour_col'])
+    
+    # 3. Group by hour and month, aggregate
+    # Using 'first' to preserve exact values assuming consistency per group
+    # If values vary, 'first' is deterministic. 'mean' would create new values.
+    agg_df = melted.groupby(['hour', 'month'])['value'].first().reset_index()
+    
+    # 4. Pivot to wide format
+    # Map month numbers to names
+    month_names = {
+        1: 'january', 2: 'february', 3: 'march', 4: 'april',
+        5: 'may', 6: 'june', 7: 'july', 8: 'august',
+        9: 'september', 10: 'october', 11: 'november', 12: 'december'
+    }
+    
+    agg_df['month_name'] = agg_df['month'].map(month_names)
+    
+    # Pivot
+    target_df = agg_df.pivot(index='hour', columns='month_name', values='value')
+    
+    # Ensure all month columns exist, even if empty
+    all_months = [month_names[i] for i in range(1, 13)]
+    for m in all_months:
+        if m not in target_df.columns:
+            target_df[m] = np.nan
+            
+    # Reorder columns
+    target_df = target_df[all_months]
+    
+    # Reset index to make hour a column
+    target_df = target_df.reset_index()
+    
+    # Ensure hour is int64
+    target_df['hour'] = target_df['hour'].astype('int64')
+    
+    # Sort by hour to ensure deterministic order (optional but good practice)
+    target_df = target_df.sort_values('hour').reset_index(drop=True)
+    
+    return target_df
+```

@@ -1,0 +1,78 @@
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse CST date
+    dt = pd.to_datetime(source['CST'], format='%a %m/%d/%Y')
+    
+    # Create date column
+    out = pd.DataFrame()
+    out['date'] = dt.dt.strftime('%m/%d/%Y')
+    
+    # Define mapping from source column names to target column names
+    # Source columns: '1:00' ... '23:00', '24:00:00'
+    # Target columns follow 12-hour clock logic with specific ordering in target schema
+    
+    # Mapping logic:
+    # 1 -> 1:00 AM
+    # 2 -> 2:00 AM
+    # ...
+    # 11 -> 11:00 AM
+    # 12 -> 12:00 AM
+    # 13 -> 1:00 PM
+    # 14 -> 2:00 PM
+    # ...
+    # 23 -> 11:00 PM
+    # 24 -> 12:00 PM
+    
+    col_map = {}
+    
+    # Hours 1-11: AM
+    for h in range(1, 12):
+        src_col = f"{h}:00"
+        tgt_col = f"{h}:00 AM"
+        col_map[src_col] = tgt_col
+        
+    # Hour 12: AM (Midnight)
+    col_map["12:00"] = "12:00 AM"
+    
+    # Hour 13: PM (1:00 PM)
+    col_map["13:00"] = "1:00 PM"
+    
+    # Hours 14-23: PM
+    for h in range(14, 24):
+        src_col = f"{h}:00"
+        tgt_h = h - 12
+        tgt_col = f"{tgt_h}:00 PM"
+        col_map[src_col] = tgt_col
+        
+    # Hour 24: PM (12:00 PM)
+    col_map["24:00:00"] = "12:00 PM"
+    
+    # Apply renaming
+    renamed_df = source.rename(columns=col_map)
+    
+    # Select columns in target order
+    target_cols = ['date']
+    # Target order from sample:
+    # 1:00 AM, 2:00 AM, ..., 11:00 AM, 12:00 AM, 1:00 PM, ..., 11:00 PM, 12:00 PM
+    
+    # Construct target column list
+    hour_cols = []
+    # 1-11 AM
+    for h in range(1, 12):
+        hour_cols.append(f"{h}:00 AM")
+    # 12 AM
+    hour_cols.append("12:00 AM")
+    # 1-11 PM
+    for h in range(1, 12):
+        hour_cols.append(f"{h}:00 PM")
+    # 12 PM
+    hour_cols.append("12:00 PM")
+    
+    final_cols = ['date'] + hour_cols
+    
+    # Extract data from renamed dataframe
+    for col in hour_cols:
+        out[col] = renamed_df[col]
+        
+    return out.reset_index(drop=True)

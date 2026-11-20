@@ -1,0 +1,162 @@
+{
+  "case": "length8_2",
+  "length": 8,
+  "strategy": "s5",
+  "model": "qwen36-27b",
+  "is_demo": false,
+  "parameters": {
+    "output": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment",
+    "model": "qwen36-27b",
+    "base_url": "https://openai.rc.asu.edu/v1",
+    "max_tokens": 6000,
+    "reasoning_effort": "none",
+    "k": 5,
+    "sample_rows": 12,
+    "timeout": 120,
+    "api_timeout": 3600,
+    "replay_only": false,
+    "strategy": "s5",
+    "python": "3.14.4 (main, Apr  7 2026, 13:13:20) [Clang 21.0.0 (clang-2100.0.123.102)]",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "pandas": "3.1.1",
+    "held_out": [
+      "length1_1",
+      "length1_2",
+      "length1_3",
+      "length2_1",
+      "length3_1"
+    ],
+    "benchmark": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split"
+  },
+  "prompt_path": "logs/s5/length8_2/prompt.json",
+  "completion_path": "logs/s5/length8_2/response.json",
+  "execution": {
+    "status": "ok",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:19: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+    "seconds": 0.6101722500025062,
+    "shape": [
+      24,
+      13
+    ],
+    "fingerprint": "071e8aec523b59ca83eab1245829460199fda51a9a0aeba410c9471e8769df02"
+  },
+  "autopipeline": {
+    "accuracy": 1.0,
+    "is_correct": true,
+    "similarities": {},
+    "info": [
+      "Hour",
+      "January",
+      "February",
+      "February",
+      "February",
+      "February",
+      "February",
+      "February",
+      "February",
+      "February",
+      "February",
+      "February",
+      "February"
+    ]
+  },
+  "hard_match": {
+    "accuracy": 0.9294871794871795,
+    "is_correct": false,
+    "similarities": [
+      1.0,
+      0.08333333333333333,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "info": [
+      "Hour",
+      "February",
+      "March",
+      "April",
+      "May",
+      "June",
+      "July",
+      "August",
+      "September",
+      "October",
+      "November",
+      "December"
+    ]
+  },
+  "hard_match_provenance": "course-provided hard_match.py and utils.py",
+  "exact_schema": true,
+  "generation": {
+    "candidate_count": 6,
+    "selected_index": 2,
+    "baseline_index": 2,
+    "selection_reason": "SC winner retained: no strict constraint improvement",
+    "constraints": {
+      "columns": [
+        "Hour",
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December"
+      ],
+      "relations": []
+    },
+    "policy": {
+      "version": "schema-weekday-v1",
+      "pool": "five few-shot SC samples + one greedy few-shot sample",
+      "constraints": [
+        "exact target schema",
+        "uniquely identified date-to-weekday relation"
+      ],
+      "target_rows": "the same 12-row prompt sample as the baselines",
+      "output_rows": "up to 128 evenly spaced training-output rows",
+      "selection": "strictly lower lexicographic constraint loss; preserve SC winner on ties",
+      "forbidden_inputs": [
+        "test_0.csv",
+        "validator results",
+        "case-specific rules",
+        "target row counts"
+      ]
+    },
+    "usage": {
+      "prompt_tokens": 77918,
+      "completion_tokens": 9525,
+      "total_tokens": 87443
+    },
+    "api_attempts": 2,
+    "marginal_api_attempts": 0,
+    "latency_seconds": 146.95925349999743,
+    "inherited_api_seconds": 146.95925349999743,
+    "clusters": {
+      "e35e60c410b3138b4fe7f892731650ca7bc49daaa7f196aa0222b0f1c93a3da9": [
+        0
+      ],
+      "a23870ff21bd449ec2b1e3dfcfe84ff07ebdd4a83d963cc5778b95cf0bde30df": [
+        2,
+        3,
+        4
+      ]
+    },
+    "cost_basis": "standalone logical pool cost; reused requests have zero marginal API cost"
+  },
+  "wall_seconds": 151.62519062499632
+}

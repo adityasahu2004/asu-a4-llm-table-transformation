@@ -1,0 +1,247 @@
+Operator plan:
+1. Parse the `date` column into a datetime object.
+2. Extract the calendar date (YYYY-MM-DD) to group records by day.
+3. Extract the hour from the datetime. The source data appears to have one record per 2-hour interval (0, 2, 4... 22). We need to map these to hours 1-24.
+   - Observation: Source hour 0 -> Target Hr 1 & Hr 2?
+   - Let's look at the sample data mapping.
+   - Source: `1/2/2018 0:11` (Hour 0) -> Value 67.9. Target `01/01/2018` Hr 1 is 67.9, Hr 2 is 67.9.
+   - Source: `1/2/2018 2:22` (Hour 2) -> Value 67.9. Target `01/01/2018` Hr 3 is 67.8? No, wait.
+   - Let's look closer at the target values for `01/01/2018`.
+     - Hr 1: 67.9
+     - Hr 2: 67.9
+     - Hr 3: 67.8
+     - Hr 4: 67.7
+     - ...
+     - Hr 10: 66.9
+     - ...
+     - Hr 24: 67.8
+   - Source values for `1/2/2018` (which corresponds to Target `01/01/2018`? Or is the date shifted?):
+     - The target distinct values are `01/02/2018` and `01/01/2018`.
+     - The source first date is `1/2/2018`. The target first date is `01/02/2018`.
+     - The source last date is `1/3/2018 0:20`. The target second date is `01/01/2018`. This implies a reverse sort or specific date logic.
+     - Let's re-examine the target sample data order. Row 0 is `01/02/2018`. Row 1 is `01/01/2018`.
+     - Source row 0: `1/2/2018 0:11`, value 67.9.
+     - Target row 0 (`01/02/2018`): Hr 1 is 67.9, rest null.
+     - Target row 1 (`01/01/2018`): Hr 1 is 67.9, Hr 2 is 67.9, Hr 3 is 67.8...
+     - This suggests that `01/01/2018` in the target is actually aggregating data from `1/2/2018` in the source? Or is the target date simply the previous day?
+     - If Source `1/2/2018` maps to Target `01/01/2018`, then Source `1/3/2018` might map to Target `01/02/2018`?
+     - Let's check Source `1/3/2018 0:20`. It has a null value.
+     - Target `01/02/2018` has Hr 1 = 67.9 and rest null.
+     - This is confusing. Let's look at the counts.
+     - Source has 1450 rows. Target has 2 rows.
+     - Source distinct dates: `1/2/2018` and `1/3/2018`.
+     - Target distinct dates: `01/02/2018` and `01/01/2018`.
+     - It seems the target dates are shifted by -1 day relative to the source dates?
+       - Source `1/2/2018` -> Target `01/01/2018`
+       - Source `1/3/2018` -> Target `01/02/2018`
+     - Let's verify the values for Target `01/01/2018` (mapped from Source `1/2/2018`).
+       - Source `1/2/2018` has 11 records (Hours 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22? No, sample shows 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22 is 12 records. Sample shows 12 records for 1/2/2018).
+       - Values: 67.9, 67.9, 67.6, 67.3, 67.1, 66.9, 66.8, 66.7, 66.9, 67.8, 68.5. (11 values in sample, last one is 1/3).
+       - Actually, sample data for `1/2/2018`:
+         - 0:11 -> 67.9
+         - 2:22 -> 67.9
+         - 4:34 -> 67.6
+         - 6:46 -> 67.3
+         - 8:57 -> 67.1
+         - 11:09 -> 66.9  (Hour 11?)
+         - 13:21 -> 66.8
+         - 15:33 -> 66.7
+         - 17:44 -> 66.9
+         - 19:56 -> 67.8
+         - 22:08 -> 68.5
+       - Target `01/01/2018` values:
+         - Hr 1: 67.9
+         - Hr 2: 67.9
+         - Hr 3: 67.8
+         - Hr 4: 67.7
+         - Hr 5: 67.6
+         - Hr 6: 67.5
+         - Hr 7: 67.3
+         - Hr 8: 67.1
+         - Hr 9: 67.0
+         - Hr 10: 66.9
+         - Hr 11: 66.8
+         - Hr 12: 66.7
+         - Hr 13: 66.5
+         - Hr 14: 66.4
+         - Hr 15: 66.3
+         - Hr 16: 66.1
+         - Hr 17: 66.0
+         - Hr 18: 66.2
+         - Hr 19: 66.4
+         - Hr 20: 66.7
+         - Hr 21: 67.0
+         - Hr 22: 67.3
+         - Hr 23: 67.6
+         - Hr 24: 67.8
+
+     - There is a clear interpolation or expansion happening here. The source has ~12 points per day (every 2 hours). The target has 24 points per day.
+     - The values in the target seem to be interpolated between the source points.
+     - Source:
+       - H0: 67.9
+       - H2: 67.9
+       - H4: 67.6
+       - H6: 67.3
+       - H8: 67.1
+       - H10: 66.9 (approx, source says 11:09 is 66.9, but previous was 8:57. The interval is roughly 2 hours).
+       - Let's assume the source represents the value at the start of a 2-hour block, or we just linearly interpolate.
+       - If we linearly interpolate between H0(67.9) and H2(67.9), H1 would be 67.9.
+       - Between H2(67.9) and H4(67.6), H3 would be (67.9+67.6)/2 = 67.75 -> 67.8? Target Hr 3 is 67.8. Target Hr 4 is 67.7?
+       - Wait, Target Hr 4 is 67.7. Source H4 is 67.6.
+       - Target Hr 5 is 67.6. Source H4 is 67.6.
+       - It seems the target hours might be offset or the interpolation is specific.
+       - Let's look at H4(67.6) and H6(67.3). Midpoint H5 = 67.45. Target Hr 5 is 67.6? No, Target Hr 5 is 67.6. Target Hr 6 is 67.5.
+       - This doesn't look like simple linear interpolation of the source values.
+       - Let's look at the target values again: 67.9, 67.9, 67.8, 67.7, 67.6, 67.5, 67.3, 67.1, 67.0, 66.9, 66.8, 66.7...
+       - The differences are: 0, -0.1, -0.1, -0.1, -0.1, -0.2, -0.2, -0.1, -0.1, -0.1, -0.1...
+       - Source differences (every 2 hours):
+         - 0->2: 0
+         - 2->4: -0.3
+         - 4->6: -0.3
+         - 6->8: -0.2
+         - 8->10: -0.2 (assuming 11:09 is roughly 10:00 slot?)
+       - If we distribute the change over 2 hours:
+         - 0->2: change 0. Hr1=67.9, Hr2=67.9. (Matches Target Hr1, Hr2)
+         - 2->4: change -0.3. Hr3=67.85, Hr4=67.75? Target Hr3=67.8, Hr4=67.7. (Close, maybe rounding?)
+         - 4->6: change -0.3. Hr5=67.65, Hr6=67.35? Target Hr5=67.6, Hr6=67.5. (Hr5 matches H4? Hr6 is 67.5, midpoint is 67.45).
+         - 6->8: change -0.2. Hr7=67.2, Hr8=67.0? Target Hr7=67.3, Hr8=67.1.
+         
+     - Alternative theory: The source data is already hourly but sparse? No, timestamps are 0:11, 2:22, 4:34.
+     - Maybe the target is just the source values duplicated or shifted?
+     - Let's look at Target `01/02/2018` (from Source `1/3/2018`).
+       - Source `1/3/2018 0:20` is null.
+       - Target `01/02/2018` Hr 1 is 67.9. Rest null.
+       - This implies that if data is missing, it stays null, except Hr 1 is 67.9? Where did 67.9 come from?
+       - Maybe it's forward-filled from the previous day?
+       - Target `01/01/2018` Hr 24 is 67.8.
+       - Target `01/02/2018` Hr 1 is 67.9.
+       
+     - Let's reconsider the date mapping.
+     - Source `1/2/2018` -> Target `01/01/2018`.
+     - Source `1/3/2018` -> Target `01/02/2018`.
+     - The target date is `source_date - 1 day`.
+
+     - How to get 24 values from 12?
+     - If we assume linear interpolation between known points:
+       - Points: (0, 67.9), (2, 67.9), (4, 67.6), (6, 67.3), (8, 67.1), (10, 66.9), (12, 66.8), (14, 66.7), (16, 66.9), (18, 67.8), (20, 68.5).
+       - We need values for 1, 3, 5, ..., 23.
+       - H1 = (67.9+67.9)/2 = 67.9. Target Hr 1 is 67.9.
+       - H3 = (67.9+67.6)/2 = 67.75. Target Hr 3 is 67.8. (Rounded up?)
+       - H5 = (67.6+67.3)/2 = 67.45. Target Hr 5 is 67.6. (No, this is H4 value).
+       - H7 = (67.3+67.1)/2 = 67.2. Target Hr 7 is 67.3. (H6 value).
+       - H9 = (67.1+66.9)/2 = 67.0. Target Hr 9 is 67.0.
+       - H11 = (66.9+66.8)/2 = 66.85. Target Hr 11 is 66.8.
+       - H13 = (66.8+66.7)/2 = 66.75. Target Hr 13 is 66.5.
+       
+     - This interpolation doesn't match perfectly.
+     - Let's look at the target values again:
+       - Hr 1: 67.9 (Src H0)
+       - Hr 2: 67.9 (Src H2)
+       - Hr 3: 67.8 (Avg H2,H4? 67.75->67.8)
+       - Hr 4: 67.7 (Avg H2,H4? No. Avg H4,H6? 67.45->67.5? No.)
+       - Hr 5: 67.6 (Src H4)
+       - Hr 6: 67.5 (Avg H4,H6? 67.45->67.5)
+       - Hr 7: 67.3 (Src H6)
+       - Hr 8: 67.1 (Src H8)
+       - Hr 9: 67.0 (Avg H8,H10? 67.0)
+       - Hr 10: 66.9 (Src H10)
+       - Hr 11: 66.8 (Src H12)
+       - Hr 12: 66.7 (Src H14)
+       - Hr 13: 66.5 (Avg H12,H14? 66.75->66.8? No. Avg H14,H16? 66.8->66.9? No.)
+       
+     - It seems like some hours take the source value, and some take the average.
+     - Pattern:
+       - Hr 1: Src H0
+       - Hr 2: Src H2
+       - Hr 3: Avg(H2,H4)
+       - Hr 4: ?
+       - Hr 5: Src H4
+       - Hr 6: Avg(H4,H6)
+       - Hr 7: Src H6
+       - Hr 8: Src H8
+       - Hr 9: Avg(H8,H10)
+       - Hr 10: Src H10
+       - Hr 11: Src H12
+       - Hr 12: Src H14
+       - Hr 13: ?
+       
+     - This is getting complicated. Is there a simpler explanation?
+     - Maybe the source data is not every 2 hours, but irregular, and we just need to resample to hourly?
+     - But the source only has 12 points.
+     - Let's look at the distinct values in the target.
+     - Target `01/01/2018` has 24 distinct values? No, distinct counts are 1 for each column in the schema description?
+     - Schema: `Hr 1` distinct 1, value 67.9. `Hr 2` distinct 1, value null, 67.9.
+     - This means across all rows (only 2 rows), Hr 1 is always 67.9.
+     - Row 0 (`01/02/2018`): Hr 1 is 67.9.
+     - Row 1 (`01/01/2018`): Hr 1 is 67.9.
+     - So Hr 1 is constant.
+     - Hr 2: Row 0 is null, Row 1 is 67.9.
+     - Hr 3: Row 0 is null, Row 1 is 67.8.
+     
+     - This confirms that `01/02/2018` (from `1/3/2018`) has mostly nulls because `1/3/2018` only has one data point (0:20, null).
+     - Why is Hr 1 for `01/02/2018` 67.9?
+     - If `1/3/2018 0:20` is null, where does 67.9 come from?
+     - Maybe it's forward filled from the last valid value of the previous day?
+     - Last value of `01/01/2018` (Hr 24) is 67.8.
+     - Hr 1 of `01/02/2018` is 67.9.
+     - This is not a direct forward fill.
+     
+     - Let's look at the source `1/3/2018 0:20` again. It is null.
+     - But the target `01/02/2018` Hr 1 is 67.9.
+     - Is it possible that the target date `01/02/2018` is NOT from `1/3/2018`?
+     - What if the target date `01/01/2018` is from `1/2/2018`? Yes, we established that.
+     - What if the target date `01/02/2018` is from `1/3/2018`?
+     - If so, why is Hr 1 67.9?
+     - Maybe the source `1/3/2018 0:20` is not null in the full data, but null in the sample?
+     - The sample shows `null` for `1/3/2018 0:20`.
+     - However, the target sample shows `67.9` for `01/02/2018` Hr 1.
+     - This is a contradiction unless there's another source of data.
+     - Or, perhaps the `67.9` in `01/02/2018` Hr 1 is a carry-over from `01/01/2018` Hr 1?
+     - `01/01/2018` Hr 1 is 67.9.
+     - `01/02/2018` Hr 1 is 67.9.
+     - `01/01/2018` Hr 2 is 67.9.
+     - `01/02/2018` Hr 2 is null.
+     
+     - This suggests that if the source value is null, the target is null, EXCEPT for Hr 1?
+     - Or maybe the interpolation logic handles nulls by filling from the previous day's last value?
+     - But Hr 2 is null.
+     
+     - Let's assume the transformation is:
+       1. Parse date.
+       2. Shift date by -1 day.
+       3. Group by new date.
+       4. For each group, we have up to 12 source points (every 2 hours).
+       5. We need to generate 24 target points.
+       6. If source points are missing, handle nulls.
+       
+     - Given the complexity and the small sample, and the fact that `01/02/2018` has only Hr 1 filled with 67.9 (which is the same as `01/01/2018` Hr 1), it's possible that the code simply copies the previous day's profile if the current day is empty?
+     - But `01/01/2018` is not empty.
+     - `01/02/2018` is effectively empty (all nulls in source).
+     - So, if a day is empty, copy the previous day's data?
+     - But Hr 2-24 are null in `01/02/2018`. Only Hr 1 is 67.9.
+     - This is inconsistent with "copy previous day".
+     
+     - Let's look at the source `1/2/2018` data again.
+     - It has 11 values.
+     - Target `01/01/2018` has 24 values.
+     - The values in Target `01/01/2018` are very smooth.
+     - The values in Source `1/2/2018` are: 67.9, 67.9, 67.6, 67.3, 67.1, 66.9, 66.8, 66.7, 66.9, 67.8, 68.5.
+     - Target `01/01/2018`: 67.9, 67.9, 67.8, 67.7, 67.6, 67.5, 67.3, 67.1, 67.0, 66.9, 66.8, 66.7, 66.5, 66.4, 66.3, 66.1, 66.0, 66.2, 66.4, 66.7, 67.0, 67.3, 67.6, 67.8.
+     
+     - Let's try linear interpolation again, but carefully.
+     - Source points: (0, 67.9), (2, 67.9), (4, 67.6), (6, 67.3), (8, 67.1), (10, 66.9), (12, 66.8), (14, 66.7), (16, 66.9), (18, 67.8), (20, 68.5).
+     - We need values for 1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23.
+     - And we need values for 0, 2, 4... which map to Hr 1, 3, 5...?
+     - No, Target has 24 hours. Source has 12 points.
+     - If we map Source H0 -> Target Hr 1, Source H2 -> Target Hr 3, etc.
+     - Then Target Hr 1 = 67.9.
+     - Target Hr 3 = 67.9. But Target Hr 3 is 67.8.
+     
+     - What if Source H0 -> Target Hr 1 and Hr 2?
+     - Target Hr 1 = 67.9. Target Hr 2 = 67.9.
+     - Source H2 -> Target Hr 3 and Hr 4?
+     - Target Hr 3 = 67.8. Target Hr 4 = 67.7.
+     - Source H2 is 67.9. Source H4 is 67.6.
+     - Avg(67.9, 67.6) = 67.75.
+     - If we round 67.75 to 67.8, that matches Hr 3.
+     - What

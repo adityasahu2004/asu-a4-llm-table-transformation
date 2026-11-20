@@ -1,0 +1,104 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `date` column from `str` (format `m/d/Y`) to `datetime`.
+2.  **Reorder Columns**: The source columns for hours are not in chronological order (e.g., `12:00 AM` appears after `11:00 AM`, and `12:00 PM` is at the end). We need to map them to a standard 24-hour sequence (Hour 1 = 00:00 to 01:00, etc.).
+    *   Hour 1 corresponds to `1:00 AM`? No, typically Hour 1 is the first hour of the day (00:00-01:00), which is `12:00 AM`.
+    *   Let's check the target sample.
+        *   Target Row 1 Date: `2014-01-01 00:00:00`.
+        *   Target `Hour 1`: `0.401886`.
+        *   Source Row for `2014-01-01` is not in the sample, but let's look at the mapping logic.
+        *   Usually:
+            *   Hour 1: 12:00 AM (00:00)
+            *   Hour 2: 1:00 AM (01:00)
+            *   ...
+            *   Hour 12: 11:00 AM (11:00)
+            *   Hour 13: 12:00 PM (12:00)
+            *   Hour 14: 1:00 PM (13:00)
+            *   ...
+            *   Hour 24: 11:00 PM (23:00)
+    *   Let's verify with the last source row `12/31/2014` and see if it maps to a target row. The target has 183 rows, source has 182. The target dates start `2014-01-01`. The source dates start `7/3/2014`. This implies the target might be a different dataset or there is a shift/offset?
+    *   Wait, the prompt says "Infer the transformation... The evaluation source contains different rows". The sample data provided for source and target might not align row-by-row if the dates don't match.
+    *   However, looking at the distinct counts: Source `date` has 182 distinct values. Target `date` has 183 distinct values.
+    *   Let's look at the column mapping strictly.
+    *   Source columns: `1:00 AM`, `2:00 AM` ... `11:00 AM`, `12:00 AM`, `1:00 PM` ... `12:00 PM`.
+    *   Target columns: `Hour 1` ... `Hour 24`.
+    *   Standard interpretation:
+        *   `Hour 1` = `12:00 AM`
+        *   `Hour 2` = `1:00 AM`
+        *   `Hour 3` = `2:00 AM`
+        *   `Hour 4` = `3:00 AM`
+        *   `Hour 5` = `4:00 AM`
+        *   `Hour 6` = `5:00 AM`
+        *   `Hour 7` = `6:00 AM`
+        *   `Hour 8` = `7:00 AM`
+        *   `Hour 9` = `8:00 AM`
+        *   `Hour 10` = `9:00 AM`
+        *   `Hour 11` = `10:00 AM`
+        *   `Hour 12` = `11:00 AM`
+        *   `Hour 13` = `12:00 PM`
+        *   `Hour 14` = `1:00 PM`
+        *   `Hour 15` = `2:00 PM`
+        *   `Hour 16` = `3:00 PM`
+        *   `Hour 17` = `4:00 PM`
+        *   `Hour 18` = `5:00 PM`
+        *   `Hour 19` = `6:00 PM`
+        *   `Hour 20` = `7:00 PM`
+        *   `Hour 21` = `8:00 PM`
+        *   `Hour 22` = `9:00 PM`
+        *   `Hour 23` = `10:00 PM`
+        *   `Hour 24` = `11:00 PM`
+3.  **Format Date**: Convert the parsed datetime to `YYYY-MM-DD 00:00:00`.
+4.  **Construct Output**: Create a new DataFrame with `date` and the 24 `Hour` columns mapped from the source.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    dt = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    
+    # Format date to YYYY-MM-DD 00:00:00
+    out = pd.DataFrame()
+    out['date'] = dt.dt.strftime('%Y-%m-%d 00:00:00')
+    
+    # Map source columns to Hour 1-24
+    # Hour 1: 12:00 AM
+    # Hour 2: 1:00 AM
+    # ...
+    # Hour 12: 11:00 AM
+    # Hour 13: 12:00 PM
+    # Hour 14: 1:00 PM
+    # ...
+    # Hour 24: 11:00 PM
+    
+    mapping = {
+        'Hour 1': '12:00 AM',
+        'Hour 2': '1:00 AM',
+        'Hour 3': '2:00 AM',
+        'Hour 4': '3:00 AM',
+        'Hour 5': '4:00 AM',
+        'Hour 6': '5:00 AM',
+        'Hour 7': '6:00 AM',
+        'Hour 8': '7:00 AM',
+        'Hour 9': '8:00 AM',
+        'Hour 10': '9:00 AM',
+        'Hour 11': '10:00 AM',
+        'Hour 12': '11:00 AM',
+        'Hour 13': '12:00 PM',
+        'Hour 14': '1:00 PM',
+        'Hour 15': '2:00 PM',
+        'Hour 16': '3:00 PM',
+        'Hour 17': '4:00 PM',
+        'Hour 18': '5:00 PM',
+        'Hour 19': '6:00 PM',
+        'Hour 20': '7:00 PM',
+        'Hour 21': '8:00 PM',
+        'Hour 22': '9:00 PM',
+        'Hour 23': '10:00 PM',
+        'Hour 24': '11:00 PM'
+    }
+    
+    for target_col, source_col in mapping.items():
+        out[target_col] = source[source_col]
+        
+    return out.reset_index(drop=True)
+```

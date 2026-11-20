@@ -1,0 +1,112 @@
+[
+  {
+    "index": 0,
+    "pool_index": 0,
+    "provider_index": 0,
+    "finish_reason": "stop",
+    "path": "generated/s5/length9_1/candidates/0.py",
+    "execution": {
+      "status": "execution_error",
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:19: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\nTraceback (most recent call last):\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py\", line 37, in <module>\n    output = namespace['transform'](source)\n  File \"transform.py\", line 25, in transform\n    df['date'] = pd.to_datetime(\n                 ~~~~~~~~~~~~~~^\n        year=df['YEAR'].astype(int),\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        month=df['MONTH'].astype(int),\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        day=df['DAY'].astype(int)\n        ^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\nTypeError: to_datetime() got an unexpected keyword argument 'year'\n",
+      "seconds": 1.8510570419966825
+    }
+  },
+  {
+    "index": 1,
+    "pool_index": 0,
+    "provider_index": 1,
+    "finish_reason": "stop",
+    "path": "generated/s5/length9_1/candidates/1.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:19: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+      "seconds": 2.5719917090027593,
+      "shape": [
+        118273,
+        8
+      ],
+      "fingerprint": "862c256015e7dbe3570fe7d3f09e716d2fc47b0876a0847282a30f929d2e74cb"
+    },
+    "constraint_loss": [
+      0,
+      0
+    ],
+    "constraint_diagnostics": []
+  },
+  {
+    "index": 2,
+    "pool_index": 0,
+    "provider_index": 2,
+    "finish_reason": "length",
+    "execution": {
+      "status": "extraction_error",
+      "error": "No fenced Python block"
+    }
+  },
+  {
+    "index": 3,
+    "pool_index": 0,
+    "provider_index": 3,
+    "finish_reason": "stop",
+    "path": "generated/s5/length9_1/candidates/3.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:19: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+      "seconds": 2.1294973330004723,
+      "shape": [
+        50391,
+        8
+      ],
+      "fingerprint": "792e514720bd52ecac06785cf49a5b6bba1b92a180487188c09a4fee760bc942"
+    },
+    "constraint_loss": [
+      0,
+      0
+    ],
+    "constraint_diagnostics": []
+  },
+  {
+    "index": 4,
+    "pool_index": 0,
+    "provider_index": 4,
+    "finish_reason": "stop",
+    "path": "generated/s5/length9_1/candidates/4.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:19: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+      "seconds": 3.170377249996818,
+      "shape": [
+        118273,
+        8
+      ],
+      "fingerprint": "862c256015e7dbe3570fe7d3f09e716d2fc47b0876a0847282a30f929d2e74cb"
+    },
+    "constraint_loss": [
+      0,
+      0
+    ],
+    "constraint_diagnostics": []
+  },
+  {
+    "index": 5,
+    "pool_index": 1,
+    "provider_index": 0,
+    "finish_reason": "stop",
+    "path": "generated/s5/length9_1/candidates/5.py",
+    "execution": {
+      "status": "execution_error",
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:19: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\nTraceback (most recent call last):\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py\", line 37, in <module>\n    output = namespace['transform'](source)\n  File \"transform.py\", line 24, in transform\n    df['date'] = pd.to_datetime(\n                 ~~~~~~~~~~~~~~^\n        year=df['YEAR'].astype(int),\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        month=df['MONTH'].astype(int),\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        day=df['DAY'].astype(int)\n        ^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\nTypeError: to_datetime() got an unexpected keyword argument 'year'\n",
+      "seconds": 1.8085714999979245
+    }
+  }
+]

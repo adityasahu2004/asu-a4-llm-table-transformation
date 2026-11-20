@@ -1,0 +1,150 @@
+Operator plan:
+1. Map `Time Period` (month) to `season` (Winter, Spring, Summer, Fall).
+2. Filter rows to keep only those contributing to `hvac`, `water_heating`, `refrigerator`, and `dishwasher`. Based on the target sample values and distinct counts, these are the only non-zero/variable columns. The other target columns (`clothes_washer`, `clothes_dryer`, etc.) are constant 0 in the target, implying they are either not present in the source data used for this specific transformation or explicitly zeroed out. Given the source has "Remaining Load" (likely HVAC) and specific appliance names, we map:
+   - "Remaining Load" -> `hvac` (This is a common pattern in such datasets where the residual load is HVAC). However, looking at the values, `hvac` is quite large. Let's look for other candidates. There is no explicit "HVAC" or "AC" or "Heating" in the distinct values of `End Use` shown in the sample, but "Remaining Load" is the standard term for the non-measured portion, often dominated by HVAC in these studies. Let's assume "Remaining Load" maps to `hvac`.
+   - "Water Heater" or similar -> `water_heating`. The sample doesn't show "Water Heater", but "Water Heating" is a standard end use. If it's not in the sample, it might be in the full data. Wait, the sample shows distinct values for `End Use` as 15. The sample lists: Freezer, Clothes Dryer - Electric, Clothes Washer, Primary TV and Peripherals, Primary Desktop Computer, Misc Metered, Pool Pump, Lighting, Remaining Load.
+   - Let's look at the target columns again. `hvac`, `water_heating`, `refrigerator`, `dishwasher` have 96 distinct values (4 seasons * 24 hours). This implies they are aggregated per season and hour.
+   - The other columns are constant 0. This suggests that for this specific dataset/transformation, only these four end uses are populated or mapped.
+   - Mapping:
+     - `refrigerator`: Likely "Freezer" or "Refrigerator". The sample has "Freezer". Let's assume "Freezer" maps to `refrigerator`.
+     - `dishwasher`: Likely "Dishwasher". Not in the sample snippet, but likely in the full 15 distinct values.
+     - `water_heating`: Likely "Water Heater". Not in the sample snippet, but likely in the full 15 distinct values.
+     - `hvac`: Likely "Remaining Load".
+   - Aggregation: Sum the `Average Demand Per Home With This End Use [kW]` for each (Season, Hour) group.
+   - The target has 96 rows. 4 seasons * 24 hours = 96.
+   - We need to handle NaNs in the source. The sample shows `null` for some `Average Demand...`. We should treat them as 0 or drop them before summing. Given the distinct count of 96 for the target floats, every (season, hour) bin has a value.
+   - Columns not in the mapping (or with no data) will be 0.
+
+Let's refine the mapping based on standard end-use categories:
+- `refrigerator`: "Freezer" (from sample) or "Refrigerator".
+- `dishwasher`: "Dishwasher".
+- `water_heating`: "Water Heater".
+- `hvac`: "Remaining Load".
+
+The target columns `clothes_washer`, `clothes_dryer`, `cooking_range`, `pool_spa_pumps`, `interior_lighting`, `exterior_lighting`, `lighting`, `plug`, `pool_spa_heater` are all 0. This implies either the source data for this specific evaluation set doesn't contain those end uses, or they are ignored. The sample contains "Clothes Washer", "Clothes Dryer", "Lighting", "Pool Pump", "Primary TV...", "Primary Desktop...", "Misc Metered". If the target is 0 for these, we simply don't map them or map them to 0.
+
+Steps:
+1. Create a season map: Jan/Feb/Dec -> Winter, Mar/Apr/May -> Spring, Jun/Jul/Aug -> Summer, Sep/Oct/Nov -> Fall.
+2. Filter source for relevant end uses.
+3. Group by Season and Hour Ending.
+4. Sum the demand.
+5. Pivot/reshape to have columns for each end use.
+6. Fill missing combinations with 0.
+7. Add the constant 0 columns.
+
+Note: The source `Hour Ending` is 1-24. The target `hour` is 1-24.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Map month to season
+    def get_season(month):
+        if month in ['January', 'February', 'December']:
+            return 'Winter'
+        elif month in ['March', 'April', 'May']:
+            return 'Spring'
+        elif month in ['June', 'July', 'August']:
+            return 'Summer'
+        elif month in ['September', 'October', 'November']:
+            return 'Fall'
+        return 'Unknown'
+    
+    source = source.copy()
+    source['season'] = source['Time Period'].apply(get_season)
+    source['hour'] = source['Hour Ending']
+    
+    # Clean demand values
+    source['demand'] = pd.to_numeric(source['Average Demand Per Home With This End Use [kW]'], errors='coerce').fillna(0)
+    
+    # Define mapping from End Use to target columns
+    # Based on the target having non-zero values only for hvac, water_heating, refrigerator, dishwasher
+    # And the sample showing "Freezer", "Remaining Load", etc.
+    # We assume:
+    # "Remaining Load" -> hvac
+    # "Freezer" -> refrigerator (or "Refrigerator" if present)
+    # "Dishwasher" -> dishwasher
+    # "Water Heater" -> water_heating
+    
+    # Identify relevant end uses. If they don't exist in source, they will just result in 0 sums.
+    end_use_map = {
+        'Remaining Load': 'hvac',
+        'Freezer': 'refrigerator',
+        'Refrigerator': 'refrigerator', # Handle potential variation
+        'Dishwasher': 'dishwasher',
+        'Water Heater': 'water_heating',
+        'Water Heating': 'water_heating' # Handle potential variation
+    }
+    
+    # Filter to only mapped end uses
+    valid_uses = list(end_use_map.keys())
+    source_filtered = source[source['End Use'].isin(valid_uses)].copy()
+    
+    # Map End Use to target column name
+    source_filtered['target_col'] = source_filtered['End Use'].map(end_use_map)
+    
+    # Group by season, hour, and target_col, then sum demand
+    grouped = source_filtered.groupby(['season', 'hour', 'target_col'])['demand'].sum().reset_index()
+    
+    # Pivot to get columns for each end use
+    pivoted = grouped.pivot_table(index=['season', 'hour'], columns='target_col', values='demand', fill_value=0).reset_index()
+    
+    # Ensure all target columns exist, even if empty
+    target_cols = ['hvac', 'water_heating', 'refrigerator', 'dishwasher']
+    for col in target_cols:
+        if col not in pivoted.columns:
+            pivoted[col] = 0
+            
+    # Select and order columns
+    out = pivoted[['season', 'hour'] + target_cols]
+    
+    # Add the constant zero columns as required by the target schema
+    const_zero_cols = [
+        'clothes_washer', 'clothes_dryer', 'cooking_range', 
+        'pool_spa_pumps', 'interior_lighting', 'exterior_lighting', 
+        'lighting', 'plug', 'pool_spa_heater'
+    ]
+    for col in const_zero_cols:
+        out[col] = 0
+        
+    # Reorder to match target exactly
+    final_cols = ['season', 'hour', 'hvac', 'water_heating', 'refrigerator', 
+                  'clothes_washer', 'clothes_dryer', 'dishwasher', 'cooking_range', 
+                  'pool_spa_pumps', 'interior_lighting', 'exterior_lighting', 
+                  'lighting', 'plug', 'pool_spa_heater']
+                  
+    out = out[final_cols]
+    
+    # Ensure dtypes match target
+    # hour is int64
+    out['hour'] = out['hour'].astype(int)
+    # clothes_washer, clothes_dryer, cooking_range, pool_spa_pumps, interior_lighting, exterior_lighting, lighting, plug, pool_spa_heater are int64
+    int_cols = ['clothes_washer', 'clothes_dryer', 'cooking_range', 'pool_spa_pumps', 'interior_lighting', 'exterior_lighting', 'lighting', 'plug', 'pool_spa_heater']
+    for col in int_cols:
+        out[col] = out[col].astype(int)
+        
+    # Sort by season and hour to ensure deterministic order? 
+    # The target sample isn't strictly sorted by hour within season, but usually these are ordered.
+    # The distinct count of 96 implies a full cartesian product of 4 seasons and 24 hours.
+    # We should ensure all 96 rows exist.
+    
+    # Create a full grid of seasons and hours
+    seasons = ['Winter', 'Spring', 'Summer', 'Fall']
+    hours = range(1, 25)
+    grid = pd.MultiIndex.from_product([seasons, hours], names=['season', 'hour'])
+    full_df = pd.DataFrame(index=grid).reset_index()
+    
+    # Merge with our calculated data
+    out = full_df.merge(out, on=['season', 'hour'], how='left')
+    
+    # Fill NaNs from merge with 0
+    out = out.fillna(0)
+    
+    # Ensure dtypes again after merge
+    out['hour'] = out['hour'].astype(int)
+    for col in int_cols:
+        out[col] = out[col].astype(int)
+        
+    return out
+```

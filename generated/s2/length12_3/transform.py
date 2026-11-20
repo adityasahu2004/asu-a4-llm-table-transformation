@@ -1,0 +1,100 @@
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse timestamp
+    ts = pd.to_datetime(source['timestamp'])
+    
+    # Derive season
+    month = ts.dt.month
+    season_map = {
+        12: 'Winter', 1: 'Winter', 2: 'Winter',
+        3: 'Spring', 4: 'Spring', 5: 'Spring',
+        6: 'Summer', 7: 'Summer', 8: 'Summer',
+        9: 'Fall', 10: 'Fall', 11: 'Fall'
+    }
+    out = pd.DataFrame(index=source.index)
+    out['season'] = month.map(season_map)
+    out['hour'] = ts.dt.hour.astype('int64')
+    
+    # Helper to safely sum or select columns, handling 32767 if necessary? 
+    # The target sample shows 32767 preserved in some fields (e.g., hvac=32767 in sample? No, sample has 98301, 33294... wait.
+    # Let's look at the sample data mapping.
+    # Source row 0: AC=0, Air=16 -> hvac=16? Target row 0 hvac=98301. 
+    # Wait, the target sample rows do not correspond 1-to-1 with source sample rows in order or value directly without aggregation or different mapping?
+    # Let's re-read carefully.
+    # Source row 0: site 19, 2015-11-14 02:00:00. 
+    # Target row 0: Summer, 16, hvac 98301...
+    # The target sample data provided in the prompt is just a sample of the *target* dataframe, not necessarily aligned with the *source* sample rows provided.
+    # However, the transformation must be deterministic.
+    # Let's look at the column names and types.
+    # Source has float64. Target has int64.
+    # Source has 32767 as a distinct value for many columns.
+    # Target has 32767 in the sample for hvac? No, target sample hvac values are 98301, 33294, 34123...
+    # Wait, look at target sample row 0: hvac=98301. 
+    # Look at source sample row 0: AC=0, Air=16. Sum=16.
+    # This implies the target sample rows are NOT from the source sample rows directly.
+    # But I must infer the transformation logic.
+    # Usually, these tasks involve simple column mapping and renaming.
+    # Let's assume standard mapping:
+    # hvac = AC + Air Handler
+    # water_heating = Water Heater
+    # refrigerator = Primary Fridge + 2nd Fridge
+    # clothes_dryer = Dryer 1-CT + Dryer 2-CTs
+    # dishwasher = Dish Washer
+    # cooking_range = Range
+    # pool_spa_pumps = Pool Pump
+    
+    # Let's check if 32767 is treated as NaN or a valid value.
+    # In source, 32767 is a distinct value. In target, 32767 appears in the sample for hvac? 
+    # Target sample row 0: hvac 98301.
+    # Target sample row 1: hvac 33294.
+    # Target sample row 2: hvac 34123.
+    # Target sample row 3: hvac 35078.
+    # Target sample row 4: hvac 18.
+    # Target sample row 5: hvac 32773.
+    # Target sample row 6: hvac 32770.
+    # Target sample row 7: hvac 33490.
+    # Target sample row 8: hvac 146.
+    # Target sample row 9: hvac 32778.
+    # Target sample row 10: hvac 98301.
+    # Target sample row 11: hvac 32782.
+    
+    # It seems 32767 is preserved as a value in the target (e.g., 32773, 32770, 32778, 32782 are close to 32767, possibly sums involving 32767?).
+    # If AC=32767 and Air=6, sum=32773. This matches target row 5 hvac=32773.
+    # So 32767 is a valid numeric value, not NaN. We just sum them.
+    
+    # Mapping:
+    hvac = (source['AC COMPRESSOR WHS [emon ch3,4]'] + source['AIR HANDLER WHS [emon ch5,6]'])
+    water_heating = source['WATER HEATER WHS [emon ch7,8]']
+    refrigerator = (source['Primary Fridge WHS [emon ch12]'] + source['2nd Fridge WHS [emon ch13]'])
+    clothes_dryer = (source['DRYER WHS (1-CT) [emon ch9]'] + source['Dryer WHS (2-CTs) [xpod chA-9,10]'])
+    dishwasher = source['DISH WASHER WHS [emon ch11]']
+    cooking_range = source['RANGE WHS (1-CT) [emon ch10]']
+    pool_spa_pumps = source['POOL PUMP WHS (2-CTs) [xpod chA-3,4]']
+    
+    out['hvac'] = hvac.astype('int64')
+    out['water_heating'] = water_heating.astype('int64')
+    out['refrigerator'] = refrigerator.astype('int64')
+    out['clothes_dryer'] = clothes_dryer.astype('int64')
+    out['dishwasher'] = dishwasher.astype('int64')
+    out['cooking_range'] = cooking_range.astype('int64')
+    out['pool_spa_pumps'] = pool_spa_pumps.astype('int64')
+    
+    # Zero columns
+    out['clothes_washer'] = 0
+    out['interior_lighting'] = 0
+    out['exterior_lighting'] = 0
+    out['lighting'] = 0
+    out['plug'] = 0
+    out['pool_spa_heater'] = 0
+    
+    # Ensure correct column order
+    cols = [
+        'season', 'hour', 'hvac', 'water_heating', 'refrigerator', 
+        'clothes_washer', 'clothes_dryer', 'dishwasher', 'cooking_range', 
+        'pool_spa_pumps', 'interior_lighting', 'exterior_lighting', 
+        'lighting', 'plug', 'pool_spa_heater'
+    ]
+    
+    return out[cols].reset_index(drop=True)

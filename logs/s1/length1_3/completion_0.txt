@@ -1,0 +1,208 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `date` column from string format (`M/D/YYYY`) to pandas datetime objects.
+2.  **Map Time Columns**: The source has 24 columns representing hours of the day in 12-hour format with AM/PM (e.g., `1:00 AM`, `12:00 PM`). The target requires 24 columns in 24-hour format (`1:00` to `24:00`).
+    *   `1:00 AM` -> `1:00`
+    *   `2:00 AM` -> `2:00`
+    *   ...
+    *   `11:00 AM` -> `11:00`
+    *   `12:00 PM` -> `12:00`
+    *   `1:00 PM` -> `13:00`
+    *   ...
+    *   `11:00 PM` -> `23:00`
+    *   `12:00 AM` -> `24:00` (Midnight at the end of the day)
+3.  **Construct Target DataFrame**: Create a new DataFrame with the mapped column names and values from the source.
+4.  **Generate Date Index/Column**: The target has 183 rows, while the source has 182. The target dates start from `Wed 01/01/2014` and end at `Wed 07/02/2014`. The source dates range from `7/3/2014` to `12/31/2014`.
+    *   Observation: The target dates seem to be a continuous sequence of dates starting from Jan 1, 2014. The source data appears to be a subset or a different period. However, looking closely at the sample data:
+        *   Source first date: `7/3/2014` (Thursday).
+        *   Target last date: `Wed 07/02/2014`.
+        *   Target first date: `Wed 01/01/2014`.
+    *   Wait, the target sample shows dates like `Wed 01/01/2014`, `Fri 01/17/2014`, etc. These are not consecutive daily dates. They are spaced by ~2 weeks.
+    *   Let's re-examine the row counts. Source: 182 rows. Target: 183 rows.
+    *   Let's look at the target date format: `DayOfWeek MM/DD/YYYY`.
+    *   Let's look at the source date format: `M/D/YYYY`.
+    *   The target column `cst` contains dates. The source column `date` contains dates.
+    *   Is there a direct mapping?
+        *   Source `7/3/2014` is a Thursday.
+        *   Target `Wed 07/02/2014` is the last row in the sample.
+        *   Target `Wed 01/01/2014` is the first row.
+    *   The target dates in the sample are:
+        1.  Wed 01/01/2014
+        2.  Fri 01/17/2014
+        3.  Mon 02/03/2014
+        4.  Wed 02/19/2014
+        5.  Sat 03/08/2014
+        6.  Mon 03/24/2014
+        7.  Thu 04/10/2014
+        8.  Sat 04/26/2014
+        9.  Tue 05/13/2014
+        10. Thu 05/29/2014
+        11. Sun 06/15/2014
+        12. Wed 07/02/2014
+    *   These dates are roughly bi-weekly.
+    *   The source dates in the sample are:
+        1.  7/3/2014
+        2.  7/19/2014
+        3.  8/4/2014
+        4.  8/21/2014
+        5.  9/6/2014
+        6.  9/23/2014
+        7.  10/9/2014
+        8.  10/26/2014
+        9.  11/11/2014
+        10. 11/28/2014
+        11. 12/14/2014
+        12. 12/31/2014
+    *   These are also roughly bi-weekly.
+    *   The target has 183 rows, source has 182.
+    *   The target dates start Jan 1, 2014. The source dates start July 3, 2014.
+    *   This implies the transformation is **not** a simple row-by-row mapping of the existing source rows to target rows based on the sample data provided, because the dates don't match.
+    *   However, the problem statement says "Compute the result only from the source DataFrame." and "Never copy target rows...".
+    *   If the source only contains data from July-Dec 2014, how can we generate data for Jan-June 2014?
+    *   Let's re-read carefully. "Source row count describes a training sample only, not the evaluation input."
+    *   This suggests the *evaluation* input might have different dates. But the transformation logic must be general.
+    *   Is it possible the source `date` column is just an identifier and the target `cst` is derived from it?
+    *   Let's look at the values.
+        *   Source `7/3/2014` row values: `1.035932`, `0.432909`, ...
+        *   Target `Wed 07/02/2014` row values: `0.816822`, `0.211235`, ...
+        *   These values are different.
+    *   This is a "time series" or "forecasting" type problem? No, the instructions say "deterministic Python/pandas table transformations". No ML.
+    *   Let's look at the column mapping again.
+        *   Source `1:00 AM` -> Target `1:00`?
+        *   Source `12:00 AM` -> Target `24:00`?
+    *   Let's check if the values in the target correspond to the source values for the *same* date, just shifted or transformed?
+        *   Source `7/3/2014` is Thursday. Target `Wed 07/02/2014` is Wednesday.
+        *   Source `7/19/2014` is Saturday. Target `Fri 01/17/2014` is Friday.
+    *   There is no obvious date alignment between the source sample and target sample.
+    *   However, usually in these problems, the source and target represent the *same* underlying data, just formatted differently. The discrepancy in dates in the *sample* might be due to the sample being a random subset or the source/target being from different time periods in the training set, but the *structure* is what matters.
+    *   BUT, the target has 183 rows and source has 182. And the dates are completely different ranges.
+    *   Let's look at the `DSL` column in source. It has values `0.0` and `0.119509`. It is not in the target.
+    *   Let's look at the target `cst` column. It is a string.
+    *   Hypothesis: The source DataFrame *is* the data, but the dates in the source are just labels. The target requires a specific date format and column renaming.
+    *   Why the row count difference? 182 vs 183.
+    *   Why the date range difference?
+    *   Maybe the source `date` column needs to be parsed, and then the target `cst` is generated by formatting that date?
+    *   If I format `7/3/2014` as `Day MM/DD/YYYY`, I get `Thu 07/03/2014`.
+    *   The target sample has `Wed 07/02/2014`.
+    *   This is a 1-day offset?
+    *   Let's check `7/19/2014` (Sat). Offset -1 day -> `Fri 07/18/2014`. Target sample has `Fri 01/17/2014`. No.
+    *   Let's check the values again.
+        *   Source `7/3/2014`: `1:00 AM` = 1.035932.
+        *   Target `Wed 07/02/2014`: `1:00` = 0.816822.
+        *   They are not the same.
+    *   Is it possible the target is an *aggregation* or *rolling* calculation?
+    *   Or is the source data actually *daily* data, and the target is *bi-weekly*?
+    *   Source distinct dates: 182. Target distinct dates: 183.
+    *   If source is daily, 182 days is about 6 months. July to Dec is ~182 days.
+    *   If target is bi-weekly, 183 rows is ~3.5 years. Jan 2014 to July 2014 is 6 months. 6 months / 2 weeks = ~13 rows. The sample has 12 rows.
+    *   So the target sample is a subset of a larger target dataset.
+    *   The source sample is a subset of a larger source dataset.
+    *   The key is the **column transformation**.
+    *   The target columns `1:00` to `24:00` clearly map to the source time columns.
+    *   The target column `cst` clearly maps to the source `date` column, but with a format change.
+    *   The row count difference (182 vs 183) and date range difference in the *samples* might be misleading if the samples are just random slices. However, the instruction says "Compute the result only from the source DataFrame".
+    *   If the source has 182 rows, the output must have 182 rows (unless we generate new rows, which is not standard for "table transformations" without explicit generation logic like `date_range`).
+    *   But the target schema says 183 rows.
+    *   Let's look at the `DSL` column. It's dropped.
+    *   Let's assume the standard transformation:
+        1.  Rename time columns to 24-hour format.
+        2.  Format the date column to `DayOfWeek MM/DD/YYYY`.
+        3.  Drop `DSL`.
+    *   Why the row count mismatch in the schema description?
+        *   Source: 182 rows.
+        *   Target: 183 rows.
+        *   Maybe the source *evaluation* input will have 183 rows? The note says "Source row count describes a training sample only".
+        *   So, for the evaluation, the source might have 183 rows.
+        *   The transformation should be row-preserving (1-to-1).
+    *   Let's verify the date format.
+        *   Source: `7/3/2014`.
+        *   Target: `Wed 01/01/2014`.
+        *   Format: `%a %m/%d/%Y`.
+    *   Let's verify the column mapping.
+        *   `1:00 AM` -> `1:00`
+        *   `2:00 AM` -> `2:00`
+        *   ...
+        *   `11:00 AM` -> `11:00`
+        *   `12:00 PM` -> `12:00`
+        *   `1:00 PM` -> `13:00`
+        *   ...
+        *   `11:00 PM` -> `23:00`
+        *   `12:00 AM` -> `24:00`
+    *   This mapping is consistent with standard 24-hour clock representation where midnight at the end of the day is 24:00.
+
+    **Assumptions:**
+    1.  The transformation is a 1-to-1 row mapping. The row count difference in the schema sample is due to the sample being a subset or the evaluation input having different dimensions. The code should process all rows in the source.
+    2.  The `DSL` column is irrelevant and should be dropped.
+    3.  The `date` column should be parsed and reformatted to `DayOfWeek MM/DD/YYYY` (e.g., `Wed 01/01/2014`).
+    4.  The time columns should be renamed to 24-hour format strings (`1:00`, `2:00`, ..., `24:00`).
+
+    **Step-by-step Plan:**
+    1.  Define a mapping dictionary for the time columns.
+    2.  Rename the columns in the source DataFrame.
+    3.  Parse the `date` column to datetime.
+    4.  Format the `date` column to the target string format.
+    5.  Rename the `date` column to `cst`.
+    6.  Select the required columns in the correct order.
+    7.  Return the resulting DataFrame.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Define the mapping from source time columns to target time columns
+    # Source: 12-hour format with AM/PM
+    # Target: 24-hour format (1:00 to 24:00)
+    col_mapping = {
+        '1:00 AM': '1:00',
+        '2:00 AM': '2:00',
+        '3:00 AM': '3:00',
+        '4:00 AM': '4:00',
+        '5:00 AM': '5:00',
+        '6:00 AM': '6:00',
+        '7:00 AM': '7:00',
+        '8:00 AM': '8:00',
+        '9:00 AM': '9:00',
+        '10:00 AM': '10:00',
+        '11:00 AM': '11:00',
+        '12:00 PM': '12:00',
+        '1:00 PM': '13:00',
+        '2:00 PM': '14:00',
+        '3:00 PM': '15:00',
+        '4:00 PM': '16:00',
+        '5:00 PM': '17:00',
+        '6:00 PM': '18:00',
+        '7:00 PM': '19:00',
+        '8:00 PM': '20:00',
+        '9:00 PM': '21:00',
+        '10:00 PM': '22:00',
+        '11:00 PM': '23:00',
+        '12:00 AM': '24:00'
+    }
+
+    # Create a copy to avoid modifying the original
+    df = source.copy()
+
+    # Rename the time columns
+    df.rename(columns=col_mapping, inplace=True)
+
+    # Parse the date column
+    # Source format: M/D/YYYY (e.g., 7/3/2014)
+    df['date'] = pd.to_datetime(df['date'], format='%m/%d/%Y')
+
+    # Format the date column to target format: DayOfWeek MM/DD/YYYY (e.g., Wed 01/01/2014)
+    # %a gives abbreviated weekday name (e.g., Wed)
+    # %m gives zero-padded month
+    # %d gives zero-padded day
+    # %Y gives 4-digit year
+    df['cst'] = df['date'].dt.strftime('%a %m/%d/%Y')
+
+    # Define the target column order
+    target_columns = ['cst'] + [f'{h}:00' for h in range(1, 25)]
+
+    # Select and reorder columns
+    # Note: The source 'date' column is no longer needed, and 'DSL' is dropped.
+    result = df[target_columns]
+
+    return result
+```

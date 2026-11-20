@@ -1,0 +1,131 @@
+{
+  "case": "length10_1",
+  "length": 10,
+  "strategy": "s2",
+  "model": "qwen36-27b",
+  "is_demo": false,
+  "parameters": {
+    "output": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment",
+    "model": "qwen36-27b",
+    "base_url": "https://openai.rc.asu.edu/v1",
+    "max_tokens": 6000,
+    "reasoning_effort": "none",
+    "k": 5,
+    "sample_rows": 12,
+    "timeout": 120,
+    "replay_only": true,
+    "strategy": "s2",
+    "python": "3.14.4 (main, Apr  7 2026, 13:13:20) [Clang 21.0.0 (clang-2100.0.123.102)]",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "pandas": "3.1.1",
+    "held_out": [
+      "length1_1",
+      "length1_2",
+      "length1_3",
+      "length2_1",
+      "length3_1"
+    ],
+    "benchmark": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split"
+  },
+  "prompt_path": "logs/s2/length10_1/prompt.json",
+  "completion_path": "logs/s2/length10_1/response.json",
+  "execution": {
+    "status": "ok",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+    "seconds": 1.4150727089981956,
+    "shape": [
+      17568,
+      14
+    ],
+    "fingerprint": "0a351c4e0908b087f05d58aed721f15a288beb3cbd428b57f8424c882b85882e"
+  },
+  "autopipeline": {
+    "accuracy": 1.0,
+    "is_correct": true,
+    "similarities": {},
+    "info": [
+      "datetime",
+      "hvac",
+      "water_heating",
+      "refrigerator",
+      "clothes_washer",
+      "clothes_dryer",
+      "dishwasher",
+      "cooking_range",
+      "pool_spa_pumps",
+      "interior_lighting",
+      "exterior_lighting",
+      "lighting",
+      "plug",
+      "pool_spa_heater"
+    ]
+  },
+  "hard_match": {
+    "accuracy": 0.9285714285714286,
+    "is_correct": false,
+    "similarities": [
+      1.0,
+      0.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "info": [
+      "datetime",
+      "water_heating",
+      "refrigerator",
+      "clothes_washer",
+      "clothes_dryer",
+      "dishwasher",
+      "cooking_range",
+      "pool_spa_pumps",
+      "interior_lighting",
+      "exterior_lighting",
+      "lighting",
+      "plug",
+      "pool_spa_heater"
+    ]
+  },
+  "hard_match_provenance": "course-provided hard_match.py and utils.py",
+  "exact_schema": true,
+  "generation": {
+    "request_hash": "0589c6f24bc14e3d4decda64635e4e79087167fc0481d0a16507fdc56e5071e7",
+    "usage": {
+      "completion_tokens": 1184,
+      "prompt_tokens": 50358,
+      "total_tokens": 51542,
+      "completion_tokens_details": null,
+      "prompt_tokens_details": {
+        "audio_tokens": null,
+        "cache_write_tokens": null,
+        "cached_tokens": 36736,
+        "image_tokens": null,
+        "text_tokens": null,
+        "created_cache_tokens": 13440,
+        "multimodal_tokens": null
+      },
+      "co2_g": 0.771003,
+      "energy_wh": 2.287842
+    },
+    "latency_seconds": 35.3191107920029,
+    "api_attempts": 1,
+    "cached": true,
+    "candidate_count": 1,
+    "reasoning_effort_header": "none",
+    "selected_index": 0,
+    "clusters": {}
+  },
+  "wall_seconds": 39.02271554099934,
+  "replay_wall_seconds": 3.5308869170003163
+}

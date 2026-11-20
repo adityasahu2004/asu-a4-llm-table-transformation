@@ -1,0 +1,110 @@
+### Operator Plan
+
+1.  **Filter Rows**: The target schema has 366 distinct values for the date column `cst`, corresponding to the days of the year 2016. The source has 5673 rows (16 strata * 366 days + some holiday/weekend specific rows? No, 16*366 = 5856. The source has distinct `DOW` values including 'H' (Holiday) and 'D' (Daylight Saving?). Actually, looking at the source, `DOW` has values 1-7, H, D. The target seems to represent the "standard" daily profiles, likely excluding specific holiday or special day adjustments if they exist as separate rows, or perhaps it's an aggregation. However, the distinct count in target `cst` is 366. The source `DT_STRATA` has 366 distinct dates. This implies we need to aggregate or select one row per date.
+    *   Let's look at the `DOW` column in source. It has '1' through '7', 'H', 'D'.
+    *   The target `cst` format is "DayName MM/DD/YYYY".
+    *   The source `DT_STRATA` is "MM/DD/YYYY".
+    *   The target has 366 rows. 2016 is a leap year (366 days).
+    *   The source has 5673 rows. 5673 / 366 ≈ 15.5. This suggests there are multiple rows per date.
+    *   Looking at the sample data, we see rows for different `Strata_ID`s on different dates.
+    *   Wait, the target `cst` values like "Fri 01/01/2016" correspond to `DT_STRATA` "1/1/2016".
+    *   The target values for hours (e.g., "1:00") are averages or sums?
+    *   Let's check the first row of target: "Fri 01/01/2016".
+    *   Source rows for "1/1/2016": We need to find them. The sample doesn't show 1/1/2016 explicitly in the first few rows, but we can infer.
+    *   Actually, usually in these traffic datasets, the "Strata" represent different types of days (e.g., weekdays, weekends, holidays) or different geographic zones. But here `Strata` seems to be a geographic/segment ID.
+    *   If the target is a single profile per day, it likely represents an **average** across all Strata for that day, or perhaps a specific Strata?
+    *   Let's look at the distinct counts. Target `1:00` has 1312 distinct values. Source `PCT_HOURLY_0100` has 956 distinct values.
+    *   If we average 16 strata, the distinct count might increase or decrease depending on precision.
+    *   Let's look at the `DOW` column in source. It contains '1'..'7', 'H', 'D'.
+    *   The target `cst` includes the day of week.
+    *   Hypothesis: The transformation aggregates the source data by date (`DT_STRATA`). For each date, it calculates the mean of the hourly columns across all rows (Strata) for that date. Then it formats the date into "DayOfWeek MM/DD/YYYY".
+    *   Let's verify the row count. If we group by `DT_STRATA`, we get 366 rows (one for each day in 2016). This matches the target row count.
+    *   Let's verify the values.
+        *   Target row 1: "Fri 01/01/2016". Value for "1:00" is `0.0012220171`.
+        *   We need to check if this is the mean of `PCT_HOURLY_0100` for date "1/1/2016".
+        *   Since I don't have the full source data, I must infer from the schema. The most logical operation to go from 5673 rows (multiple strata per day) to 366 rows (one per day) is a **GroupBy Mean**.
+
+2.  **Date Formatting**:
+    *   Parse `DT_STRATA` (format `m/d/yyyy`) into datetime.
+    *   Format the datetime as "DayName MM/DD/YYYY" (e.g., "Fri 01/01/2016"). Note the space between DayName and Date.
+
+3.  **Column Renaming and Selection**:
+    *   Select the hourly columns `PCT_HOURLY_0100` through `PCT_HOURLY_2400`.
+    *   Rename them to `1:00` through `24:00`.
+    *   Drop other columns (`Strata_ID`, `Strata`, `DOW`, `PCT_HOURLY_2500`).
+
+4.  **Aggregation**:
+    *   Group by the parsed date.
+    *   Calculate the mean of the hourly columns.
+
+5.  **Final Output**:
+    *   Construct the DataFrame with `cst` and the renamed hourly columns.
+    *   Ensure the index is reset.
+
+### Assumptions
+*   The target represents the average hourly profile across all Strata for each day.
+*   The date format in `DT_STRATA` is consistent `m/d/yyyy`.
+*   The day of week in `cst` is derived from the date, not the `DOW` column (which seems to encode something else, possibly weekday number or holiday status).
+*   `PCT_HOURLY_2500` is ignored as it's not in the target.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse the date column
+    source = source.copy()
+    source['DT_STRATA'] = pd.to_datetime(source['DT_STRATA'], format='%m/%d/%Y')
+    
+    # 2. Identify hourly columns to aggregate
+    # Source columns: PCT_HOURLY_0100 to PCT_HOURLY_2400
+    hourly_cols = [f'PCT_HOURLY_{h:04d}' for h in range(1, 25)]
+    
+    # 3. Group by date and calculate mean
+    # We group by the parsed datetime object
+    grouped = source.groupby(source['DT_STRATA'])[hourly_cols].mean()
+    
+    # 4. Reset index to make date a column
+    result = grouped.reset_index()
+    
+    # 5. Format the date column as "DayName MM/DD/YYYY"
+    # e.g., "Fri 01/01/2016"
+    # %a gives abbreviated weekday name (e.g., Fri)
+    # %m/%d/%Y gives MM/DD/YYYY
+    result['cst'] = result['DT_STRATA'].dt.strftime('%a %m/%d/%Y')
+    
+    # 6. Rename hourly columns to "1:00", "2:00", ..., "24:00"
+    rename_map = {f'PCT_HOURLY_{h:04d}': f'{h:02d}:00' if h < 10 else f'{h}:00' 
+                  for h in range(1, 25)}
+    # Wait, target names are "1:00", "2:00" ... "9:00", "10:00" ... "24:00"
+    # The format string for hour 1 is "1:00", for 10 is "10:00".
+    # Let's refine the rename map keys to match source and values to match target.
+    
+    rename_map = {}
+    for h in range(1, 25):
+        src_col = f'PCT_HOURLY_{h:04d}'
+        tgt_col = f'{h}:00'
+        rename_map[src_col] = tgt_col
+        
+    result = result.rename(columns=rename_map)
+    
+    # 7. Select and order columns
+    # Target columns: cst, 1:00, 2:00, ..., 24:00
+    target_cols = ['cst'] + [f'{h}:00' for h in range(1, 25)]
+    result = result[target_cols]
+    
+    # 8. Sort by date to match typical chronological order (optional but good practice)
+    # The target sample is not strictly sorted by date (Fri 01/01, Sun 05/29, Wed 10/26...), 
+    # but usually transformations preserve some order or sort. 
+    # Given the target sample looks random or specific, we should probably just return the grouped result.
+    # However, groupby usually sorts by the key. Let's sort by the original date to be deterministic.
+    # We can sort by the 'cst' string if we parse it, but easier to sort by the index before reset or keep the datetime.
+    # Let's add the datetime back temporarily to sort, or just sort by 'cst' if it parses correctly?
+    # "Fri 01/01/2016" -> standard sort might not work chronologically if day names vary length? 
+    # Actually, let's just sort by the underlying date.
+    
+    # Re-parse cst to datetime for sorting? Or just rely on the groupby order.
+    # groupby sorts by key by default. So the result is sorted by date.
+    
+    return result
+```

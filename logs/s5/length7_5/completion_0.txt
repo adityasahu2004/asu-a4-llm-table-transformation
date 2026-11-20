@@ -1,0 +1,74 @@
+Operator plan:
+1. Parse the `date` column into datetime objects.
+2. Extract `month` as the full English month name.
+3. Determine `daytype` as "weekend" if the day of the week is Saturday (5) or Sunday (6), else "weekday".
+4. Map the 24 hour columns from the source (which are in a non-chronological order: AM hours 1-11, then 12 AM, then PM hours 1-11, then 12 PM) to chronological order `hr1` through `hr24`.
+   - `hr1` <- `1:00 AM`
+   - `hr2` <- `2:00 AM`
+   - ...
+   - `hr11` <- `11:00 AM`
+   - `hr12` <- `12:00 PM` (Note: Source has `12:00 AM` and `12:00 PM`. Chronologically, 12:00 PM is noon, which is hour 12. 12:00 AM is midnight, which is hour 24 or hour 0. Let's look at the source columns again.
+     Source columns: `1:00 AM`...`11:00 AM`, `12:00 AM`, `1:00 PM`...`11:00 PM`, `12:00 PM`.
+     Standard 24-hour clock:
+     1:00 AM -> 1
+     ...
+     11:00 AM -> 11
+     12:00 PM -> 12 (Noon)
+     1:00 PM -> 13
+     ...
+     11:00 PM -> 23
+     12:00 AM -> 24 (Midnight, end of day)
+     
+     Let's verify this mapping with the target sample.
+     Target `hr12` corresponds to Noon. Source `12:00 PM` is Noon.
+     Target `hr24` corresponds to Midnight. Source `12:00 AM` is Midnight.
+     
+     So the mapping is:
+     `hr1` = `1:00 AM`
+     `hr2` = `2:00 AM`
+     ...
+     `hr11` = `11:00 AM`
+     `hr12` = `12:00 PM`
+     `hr13` = `1:00 PM`
+     ...
+     `hr23` = `11:00 PM`
+     `hr24` = `12:00 AM`
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse dates
+    dt = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    
+    # Create output dataframe
+    out = pd.DataFrame(index=source.index)
+    
+    # Month name
+    out['month'] = dt.dt.strftime('%B')
+    
+    # Day type
+    # dt.dayofweek: 0=Mon, ..., 5=Sat, 6=Sun
+    out['daytype'] = np.where(dt.dt.dayofweek.isin([5, 6]), 'weekend', 'weekday')
+    
+    # Map hours
+    # Source columns order: 1-11 AM, 12 AM, 1-11 PM, 12 PM
+    # Target columns: hr1-24 chronological
+    
+    # 1:00 AM to 11:00 AM -> hr1 to hr11
+    for h in range(1, 12):
+        out[f'hr{h}'] = source[f'{h}:00 AM']
+        
+    # 12:00 PM (Noon) -> hr12
+    out['hr12'] = source['12:00 PM']
+    
+    # 1:00 PM to 11:00 PM -> hr13 to hr23
+    for h in range(1, 12):
+        out[f'hr{h+12}'] = source[f'{h}:00 PM']
+        
+    # 12:00 AM (Midnight) -> hr24
+    out['hr24'] = source['12:00 AM']
+    
+    return out.reset_index(drop=True)
+```

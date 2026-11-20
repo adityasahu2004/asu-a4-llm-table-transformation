@@ -1,0 +1,66 @@
+Operator plan:
+1. Parse the `CST` column into datetime objects.
+2. Create a new column `date` formatted as `MM/DD/YYYY`.
+3. Map the 24 hourly columns from the source (named `1:00` through `24:00:00`) to the target names (`1:00 AM` through `12:00 PM`, then `1:00 PM` through `12:00 AM` for the afternoon/evening hours, but looking at the target schema order: `1:00 AM`...`11:00 AM`, `12:00 AM`, `1:00 PM`...`11:00 PM`, `12:00 PM`).
+   Wait, let's look closer at the target column order and names:
+   - Source: `1:00` to `24:00:00`.
+   - Target:
+     - `1:00 AM` corresponds to Source `1:00`
+     - ...
+     - `11:00 AM` corresponds to Source `11:00`
+     - `12:00 AM` corresponds to Source `12:00` (Noon is often 12:00 PM, but here it says `12:00 AM`? Let's check the sample data values to be sure.
+       - Source sample row 1 (`Sat 12/01/2012`): `12:00` is 3.5242.
+       - Target sample row 1 (`04/01/2009`): This is a different date. Let's look for a matching date or pattern.
+       - Actually, standard 12-hour clock:
+         - 1:00-11:00 are AM.
+         - 12:00 is Noon (PM).
+         - 13:00-23:00 are PM (1:00 PM - 11:00 PM).
+         - 24:00 is Midnight (AM/Next day).
+       - Let's check the target column names again:
+         `1:00 AM`, `2:00 AM`, ..., `11:00 AM`, `12:00 AM`, `1:00 PM`, ..., `11:00 PM`, `12:00 PM`.
+         This naming is slightly non-standard or specific.
+         Let's trace indices:
+         Source `1:00` -> Target `1:00 AM`
+         Source `2:00` -> Target `2:00 AM`
+         ...
+         Source `11:00` -> Target `11:00 AM`
+         Source `12:00` -> Target `12:00 AM` (This is unusual, usually 12:00 PM is noon. But I must follow the target schema exactly).
+         Source `13:00` -> Target `1:00 PM`
+         ...
+         Source `23:00` -> Target `11:00 PM`
+         Source `24:00:00` -> Target `12:00 PM`
+
+   Let's verify this mapping with the distinct values or just assume positional mapping based on the hour index.
+   Index 1 (Source `1:00`) -> `1:00 AM`
+   Index 12 (Source `12:00`) -> `12:00 AM`
+   Index 13 (Source `13:00`) -> `1:00 PM`
+   Index 24 (Source `24:00:00`) -> `12:00 PM`
+
+   This seems to be the direct mapping required by the target schema.
+
+```python
+import pandas as pd
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    out = pd.DataFrame(index=source.index)
+    
+    # Parse CST and format date
+    dates = pd.to_datetime(source['CST'], format='%a %m/%d/%Y')
+    out['date'] = dates.dt.strftime('%m/%d/%Y')
+    
+    # Define the mapping from source hour columns to target names
+    # Source columns are '1:00' through '23:00' and '24:00:00'
+    # Target names follow a specific pattern
+    target_names = [
+        '1:00 AM', '2:00 AM', '3:00 AM', '4:00 AM', '5:00 AM', '6:00 AM', '7:00 AM', '8:00 AM', 
+        '9:00 AM', '10:00 AM', '11:00 AM', '12:00 AM', 
+        '1:00 PM', '2:00 PM', '3:00 PM', '4:00 PM', '5:00 PM', '6:00 PM', '7:00 PM', '8:00 PM', 
+        '9:00 PM', '10:00 PM', '11:00 PM', '12:00 PM'
+    ]
+    
+    for i in range(1, 25):
+        src_col = f'{i}:00' if i < 24 else '24:00:00'
+        tgt_col = target_names[i-1]
+        out[tgt_col] = source[src_col]
+        
+    return out.reset_index(drop=True)
+```

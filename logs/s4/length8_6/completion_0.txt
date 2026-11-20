@@ -1,0 +1,127 @@
+**Operator Plan:**
+
+1.  **Parse Dates**: Convert the `date` column from string format (`M/D/YYYY`) to datetime objects.
+2.  **Map Columns to Hours**: The source DataFrame has columns representing hours of the day in a non-sequential order (1-11 AM, 12 AM, 1-11 PM, 12 PM). We need to map these source column names to their corresponding 24-hour integer values (1-24).
+    *   1:00 AM -> 1
+    *   ...
+    *   11:00 AM -> 11
+    *   12:00 AM -> 12
+    *   1:00 PM -> 13
+    *   ...
+    *   12:00 PM -> 24
+3.  **Pivot/Reshape**:
+    *   Iterate through each hour (1 to 24).
+    *   For each hour, extract the values from the corresponding source column.
+    *   Group these values by the month (1-12) derived from the parsed dates.
+    *   Calculate the mean (or sum? Let's check distinct counts. Source has 182 rows. Target has 24 rows. Target columns are months. It looks like an aggregation. Since the target values are floats and distinct counts are 24 for most months, it implies a single value per hour per month. Given the source has multiple days per month, we likely need to average the hourly values for that specific hour across all days in that month. Let's verify with sample data if possible, or assume mean as standard for "profile" creation. Actually, looking at the target sample, `hour` 1 has values for Jan-July. The source sample only has July-Dec 2014. The target sample shows data for Jan-July. This suggests the evaluation data might cover a full year or multiple years. The operation is likely `groupby(month).mean()` for each hour column.
+    *   Wait, the target has `null` for Aug-Dec. This is consistent with the source sample only containing July-Dec 2014? No, source sample is July-Dec 2014. Target sample has Jan-July data. This implies the *evaluation* source data contains the full year (or years) Jan-Dec. The sample provided in the prompt is just a subset. The transformation must be general.
+    *   So, for each hour `h` (1-24):
+        *   Get the series of values from the source column mapped to `h`.
+        *   Create a Series indexed by month (1-12).
+        *   Compute the mean of values for each month.
+4.  **Construct Result**:
+    *   Create a DataFrame with index 1..24 (representing hours).
+    *   Columns `january` through `december`.
+    *   Fill with the aggregated means.
+    *   Add the `hour` column.
+    *   Ensure column order: `hour`, then months.
+
+**Refinement on Aggregation**:
+The target has 24 rows. The source has many rows (182 in sample, likely more in eval). The target columns are months. This is a "typical day" profile or average profile.
+For each hour `h` (1 to 24):
+- Identify the source column name.
+- Extract values.
+- Group by Month of Year (1-12).
+- Calculate Mean.
+- Store in result row `h`, column `MonthName`.
+
+**Column Mapping**:
+`1:00 AM` -> 1
+`2:00 AM` -> 2
+`3:00 AM` -> 3
+`4:00 AM` -> 4
+`5:00 AM` -> 5
+`6:00 AM` -> 6
+`7:00 AM` -> 7
+`8:00 AM` -> 8
+`9:00 AM` -> 9
+`10:00 AM` -> 10
+`11:00 AM` -> 11
+`12:00 AM` -> 12
+`1:00 PM` -> 13
+`2:00 PM` -> 14
+`3:00 PM` -> 15
+`4:00 PM` -> 16
+`5:00 PM` -> 17
+`6:00 PM` -> 18
+`7:00 PM` -> 19
+`8:00 PM` -> 20
+`9:00 PM` -> 21
+`10:00 PM` -> 22
+`11:00 PM` -> 23
+`12:00 PM` -> 24
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Map source column names to 24-hour format integers
+    hour_map = {
+        '1:00 AM': 1, '2:00 AM': 2, '3:00 AM': 3, '4:00 AM': 4, '5:00 AM': 5, '6:00 AM': 6,
+        '7:00 AM': 7, '8:00 AM': 8, '9:00 AM': 9, '10:00 AM': 10, '11:00 AM': 11,
+        '12:00 AM': 12,
+        '1:00 PM': 13, '2:00 PM': 14, '3:00 PM': 15, '4:00 PM': 16, '5:00 PM': 17,
+        '6:00 PM': 18, '7:00 PM': 19, '8:00 PM': 20, '9:00 PM': 21, '10:00 PM': 22,
+        '11:00 PM': 23, '12:00 PM': 24
+    }
+
+    # Parse dates to get month information
+    dates = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    months = dates.dt.month
+
+    # Initialize result data structure
+    # We want 24 rows (hours 1-24) and 12 columns (months 1-12)
+    result_data = {}
+    
+    for src_col, hour_int in hour_map.items():
+        if src_col in source.columns:
+            values = source[src_col]
+            # Group by month and calculate mean
+            # We need to align values with months
+            series = pd.Series(values.values, index=months)
+            # Calculate mean for each month (1-12)
+            monthly_means = series.groupby(level=0).mean()
+            # Store in result data keyed by hour_int
+            result_data[hour_int] = monthly_means
+
+    # Construct the final DataFrame
+    # Create an empty dataframe with index 1-24
+    df_result = pd.DataFrame(index=range(1, 25))
+    df_result.index.name = 'hour'
+    
+    month_names = ['january', 'february', 'march', 'april', 'may', 'june', 
+                   'july', 'august', 'september', 'october', 'november', 'december']
+    
+    for i, month_name in enumerate(month_names):
+        month_num = i + 1
+        # Collect values for this month across all hours
+        col_values = []
+        for hour_int in range(1, 25):
+            if hour_int in result_data:
+                # Get mean for this specific month, NaN if not present
+                val = result_data[hour_int].get(month_num, np.nan)
+                col_values.append(val)
+            else:
+                col_values.append(np.nan)
+        df_result[month_name] = col_values
+
+    # Reset index to make 'hour' a column
+    df_result = df_result.reset_index()
+    
+    # Ensure correct column order: hour, then months
+    cols = ['hour'] + month_names
+    df_result = df_result[cols]
+    
+    return df_result
+```

@@ -1,0 +1,154 @@
+### Operator Plan
+
+1.  **Melt the Source Data**: The source DataFrame has a wide format with 24 hourly columns (e.g., "1:00 AM", "2:00 AM", ..., "12:00 PM"). We need to convert this into a long format where each row represents a specific hour for a specific date. We use `pd.melt` to unpivot the hourly columns, keeping `date` and `DSL` as identifiers.
+2.  **Parse and Normalize Time**: The melted `variable` column contains strings like "1:00 AM". We need to parse these into a standard 24-hour integer format (1-24) to match the target column names ("1:00", "2:00", ..., "24:00").
+    *   "12:00 AM" corresponds to hour 24 (or 0, but target uses 24:00 as the last column, implying a 1-24 scale where 24 is midnight/end of day). Looking at the target columns, they are 1:00 through 24:00.
+    *   Standard conversion:
+        *   12:00 AM -> 24 (or 0, let's check target order). The target columns are sorted 1:00 to 24:00. Usually, 12 AM is the start of the day (00:00) or end (24:00). Given the column "24:00" exists and "12:00 AM" is in source, and typical hourly data often lists 24:00 as the final hour of the day, we will map 12:00 AM to 24.
+        *   1:00 AM to 11:00 AM -> 1 to 11.
+        *   12:00 PM -> 12.
+        *   1:00 PM to 11:00 PM -> 13 to 23.
+3.  **Aggregate/Reshape**: The target has one row per date. However, the source has 182 rows and the target has 183 rows. The source sample shows dates like "7/3/2014" to "12/31/2014". The target sample shows "Wed 01/01/2014" to "Wed 07/02/2014". This implies the evaluation data will be different. The key observation is that the target has *more* rows than the source sample provided, but the source schema says 182 rows for the sample. The target has 183 rows.
+    *   Wait, the source `date` column has 182 distinct values. The target `cst` column has 183 distinct values.
+    *   The transformation must handle the data present in the source. The note says "Source row count describes a training sample only".
+    *   Crucially, the target columns are `1:00` through `24:00`. This suggests a pivot operation where the index is the date and columns are the hours.
+    *   Since the source data appears to be daily aggregates or specific snapshots, and we are pivoting back to wide, we assume each source row corresponds to one day's data.
+    *   We need to handle the `DSL` column. The target does *not* have a `DSL` column. We should drop it or ignore it.
+4.  **Date Formatting**: The target date column `cst` is formatted as "DayOfWeek MM/DD/YYYY" (e.g., "Wed 01/01/2014"). We need to parse the source `date` strings (e.g., "7/3/2014") into datetime objects and format them accordingly.
+5.  **Pivot**: Pivot the melted dataframe so that `date` is the index, the parsed hour integers are the columns, and the values are the numeric data.
+6.  **Rename Columns**: Rename the hour columns (integers 1-24) to the string format "H:00".
+7.  **Reset Index and Format Date**: Reset the index to make `date` a column, rename it to `cst`, and format the dates.
+8.  **Sort**: Ensure the columns are in the correct order (1:00 to 24:00) and rows are sorted by date if necessary (though the target sample seems sorted by date).
+
+**Refinement on Time Mapping**:
+Source: "12:00 AM", "1:00 AM", ..., "11:00 AM", "12:00 PM", "1:00 PM", ..., "11:00 PM".
+Target: "1:00", "2:00", ..., "11:00", "12:00", "13:00", ..., "23:00", "24:00".
+
+Mapping:
+- "12:00 AM" -> 24 (Midnight at end of day)
+- "1:00 AM" -> 1
+- ...
+- "11:00 AM" -> 11
+- "12:00 PM" -> 12
+- "1:00 PM" -> 13
+- ...
+- "11:00 PM" -> 23
+
+Let's verify this mapping. If "12:00 AM" is 24, then the sequence 1..24 covers the whole day.
+
+**Refinement on Row Count**:
+The source has 182 rows. The target has 183 rows. The sample data in the prompt is just a sample. The transformation logic must be general. If the source has N rows, the target will have N rows (one per date). The discrepancy in the sample metadata (182 vs 183) likely refers to the full dataset vs the sample shown, or potentially the evaluation set has different dates. The code must simply process whatever rows are in `source`.
+
+**Implementation Steps**:
+1. Melt `source` excluding `date` and `DSL`.
+2. Parse the `variable` column to extract hour integers.
+3. Pivot on `date`, `hour`, `value`.
+4. Format `date` to `cst`.
+5. Select and order columns.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    """
+    Transforms the source DataFrame from a wide format with AM/PM hour columns
+    to a target format with 24-hour columns (1:00 to 24:00) and a formatted date column.
+    """
+    
+    # 1. Melt the DataFrame to long format
+    # Keep 'date' as id, drop 'DSL' as it's not in the target
+    id_cols = ['date']
+    value_cols = [col for col in source.columns if col not in id_cols and col != 'DSL']
+    
+    melted = pd.melt(
+        source, 
+        id_vars=id_cols, 
+        value_vars=value_cols, 
+        var_name='time_label', 
+        value_name='value'
+    )
+    
+    # 2. Parse time labels to 24-hour integer format
+    # Mapping:
+    # 12:00 AM -> 24
+    # 1:00 AM  -> 1
+    # ...
+    # 11:00 AM -> 11
+    # 12:00 PM -> 12
+    # 1:00 PM  -> 13
+    # ...
+    # 11:00 PM -> 23
+    
+    def parse_hour(label):
+        # Split by space to get time and AM/PM
+        parts = label.split()
+        time_part = parts[0]
+        ampm = parts[1]
+        
+        hour_str, minute_str = time_part.split(':')
+        hour = int(hour_str)
+        
+        if ampm == 'AM':
+            if hour == 12:
+                return 24
+            else:
+                return hour
+        else: # PM
+            if hour == 12:
+                return 12
+            else:
+                return hour + 12
+                
+    melted['hour'] = melted['time_label'].apply(parse_hour)
+    
+    # 3. Pivot back to wide format
+    # Index: date, Columns: hour, Values: value
+    pivoted = melted.pivot(index='date', columns='hour', values='value')
+    
+    # 4. Reset index to make 'date' a column
+    pivoted = pivoted.reset_index()
+    
+    # 5. Format the date column to 'cst'
+    # Source format: "M/D/YYYY" (e.g., "7/3/2014")
+    # Target format: "DayOfWeek MM/DD/YYYY" (e.g., "Wed 01/01/2014")
+    
+    # Parse the date string
+    pivoted['date_dt'] = pd.to_datetime(pivoted['date'], format='%m/%d/%Y')
+    
+    # Format to target string
+    pivoted['cst'] = pivoted['date_dt'].dt.strftime('%a %m/%d/%Y')
+    
+    # Drop the original date and datetime helper columns
+    pivoted = pivoted.drop(columns=['date', 'date_dt'])
+    
+    # 6. Rename hour columns to "H:00" format
+    # The columns are integers 1 to 24
+    new_col_names = {}
+    for col in pivoted.columns:
+        if col != 'cst':
+            new_col_names[col] = f"{int(col)}:00"
+            
+    pivoted = pivoted.rename(columns=new_col_names)
+    
+    # 7. Ensure column order: 'cst' followed by 1:00 to 24:00
+    # The pivot columns might not be sorted if the source wasn't, but pivot usually sorts.
+    # Let's explicitly order them.
+    
+    ordered_cols = ['cst'] + [f"{h}:00" for h in range(1, 25)]
+    
+    # Select only the columns that exist (in case some hours are missing in source, though unlikely)
+    # The problem implies a complete set.
+    result = pivoted[ordered_cols]
+    
+    # Sort by date if necessary? The target sample is sorted by date.
+    # It's good practice to sort by the date column.
+    # We need to parse 'cst' again or use the original date for sorting.
+    # Let's create a temporary datetime for sorting.
+    sort_df = result.copy()
+    sort_df['sort_key'] = pd.to_datetime(sort_df['cst'], format='%a %m/%d/%Y')
+    result = result.sort_values(by='sort_key').reset_index(drop=True)
+    result = result.drop(columns=['sort_key'])
+    
+    return result
+```

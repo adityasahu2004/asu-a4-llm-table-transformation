@@ -1,0 +1,277 @@
+Operator plan:
+1. Parse the `time` column to extract the hour (0-23) and the month to determine the season.
+2. Define seasons based on months: Winter (Dec, Jan, Feb), Spring (Mar, Apr, May), Summer (Jun, Jul, Aug), Fall (Sep, Oct, Nov). Note: The target only shows Summer, Winter, Spring. I will assume standard meteorological or calendar definitions. Given the sample data covers July 2012 to Jan 2013, and the target has 72 rows (24 hours * 3 seasons), it implies we are aggregating by Season and Hour. The distinct seasons in target are Summer, Winter, Spring. This suggests the input data might only contain these seasons or the transformation filters/labels them. Let's look at the input dates: "2012-07-02" to "2013-01-01". This covers Summer (Jul, Aug, Sep?), Fall, Winter. Wait, the target has "Spring". The input sample starts in July 2012. There is no Spring 2012 or Spring 2013 in the provided sample snippet, but the row count is 17568. 17568 / 4 (hours) = 4392 hours? No, the time granularity is 15 minutes. 17568 * 15 mins = 263,520 mins = 4,392 hours. 4392 / 24 = 183 days. ~6 months. July to Jan is about 6 months.
+   Let's check the season definition.
+   Standard:
+   Winter: Dec, Jan, Feb
+   Spring: Mar, Apr, May
+   Summer: Jun, Jul, Aug
+   Fall: Sep, Oct, Nov
+   
+   The target has 72 rows. 24 hours * 3 seasons. Which 3 seasons? The sample target shows Summer, Winter, Spring.
+   If the input is July 2012 - Jan 2013, it contains Summer (Jul, Aug), Fall (Sep, Oct, Nov), Winter (Dec, Jan). It does NOT contain Spring.
+   However, the target sample *includes* Spring. This implies either:
+   a) The "Spring" in the target sample comes from a different part of the dataset not shown in the source sample snippet, OR
+   b) The season definition is different.
+   
+   Let's look at the distinct values in target: `["Summer", "Winter", "Spring"]`.
+   If the source data only has Jul-Jan, where does Spring come from?
+   Maybe the source data *does* have Spring and the sample snippet is just a small subset of the 17568 rows?
+   17568 rows. If it's 15-min intervals, that's 183 days.
+   If it starts July 2, 2012, 183 days later is Jan 1, 2013.
+   This period is Summer (Jul, Aug, Sep?), Fall, Winter.
+   Is it possible "Spring" is a typo in my understanding or the problem uses a different calendar?
+   Or maybe the source data actually spans a full year or more, and the `first_last_non_null` in the schema description is just for the *sample* block provided?
+   The schema says `source.rows: 17568`. `first_last_non_null: ["2012-07-02...", "2013-01-01..."]`. This strongly suggests the entire source DataFrame only contains data from July 2012 to Jan 2013.
+   If so, there is no Spring data.
+   However, the target *must* be computed from the source.
+   If the target has Spring, and the source doesn't, I cannot produce Spring rows.
+   BUT, looking at the target sample, it has Summer, Winter, Spring.
+   Is it possible the seasons are defined differently? E.g. Heating/Cooling seasons?
+   Or is it possible the `time` column in the full source (not just the sample) extends beyond the `first_last_non_null` shown? The prompt says "Source row count describes a training sample only, not the evaluation input." and "first_last_non_null" is usually from the sample. The `rows` count 17568 is for the *training sample*. The evaluation input might be different.
+   However, I must write a general transformation.
+   If I assume standard meteorological seasons:
+   Jun-Aug: Summer
+   Sep-Nov: Fall
+   Dec-Feb: Winter
+   Mar-May: Spring
+   
+   If the target only has Summer, Winter, Spring, maybe Fall is excluded? Or mapped?
+   Let's look at the columns to aggregate.
+   Source columns:
+   - `net_site_electricity_kwh` -> likely `total`?
+   - `electricity_heating_kwh`, `electricity_cooling_kwh`, `electricity_central_system_heating_kwh`, `electricity_central_system_cooling_kwh`, `electricity_fans_heating_kwh`, `electricity_fans_cooling_kwh`, `electricity_pumps_heating_kwh`, `electricity_central_system_pumps_heating_kwh`, `electricity_central_system_pumps_cooling_kwh` -> likely `hvac`?
+   - `electricity_water_systems_kwh` -> likely `domestic_water_heating`?
+   - `electricity_clothes_washer_kwh`, `electricity_clothes_dryer_kwh`, `electricity_cooking_range_kwh`, `electricity_dishwasher_kwh`, `electricity_refrigerator_kwh` -> likely `major_appliances`?
+   - `electricity_interior_lighting_kwh`, `electricity_exterior_lighting_kwh` -> likely `lighting`?
+   - `electricity_plug_loads_kwh`, `electricity_house_fan_kwh`, `electricity_range_fan_kwh`, `electricity_bath_fan_kwh`, `electricity_ceiling_fan_kwh`, `electricity_pool_heater_kwh`, `electricity_pool_pump_kwh`, `electricity_hot_tub_heater_kwh`, `electricity_hot_tub_pump_kwh` -> likely `miscellaneous_plug_loads`?
+
+   Let's verify the sums.
+   Target `total` for Summer 19: 199,625,333.98
+   Source `net_site_electricity_kwh` is per 15-min interval?
+   If we sum all `net_site_electricity_kwh` for Summer Hour 19, do we get that number?
+   The source values are large (e.g., 826,347 kWh).
+   If there are ~90 days in Summer, and 4 intervals per hour, that's 360 intervals.
+   800,000 * 360 = 288,000,000. The magnitude matches.
+   So `total` is the sum of `net_site_electricity_kwh`.
+
+   Let's define the groups:
+   **HVAC**:
+   `electricity_heating_kwh`
+   `electricity_central_system_heating_kwh`
+   `electricity_cooling_kwh`
+   `electricity_central_system_cooling_kwh`
+   `electricity_fans_heating_kwh`
+   `electricity_fans_cooling_kwh`
+   `electricity_pumps_heating_kwh`
+   `electricity_central_system_pumps_heating_kwh`
+   `electricity_central_system_pumps_cooling_kwh`
+   (Note: `electricity_pumps_cooling_kwh` is always 0.0, so including it doesn't hurt, but it's distinct 1 value 0.0. I'll include it if it makes sense, or exclude. Usually HVAC includes all heating/cooling/fans/pumps related to HVAC.)
+
+   **Domestic Water Heating**:
+   `electricity_water_systems_kwh`
+
+   **Major Appliances**:
+   `electricity_refrigerator_kwh`
+   `electricity_clothes_washer_kwh`
+   `electricity_clothes_dryer_kwh`
+   `electricity_cooking_range_kwh`
+   `electricity_dishwasher_kwh`
+
+   **Lighting**:
+   `electricity_interior_lighting_kwh`
+   `electricity_exterior_lighting_kwh`
+
+   **Miscellaneous Plug Loads**:
+   `electricity_plug_loads_kwh`
+   `electricity_house_fan_kwh`
+   `electricity_range_fan_kwh`
+   `electricity_bath_fan_kwh`
+   `electricity_ceiling_fan_kwh`
+   `electricity_pool_heater_kwh`
+   `electricity_pool_pump_kwh`
+   `electricity_hot_tub_heater_kwh`
+   `electricity_hot_tub_pump_kwh`
+
+   **Total**:
+   `net_site_electricity_kwh`
+
+   **Season Logic**:
+   Since the target has "Spring", and standard calendar months for Spring are Mar, Apr, May.
+   Standard Summer: Jun, Jul, Aug.
+   Standard Winter: Dec, Jan, Feb.
+   
+   I will use standard meteorological seasons.
+   Month 1, 2, 12 -> Winter
+   Month 3, 4, 5 -> Spring
+   Month 6, 7, 8 -> Summer
+   Month 9, 10, 11 -> Fall
+   
+   The target sample only shows Summer, Winter, Spring. If the evaluation data contains Fall, should I output Fall? The target schema `distinct_values` for `season` is `["Summer", "Winter", "Spring"]`. This implies either:
+   1. The evaluation data does not contain Fall months.
+   2. Fall is renamed or excluded.
+   
+   Given "Infer a general transformation", and the target schema explicitly lists only 3 distinct values, it is highly likely that the evaluation data *only* contains Spring, Summer, and Winter months, or that I should filter out Fall. However, usually "general transformation" implies handling all data. If the target schema says distinct values are only those 3, and the source might have Fall, I should probably check if Fall maps to something or if I should just label it "Fall" and the schema description is just from the sample.
+   BUT, the prompt says "Keep target column names exactly...". It doesn't say "Filter rows".
+   However, if I produce "Fall" rows, and the target schema says distinct values are only 3, my output will have 4 distinct values.
+   Let's look at the source sample again. It has Jul, Aug, Sep, Oct, Nov, Dec, Jan.
+   Sep, Oct, Nov are Fall.
+   If I run my logic on the source sample, I will get Fall rows.
+   The target sample *does not* show Fall rows.
+   This suggests I should **exclude** Fall data? Or is "Fall" mapped to something else?
+   Or is the season definition different?
+   
+   Let's check if "Spring" could be Sep-Nov? No, that's Fall.
+   Let's check if "Summer" is Jun-Aug.
+   
+   If I exclude Fall, the row count will be lower.
+   If the target schema says `distinct: 3` and lists them, I will assume the evaluation data will only contain Spring, Summer, Winter, or I should filter out Fall.
+   However, a safer bet in these problems is often that the "distinct values" in the schema description are just from the *sample* provided. The sample target might not have Fall because the sample source didn't have the corresponding aggregation or the sample target was truncated.
+   But wait, the source sample *has* Fall data (Sep, Oct, Nov).
+   If the transformation is "Group by Season and Hour", and the source has Fall, the target *should* have Fall.
+   Why does the target schema say distinct values are only Summer, Winter, Spring?
+   Maybe the season definition is:
+   Cooling Season (Summer)
+   Heating Season (Winter)
+   Shoulder Season (Spring/Fall)?
+   
+   If I look at the target sample, it has "Spring".
+   If I assume standard seasons, and the source has Fall, I will produce Fall.
+   If the evaluator checks for exact schema match, having "Fall" might fail if it expects only 3.
+   However, I cannot arbitrarily drop data unless instructed.
+   
+   Let's look at the `hour` column. It is 0-23? Or 1-24?
+   Target sample: 19, 13, 21, 8, 8, 17, 1, 22, 11, 11, 3, 18.
+   These are integers. 1-23 are visible.
+   Standard pandas `dt.hour` is 0-23.
+   The sample has 1, 3, 8, 11, 13, 17, 18, 19, 21, 22.
+   It doesn't show 0.
+   If I use `dt.hour`, 0 is midnight.
+   Does "Hour 1" mean 00:00-01:00? Or 01:00-02:00?
+   Usually, Hour 1 = 1 AM. Hour 0 = 12 AM.
+   If the target has "1", and the source has "00:00", does it map to 1 or 0?
+   If I look at the source sample: "2012-07-02 00:15:00". Hour is 0.
+   If the target has "1", maybe it's 1-based?
+   Or maybe the target sample just didn't pick a row with Hour 0.
+   I will use `dt.hour` (0-23). If the target expects 1-24, I'd add 1.
+   But 0 is a valid hour.
+   Let's assume 0-23.
+
+   Let's refine the Season logic.
+   If I strictly follow standard seasons:
+   Dec, Jan, Feb -> Winter
+   Mar, Apr, May -> Spring
+   Jun, Jul, Aug -> Summer
+   Sep, Oct, Nov -> Fall
+
+   If the target schema insists on only 3 distinct values, and I produce 4, it might be an issue.
+   However, I will implement standard seasons. If the evaluation data has no Fall, it will work. If it has Fall, and the target schema is just a sample summary, it will also work.
+
+   One detail: `scaled_unit_count` is present. Should I multiply by it?
+   The values in `net_site_electricity_kwh` are ~1,000,000.
+   `scaled_unit_count` is ~3,000,000.
+   If I multiply, the values become ~3,000,000,000,000.
+   The target `total` is ~200,000,000.
+   So `scaled_unit_count` is likely NOT used for scaling the kWh values, or the kWh values are already scaled?
+   Or maybe `net_site_electricity_kwh` is already the total for the site?
+   Given the magnitude match (Sum of ~800k * 360 intervals ~ 288M vs Target 199M), it seems `net_site_electricity_kwh` is used directly.
+
+   Plan:
+   1. Parse `time`.
+   2. Extract `hour`.
+   3. Determine `season` from month.
+   4. Create columns for `hvac`, `domestic_water_heating`, `major_appliances`, `lighting`, `miscellaneous_plug_loads`, `total` by summing the respective source columns.
+   5. Group by `season` and `hour`.
+   6. Sum the aggregated columns.
+   7. Reset index.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse time
+    dt = pd.to_datetime(source['time'])
+    hour = dt.dt.hour
+    month = dt.dt.month
+    
+    # Define seasons
+    # Winter: 12, 1, 2
+    # Spring: 3, 4, 5
+    # Summer: 6, 7, 8
+    # Fall: 9, 10, 11
+    def get_season(m):
+        if m in [12, 1, 2]:
+            return 'Winter'
+        elif m in [3, 4, 5]:
+            return 'Spring'
+        elif m in [6, 7, 8]:
+            return 'Summer'
+        else:
+            return 'Fall'
+            
+    season = month.apply(get_season)
+    
+    # Define component sums
+    hvac_cols = [
+        'electricity_heating_kwh',
+        'electricity_central_system_heating_kwh',
+        'electricity_cooling_kwh',
+        'electricity_central_system_cooling_kwh',
+        'electricity_fans_heating_kwh',
+        'electricity_fans_cooling_kwh',
+        'electricity_pumps_heating_kwh',
+        'electricity_central_system_pumps_heating_kwh',
+        'electricity_central_system_pumps_cooling_kwh',
+        'electricity_pumps_cooling_kwh'
+    ]
+    
+    dwh_col = 'electricity_water_systems_kwh'
+    
+    major_appliances_cols = [
+        'electricity_refrigerator_kwh',
+        'electricity_clothes_washer_kwh',
+        'electricity_clothes_dryer_kwh',
+        'electricity_cooking_range_kwh',
+        'electricity_dishwasher_kwh'
+    ]
+    
+    lighting_cols = [
+        'electricity_interior_lighting_kwh',
+        'electricity_exterior_lighting_kwh'
+    ]
+    
+    misc_plug_cols = [
+        'electricity_plug_loads_kwh',
+        'electricity_house_fan_kwh',
+        'electricity_range_fan_kwh',
+        'electricity_bath_fan_kwh',
+        'electricity_ceiling_fan_kwh',
+        'electricity_pool_heater_kwh',
+        'electricity_pool_pump_kwh',
+        'electricity_hot_tub_heater_kwh',
+        'electricity_hot_tub_pump_kwh'
+    ]
+    
+    total_col = 'net_site_electricity_kwh'
+    
+    # Create a working dataframe
+    df = pd.DataFrame()
+    df['season'] = season
+    df['hour'] = hour
+    
+    df['hvac'] = source[hvac_cols].sum(axis=1)
+    df['domestic_water_heating'] = source[dwh_col]
+    df['major_appliances'] = source[major_appliances_cols].sum(axis=1)
+    df['lighting'] = source[lighting_cols].sum(axis=1)
+    df['miscellaneous_plug_loads'] = source[misc_plug_cols].sum(axis=1)
+    df['total'] = source[total_col]
+    
+    # Group by season and hour, sum the values
+    result = df.groupby(['season', 'hour'], as_index=False).sum()
+    
+    # Ensure column order
+    result = result[['season', 'hour', 'hvac', 'domestic_water_heating', 'major_appliances', 'lighting', 'miscellaneous_plug_loads', 'total']]
+    
+    return result
+```

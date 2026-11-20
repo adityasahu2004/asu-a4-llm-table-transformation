@@ -1,0 +1,45 @@
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date
+    dates = pd.to_datetime(source['Date'])
+    
+    # Create dt_strata: M/D/YYYY
+    # The sample shows "1/1/2014", "7/19/2014", etc.
+    # Using strftime with %m/%d/%Y gives zero-padded months/days.
+    # The sample data "1/1/2014" suggests no zero padding for single digits?
+    # Let's check "12/31/2014". It has two digits.
+    # "1/1/2014" vs "01/01/2014". The sample explicitly shows "1/1/2014".
+    # So we should strip leading zeros.
+    # However, standard strftime %m/%d/%Y produces 01/01/2014.
+    # We can convert to string and strip leading zeros, or use a custom format if possible.
+    # pandas dt.strftime doesn't support non-padded easily in all versions.
+    # Let's use str.replace or apply.
+    # Actually, looking at the sample: "1/1/2014", "7/19/2014", "2/3/2014".
+    # It seems to be MM/DD/YYYY without leading zeros.
+    
+    # Create dow: 0-6 (Mon-Sun)
+    dow = dates.dt.dayofweek
+    
+    # Rename hourly columns
+    out = pd.DataFrame(index=source.index)
+    out['dt_strata'] = dates.dt.strftime('%m/%d/%Y').str.lstrip('0').replace('', '0', regex=False) # This is tricky.
+    # Better approach for date string:
+    # %m/%d/%Y -> 01/01/2014. 
+    # We want 1/1/2014.
+    # We can apply a lambda: lambda x: f"{int(x[:2])}/{int(x[3:5])}/{x[6:]}" if we are sure of format.
+    # Or simply:
+    out['dt_strata'] = dates.apply(lambda d: f"{d.month}/{d.day}/{d.year}")
+    
+    out['dow'] = dow
+    
+    for h in range(1, 25):
+        src_col = f'Hr {h}'
+        tgt_col = f'pct_hourly_{h:02d}00'
+        out[tgt_col] = source[src_col]
+        
+    out['pct_hourly_2500'] = 0
+    
+    # Select and order columns
+    cols = ['dt_strata', 'dow'] + [f'pct_hourly_{h:02d}00' for h in range(1, 26)]
+    return out[cols].reset_index(drop=True)

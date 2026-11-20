@@ -1,0 +1,50 @@
+Operator plan:
+1. Parse the `date` column into datetime objects.
+2. Extract the date part (floor to day) and the hour part.
+3. Pivot the data so that each unique date becomes a row, and the hours (1-24) become columns named "Hour 1" to "Hour 24".
+4. The value for each cell is the `zone_016_cooling_sp`. Since the source has sparse hourly data (one reading per day in the sample, but potentially more in general, though the target implies a single value per hour per day), we assume the source contains one record per hour or we take the available value. Given the target has `nulls` for some hours, it implies not all hours are present for all days in the source. We pivot and fill missing with NaN.
+5. Format the date index back to string "MM/DD/YYYY".
+6. Reset index to make `date` a column.
+
+Note on dtypes: The target shows `int64` for hours 10-21 and `float64` for others. This is likely an artifact of how the data was generated or specific to the sample values (73.0 vs 73). Standard pandas pivot will likely produce float64 for all if there are NaNs, or object if mixed. The prompt says "Preserve NaNs unless...". I will let pandas handle the dtype naturally or cast if necessary, but typically `pivot` results in float64 if there are NaNs. The specific int/float split in the target schema is unusual and likely not strictly enforced by a simple transformation rule other than the values themselves. I will produce the standard pivot result.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date
+    df = source.copy()
+    df['dt'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract date and hour
+    df['date_only'] = df['dt'].dt.normalize()
+    df['hour'] = df['dt'].dt.hour + 1  # 1-based hour
+    
+    # Pivot
+    # Columns: date_only, Index: date_only, Values: zone_016_cooling_sp
+    # We need to group by date_only and hour.
+    # Since the source might have multiple entries or just one, we use pivot_table or pivot.
+    # Pivot assumes unique index/columns. If there are duplicates, pivot_table is safer.
+    
+    pivoted = df.pivot_table(
+        index='date_only',
+        columns='hour',
+        values='zone_016_cooling_sp',
+        aggfunc='first' # Take the first value if duplicates exist
+    ).reset_index()
+    
+    # Rename columns to "Hour 1", "Hour 2", ...
+    pivoted.rename(columns={i: f'Hour {i}' for i in range(1, 25)}, inplace=True)
+    
+    # Format date column
+    pivoted['date'] = pivoted['date_only'].dt.strftime('%m/%d/%Y')
+    
+    # Drop the original date_only column
+    pivoted.drop(columns=['date_only'], inplace=True)
+    
+    # Reorder columns to match target: date, Hour 1, ..., Hour 24
+    cols = ['date'] + [f'Hour {i}' for i in range(1, 25)]
+    pivoted = pivoted[cols]
+    
+    return pivoted
+```

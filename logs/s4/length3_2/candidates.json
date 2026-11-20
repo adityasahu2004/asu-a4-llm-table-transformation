@@ -1,0 +1,72 @@
+[
+  {
+    "index": 0,
+    "finish_reason": "stop",
+    "path": "generated/s4/length3_2/candidates/0.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+      "seconds": 0.7810965000026044,
+      "shape": [
+        523,
+        25
+      ],
+      "fingerprint": "364f93dc53c4454d58cb0b5919af3110eadc9c869f8cb677835112c87f007607"
+    }
+  },
+  {
+    "index": 1,
+    "finish_reason": "stop",
+    "path": "generated/s4/length3_2/candidates/1.py",
+    "execution": {
+      "status": "execution_error",
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\nTraceback (most recent call last):\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py\", line 21, in <module>\n    output = namespace['transform'](source)\n  File \"transform.py\", line 26, in transform\n    pivoted.index = pivoted.index.strftime('%m/%d/%Y')\n                    ^^^^^^^^^^^^^^^^^^^^^^\nAttributeError: 'Index' object has no attribute 'strftime'\n",
+      "seconds": 0.7205100840001251
+    }
+  },
+  {
+    "index": 2,
+    "finish_reason": "stop",
+    "path": "generated/s4/length3_2/candidates/2.py",
+    "execution": {
+      "status": "execution_error",
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\nTraceback (most recent call last):\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py\", line 21, in <module>\n    output = namespace['transform'](source)\n  File \"transform.py\", line 38, in transform\n    pivoted['date'] = pivoted['date_only'].dt.strftime('%m/%d/%Y')\n                      ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/generic.py\", line 6434, in __getattr__\n    return object.__getattribute__(self, name)\n           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/accessor.py\", line 231, in __get__\n    return self._accessor(obj)\n           ~~~~~~~~~~~~~~^^^^^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/indexes/accessors.py\", line 883, in __new__\n    raise AttributeError(\"Can only use .dt accessor with datetimelike values\")\nAttributeError: Can only use .dt accessor with datetimelike values. Did you mean: 'at'?\n",
+      "seconds": 0.7262719160062261
+    }
+  },
+  {
+    "index": 3,
+    "finish_reason": "stop",
+    "path": "generated/s4/length3_2/candidates/3.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+      "seconds": 0.9844444159971317,
+      "shape": [
+        523,
+        25
+      ],
+      "fingerprint": "124ef262f3dd9debd977475e89f0638c4e65fcc6f44209de0bccd6610ba71e12"
+    }
+  },
+  {
+    "index": 4,
+    "finish_reason": "stop",
+    "path": "generated/s4/length3_2/candidates/4.py",
+    "execution": {
+      "status": "execution_error",
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\nTraceback (most recent call last):\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py\", line 21, in <module>\n    output = namespace['transform'](source)\n  File \"transform.py\", line 8, in transform\n    source['parsed_dt'] = pd.to_datetime(source['date'], format='%m/%d/%Y %I:%M %p')\n                          ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/tools/datetimes.py\", line 1239, in to_datetime\n    values = convert_listlike(arg._values, format)\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/tools/datetimes.py\", line 484, in _convert_listlike_datetimes\n    return _array_strptime_with_fallback(arg, name, utc, format, exact, errors)\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/tools/datetimes.py\", line 518, in _array_strptime_with_fallback\n    result, tz_out = array_strptime(arg, fmt, exact=exact, errors=errors, utc=utc)\n                     ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"pandas/_libs/tslibs/strptime.pyx\", line 644, in pandas._libs.tslibs.strptime.array_strptime\n  File \"pandas/_libs/tslibs/strptime.pyx\", line 561, in pandas._libs.tslibs.strptime.array_strptime\n  File \"pandas/_libs/tslibs/strptime.pyx\", line 701, in pandas._libs.tslibs.strptime._parse_with_format\nValueError: time data \"7/28/2019 4:50\" doesn't match format \"%m/%d/%Y %I:%M %p\". You might want to try:\n    - passing `format` if your strings have a consistent format;\n    - passing `format='ISO8601'` if your strings are all ISO8601 but not necessarily in exactly the same format;\n    - passing `format='mixed'`, and the format will be inferred for each element individually. You might want to use `dayfirst` alongside this.\n",
+      "seconds": 0.658743375002814
+    }
+  }
+]

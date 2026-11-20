@@ -1,0 +1,19 @@
+# Credentials and local environments
+.env
+.env.*
+.venv/
+venv/
+*.pem
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.cache/
+.DS_Store
+# Course benchmark and local scratch data
+*.csv
+!/summary.csv
+!/length_summary.csv
+/benchmarks/
+/length*/
+/tmp/
+/prior_submission_v1/

@@ -1,0 +1,39 @@
+Operator plan:
+1. Parse the `CST` column (format `%a %m/%d/%Y`) into datetime objects.
+2. Create `dt_strata` by formatting the parsed datetime as `%m/%d/%Y`.
+3. Create `dow` by extracting the ISO day of the week (Monday=1 ... Sunday=7).
+4. Rename the 24 hourly columns (`1:00` through `23:00` and `24:00:00`) to `pct_hourly_0100` through `pct_hourly_2400`.
+5. Add a new column `pct_hourly_2500` with constant value `0`.
+6. Return the resulting DataFrame with the specified column order.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date
+    dt = pd.to_datetime(source['CST'], format='%a %m/%d/%Y')
+    
+    # Build output dataframe
+    out = pd.DataFrame(index=source.index)
+    
+    # Format date
+    out['dt_strata'] = dt.dt.strftime('%m/%d/%Y')
+    
+    # Day of week (ISO: Mon=1, Sun=7)
+    out['dow'] = dt.dt.dayofweek + 1
+    
+    # Map hourly columns
+    # Source cols: '1:00' ... '23:00', '24:00:00'
+    # Target cols: 'pct_hourly_0100' ... 'pct_hourly_2400'
+    for h in range(1, 25):
+        src_col = f'{h}:00' if h < 24 else '24:00:00'
+        tgt_col = f'pct_hourly_{h:02d}00'
+        out[tgt_col] = source[src_col]
+        
+    # Add constant 25th hour
+    out['pct_hourly_2500'] = 0
+    
+    # Ensure correct column order
+    cols = ['dt_strata', 'dow'] + [f'pct_hourly_{h:02d}00' for h in range(1, 26)]
+    return out[cols].reset_index(drop=True)
+```

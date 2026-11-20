@@ -1,0 +1,97 @@
+Operator plan:
+1. Parse the `date` column to extract the month.
+2. Pivot the data so that rows represent hours (1-24) and columns represent months.
+3. Since the target schema has specific month names and the source data only covers July-Dec 2015, but the target sample shows data for Jan-Jul and NaN for Aug-Dec, this implies a pivot where we aggregate by Hour and Month. However, looking closely at the target sample, it contains hours like 1, 11, 13, 15, 17, 19, 20, 22, 24, 4, 6, 9. This is not a full 1-24 sequence in the sample, but the target schema says 24 rows. The sample data for months Jan-Jul has values, while Aug-Dec are null.
+4. Wait, the source data is from 2015 (July to Dec). The target data has values for Jan-July and NaN for Aug-Dec. This suggests the target is *not* derived directly from the provided source rows via a simple pivot of the visible data, or there is a mismatch in the "training sample" note.
+5. Let's re-read carefully: "Source row count describes a training sample only, not the evaluation input." The schema/sample block is for *inference*. The target schema has 24 rows. The target sample has 12 rows shown.
+6. Let's look at the target values. `hour` 1 has `january` 0.0002398657. Source `Hour 1` is always 0.0002398657.
+7. The target columns are `hour`, `january`...`december`.
+8. The source has `date` and `Hour 1`...`Hour 24`.
+9. It seems we need to pivot the source dataframe. Rows become hours, columns become months.
+10. But the source data is only July-Dec 2015. The target has Jan-July data. This is a contradiction if we assume the target is computed *only* from the source provided in the sample.
+11. However, often in these problems, the "source" schema/sample is just an example of the *structure*, and the actual transformation logic must be general. If the evaluation input contains data for Jan-Dec, the transformation should work.
+12. The transformation is:
+    - Parse `date` to get `month` (1-12).
+    - Melt the `Hour 1`...`Hour 24` columns into a long format: `hour` (1-24) and `value`.
+    - Pivot: Index=`hour`, Columns=`month`, Values=`value`.
+    - Rename month columns to lowercase month names.
+    - Fill missing months with NaN (or 0? Target has nulls).
+    - Sort by hour.
+    - Ensure `hour` is integer.
+
+Let's verify the "nulls" in target. Aug-Dec are null. This happens if there is no data for those months in the input. If the input has Jan-Jul data, Jan-Jul will have values. If the input is July-Dec, July-Dec will have values. The target sample showing Jan-Jul values and Aug-Dec nulls implies the *evaluation* input likely contains Jan-Jul data (or the sample target is from a different context). But I must write code that works for *any* input.
+
+Steps:
+1. Parse `date` to datetime. Extract `month` number.
+2. Melt columns `Hour 1` to `Hour 24`. The column names are "Hour 1", etc. Extract hour number.
+3. Pivot table: index=`hour`, columns=`month`, values=`value`.
+4. Rename columns: 1->'january', 2->'february', ... 12->'december'.
+5. Reindex columns to ensure all 12 months are present (with NaN if missing).
+6. Reset index to make `hour` a column.
+7. Sort by `hour`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date to extract month
+    source = source.copy()
+    source['dt'] = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    source['month'] = source['dt'].dt.month
+    
+    # Melt the hour columns
+    # Columns are "Hour 1", "Hour 2", ..., "Hour 24"
+    hour_cols = [c for c in source.columns if c.startswith('Hour ')]
+    
+    melted = source.melt(
+        id_vars=['month'], 
+        value_vars=hour_cols, 
+        var_name='hour_str', 
+        value_name='value'
+    )
+    
+    # Extract hour number from "Hour X"
+    melted['hour'] = melted['hour_str'].str.replace('Hour ', '').astype(int)
+    
+    # Pivot to get hours as rows and months as columns
+    # If multiple entries for same hour/month, mean is used by default, but source seems unique per day.
+    # The source has one row per day. Different days might have same hour/month.
+    # The target values look like single values, not averages? 
+    # Let's check source: Hour 1 is constant 0.0002398657. 
+    # Hour 6 varies. 
+    # If there are multiple days in the same month, how are they aggregated?
+    # The target has 24 rows (one per hour). The source has 182 rows (days).
+    # If we pivot, we might have conflicts. 
+    # Looking at the target sample, the values are specific floats.
+    # Perhaps the source in the evaluation has only one day per month? 
+    # Or perhaps we just take the mean? Or the first?
+    # Given the deterministic nature, and "distinct" values in target, let's assume aggregation is needed.
+    # However, usually these puzzles imply a direct mapping or the input has unique keys.
+    # If the input has multiple days per month, we need an aggregation. 
+    # Let's try mean.
+    
+    pivoted = melted.pivot_table(index='hour', columns='month', values='value', aggfunc='mean')
+    
+    # Rename columns to month names
+    month_names = {
+        1: 'january', 2: 'february', 3: 'march', 4: 'april', 5: 'may', 6: 'june',
+        7: 'july', 8: 'august', 9: 'september', 10: 'october', 11: 'november', 12: 'december'
+    }
+    pivoted = pivoted.rename(columns=month_names)
+    
+    # Ensure all 12 month columns exist
+    expected_cols = [month_names[i] for i in range(1, 13)]
+    pivoted = pivoted.reindex(columns=expected_cols)
+    
+    # Reset index to get 'hour' as a column
+    result = pivoted.reset_index()
+    
+    # Sort by hour
+    result = result.sort_values('hour').reset_index(drop=True)
+    
+    # Ensure hour is int
+    result['hour'] = result['hour'].astype(int)
+    
+    return result
+```

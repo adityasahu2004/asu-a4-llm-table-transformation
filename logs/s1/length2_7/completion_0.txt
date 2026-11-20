@@ -1,0 +1,118 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `Date` column from string format `"Ddd MM/DD/YYYY"` (e.g., "Thu 10/01/2009") to pandas datetime objects.
+2.  **Generate `dt_strata`**: Format the parsed dates into the target string format `"MM/DD/YY"` (e.g., "01/01/03"). Note that the target sample shows dates like "01/01/03" corresponding to the start of the dataset, implying a standard MM/DD/YY format.
+3.  **Generate `dow`**: Extract the day of the week from the parsed dates. The target values are integers 1-7. Based on the sample data:
+    *   Source "Thu 10/01/2009" (Thursday) -> Target `dow` is not explicitly shown for this specific row in the target sample (target sample starts with different dates), but looking at the target sample:
+        *   "01/01/03" is a Wednesday. Target `dow` is 3.
+        *   "08/13/03" is a Wednesday. Target `dow` is 3.
+        *   "03/24/04" is a Wednesday. Target `dow` is 3.
+        *   It appears `dow` maps Monday=1, Tuesday=2, ..., Sunday=7. Standard `dt.weekday()` returns Mon=0...Sun=6. So we add 1.
+4.  **Transform Hourly Columns**:
+    *   Identify source columns representing hours: "1:00" through "24:00:00".
+    *   Rename these columns to the target format: `pct_hourly_HHMM`.
+        *   "1:00" -> `pct_hourly_0100`
+        *   "2:00" -> `pct_hourly_0200`
+        *   ...
+        *   "10:00" -> `pct_hourly_1000`
+        *   ...
+        *   "24:00:00" -> `pct_hourly_2400`
+    *   The values in these columns appear to be copied directly (no scaling or percentage calculation evident from the sample values, e.g., source 1.153 becomes target 2.188? Wait. Let's look closer).
+    *   **Re-evaluating Value Transformation**:
+        *   Source Row 1: Date "Thu 10/01/2009", 1:00 value = 1.153.
+        *   Target Row 1: Date "01/01/03", 1:00 value = 2.188.
+        *   The rows are **not** aligned 1-to-1 by index in the sample display because the source sample shows specific dates (2009-2016) while the target sample shows different dates (2003-2009). The problem statement says "Source row count describes a training sample only". The transformation must be general.
+        *   Let's check if the values are just renamed or transformed.
+        *   Source "Thu 10/01/2009" is a Thursday.
+        *   Target "01/01/03" is a Wednesday.
+        *   The target sample data values (e.g., 2.188) do not appear in the source sample data for the same relative position.
+        *   However, usually in these tasks, unless there is a clear mathematical relationship (like sum, mean, ratio) or a lookup, the values are often just passed through or renamed.
+        *   Let's look at the column names again. Source: `1:00`, `2:00`... Target: `pct_hourly_0100`, `pct_hourly_0200`...
+        *   Is there a calculation? "pct" suggests percentage. But the values are floats like 1.153, 2.188. They don't look like percentages (0-100) or proportions (0-1). They look like raw load factors or similar metrics.
+        *   Let's assume the values are **preserved** as-is, and the transformation is primarily structural (renaming columns, deriving date features). The discrepancy in sample values is due to the samples being from different parts of the dataset (Source sample is 2009-2016, Target sample is 2003-2009). The transformation logic must hold for any row.
+        *   Therefore: Copy values from source hourly columns to target hourly columns.
+5.  **Add `pct_hourly_2500`**: The target has a column `pct_hourly_2500` which is all nulls. We must add this column filled with NaN.
+6.  **Select and Order Columns**: Construct the final DataFrame with columns in the exact order specified by the target schema.
+
+### Assumptions
+*   The `Date` format is consistently `"Ddd MM/DD/YYYY"`.
+*   `dow` is 1-indexed (Monday=1, Sunday=7).
+*   The numeric values in the hourly columns are passed through unchanged.
+*   The `Segment` column is dropped.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse the Date column
+    # Format: "Thu 10/01/2009" -> "%a %m/%d/%Y"
+    source['Date'] = pd.to_datetime(source['Date'], format="%a %m/%d/%Y")
+    
+    # 2. Create dt_strata: "MM/DD/YY"
+    # Example: 2009-10-01 -> "10/01/09"
+    # Note: The target sample shows "01/01/03" for a date that is likely 2003-01-01.
+    # We format as MM/DD/YY.
+    dt_strata = source['Date'].dt.strftime("%m/%d/%y")
+    
+    # 3. Create dow: 1=Monday, ..., 7=Sunday
+    # pandas weekday: 0=Monday, ..., 6=Sunday
+    dow = source['Date'].dt.weekday + 1
+    
+    # 4. Transform hourly columns
+    # Source columns: "1:00", "2:00", ..., "23:00", "24:00:00"
+    # Target columns: "pct_hourly_0100", ..., "pct_hourly_2400"
+    
+    # Define mapping from source hour string to target column name
+    # We need to handle 1-9 (single digit) and 10-24 (double digit)
+    # Source "1:00" -> "01" -> "pct_hourly_0100"
+    # Source "10:00" -> "10" -> "pct_hourly_1000"
+    # Source "24:00:00" -> "24" -> "pct_hourly_2400"
+    
+    hourly_cols = [f"{h}:00" if h < 10 else f"{h}:00" for h in range(1, 25)]
+    # Adjust for the specific source column names
+    # 1-9 are "1:00" to "9:00"
+    # 10-23 are "10:00" to "23:00"
+    # 24 is "24:00:00"
+    
+    source_hourly_cols = []
+    for h in range(1, 24):
+        source_hourly_cols.append(f"{h}:00")
+    source_hourly_cols.append("24:00:00")
+    
+    target_hourly_cols = []
+    for h in range(1, 25):
+        target_hourly_cols.append(f"pct_hourly_{h:02d}00")
+        
+    # Create a new dataframe for the hourly data
+    # Ensure we select columns that exist in source
+    existing_source_cols = [c for c in source_hourly_cols if c in source.columns]
+    
+    # Map values
+    hourly_data = source[existing_source_cols].copy()
+    hourly_data.columns = target_hourly_cols[:len(existing_source_cols)]
+    
+    # If any source columns are missing (unlikely based on schema), fill with NaN
+    # But schema says all exist.
+    
+    # 5. Construct final DataFrame
+    result = pd.DataFrame()
+    result['dt_strata'] = dt_strata
+    result['dow'] = dow
+    
+    # Add hourly columns
+    for col in target_hourly_cols:
+        if col in hourly_data.columns:
+            result[col] = hourly_data[col]
+        else:
+            result[col] = np.nan
+            
+    # Add the all-null column pct_hourly_2500
+    result['pct_hourly_2500'] = np.nan
+    
+    # Ensure column order matches target
+    target_columns = ['dt_strata', 'dow'] + target_hourly_cols + ['pct_hourly_2500']
+    result = result[target_columns]
+    
+    return result
+```

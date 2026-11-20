@@ -1,0 +1,131 @@
+**Operator Plan:**
+1.  **Filter/Select**: The target row count (1825) matches the source row count, but the distinct count for `date` in the target (365) matches the distinct count for `Date` in the source. The target values differ significantly from the source values (e.g., source `Hr 1` for the first row is ~0.7, target `value1` is ~2.0). However, looking at the sample data, the target `date` column corresponds to the source `Date` column but formatted as ISO 8601 (`YYYY-MM-DD 00:00:00`).
+2.  **Date Transformation**: Parse the source `Date` column (format `m/d/yyyy`) into a datetime object and format it as `%Y-%m-%d 00:00:00`.
+3.  **Column Renaming/Selection**: The target has columns `value1` through `value24`. The source has `Hr 1` through `Hr 24`. The mapping is direct: `Hr N` -> `valueN`.
+4.  **Value Transformation**: The target values are not identical to the source values. Let's look closer.
+    *   Source Row 1 (`1/1/2014`, `R2`): `Hr 1` = 0.71934. Target `value1` = 2.07767.
+    *   Source Row 4 (`5/13/2014`, `R3`): `Hr 1` = 0.49201. Target `value1` = 93.10463.
+    *   Source Row 6 (`4/10/2014`, `R6`): `Hr 1` = 0.86589. Target `value1` = 511.49522.
+    *   Source Row 8 (`3/7/2014`, `S1`): `Hr 1` = 0.50804. Target `value1` = 9.8209.
+    *   Source Row 10 (`2/2/2014`, `S2`): `Hr 1` = 67.21641. Target `value1` = 0.53814.
+
+    There seems to be a specific transformation based on `Rate` or `Rate Code`.
+    Let's check the multipliers:
+    *   R2 (30/37/38): 2.07767 / 0.71934 ≈ 2.888.
+    *   R3 (42/86): 93.10463 / 0.49201 ≈ 189.23.
+    *   R6 (39): 511.49522 / 0.86589 ≈ 590.7.
+    *   S1 (79/81/82): 9.8209 / 0.50804 ≈ 19.33.
+    *   S2 (82): 0.53814 / 67.21641 ≈ 0.008.
+
+    Wait, the target `date` distinct count is 365. The source `Date` distinct count is 365. The source has 5 rates. 365 * 5 = 1825. So every row is kept.
+    
+    Let's re-examine the values.
+    Source `Hr 1` for `R2` on `1/1/2014` is 0.71934. Target `value1` is 2.07767.
+    Source `Hr 1` for `R3` on `5/13/2014` is 0.49201. Target `value1` is 93.10463.
+    
+    Is it possible the target values are just renamed and the sample data provided in the prompt for the target is *not* derived from the source sample rows directly in a simple arithmetic way, or implies a lookup table not present?
+    
+    Actually, let's look at the "distinct" counts.
+    Source `Hr 1` distinct: 1107. Target `value1` distinct: 1823.
+    If it were a simple rename, distinct counts would be similar (modulo NaNs). The fact that distinct counts increased suggests the values are changing.
+    
+    However, usually in these tasks, if there's no obvious mathematical relationship provided in the schema, and the column names change from `Hr N` to `value N`, it might just be a rename if the data *were* consistent. But the data is clearly different.
+    
+    Let's look at the `Rate Code` and `Rate` again.
+    Maybe the target values are from a different source or require an external factor? The prompt says "Compute the result only from the source DataFrame."
+    
+    Let's look at the relationship between `Company`, `Rate`, `Rate Code` and the values.
+    Perhaps the values in the target are `Source Value * Factor`?
+    
+    Let's check `S2` (Rate Code 82).
+    Source `Hr 1`: 67.21641. Target `value1`: 0.53814.
+    Ratio: 0.008006.
+    
+    Let's check `S1` (Rate Code 79/81/82).
+    Source `Hr 1`: 0.50804. Target `value1`: 9.8209.
+    Ratio: 19.3309.
+    
+    Let's check `R6` (Rate Code 39).
+    Source `Hr 1`: 0.86589. Target `value1`: 511.49522.
+    Ratio: 590.71.
+    
+    Let's check `R3` (Rate Code 42/86).
+    Source `Hr 1`: 0.49201. Target `value1`: 93.10463.
+    Ratio: 189.23.
+    
+    Let's check `R2` (Rate Code 30/37/38).
+    Source `Hr 1`: 0.71934. Target `value1`: 2.07767.
+    Ratio: 2.888.
+
+    These ratios look like specific multipliers associated with the Rate/RateCode.
+    However, without a mapping table provided in the source or schema, inferring exact floating point multipliers is risky and likely not the intended "general transformation" if they aren't constants.
+    
+    **Alternative Hypothesis:**
+    Is it possible the target sample data provided in the JSON is *not* the result of transforming the *specific source sample rows* provided, but rather the target schema/sample is just an example of what the output *looks like*? The note says "Source row count describes a training sample only".
+    
+    But the prompt says "Infer the transformation from this schema/sample block". Usually, the sample rows in `source` and `target` correspond to the same logical entities.
+    
+    Let's look at the `Date` in the target sample.
+    Target Row 1: `2014-01-01 00:00:00`. Source Row 1: `1/1/2014`. Match.
+    Target Row 2: `2014-06-15 00:00:00`. Source Row 2: `6/15/2014`. Match.
+    Target Row 3: `2014-11-28 00:00:00`. Source Row 3: `11/28/2014`. Match.
+    Target Row 4: `2014-05-13 00:00:00`. Source Row 4: `5/13/2014`. Match.
+    
+    The rows are in the same order. The values are different.
+    
+    If I cannot infer the multipliers from the data itself (as they are not present in the columns), I must assume there is a standard conversion or I am missing a column operation.
+    
+    Wait, look at `S2` source values: ~67. Target: ~0.5.
+    Look at `R6` source values: ~0.8. Target: ~511.
+    
+    Is it possible the columns are permuted? No, `Hr 1` is the first value column in both.
+    
+    Let's reconsider the "distinct" values.
+    Source `Hr 1` distinct: 1107.
+    Target `value1` distinct: 1823.
+    
+    If the transformation is just a rename, the distinct counts should be identical (unless NaNs are handled differently, but source has 0 nulls for Hr 1).
+    
+    There is no other data in the source to derive these new values. This implies either:
+    1.  The multipliers are implicit/standard (unlikely for a general coding task).
+    2.  The target sample data is *not* derived from the source sample data via a simple deterministic function visible here, but the *structure* transformation is what's required.
+    3.  I am expected to perform a rename and date format, and the value discrepancy is due to the target sample being from a different "evaluation" set or the prompt implies a "black box" transformation that I should approximate by structure.
+    
+    However, in previous similar tasks, if the values change drastically without an obvious formula, it's often a **rename** and **date format** change, and the value differences in the sample might be illustrative of a different dataset version or the "target" sample is just showing the *schema* (column names/types) and *format* (date string), not necessarily the exact values for those specific rows if the values depend on external context not shown.
+    
+    BUT, the prompt says "Compute the result only from the source DataFrame."
+    
+    Let's look at the `Rate Code` column.
+    R2: 30/37/38
+    R3: 42/86
+    R6: 39
+    S1: 79/81/82
+    S2: 82
+    
+    If I simply rename the columns and format the date, I satisfy the schema requirements (`date` string, `value1`-`value24` floats). The values will be wrong compared to the target sample, but I cannot generate those values from the source.
+    
+    **Decision:** The most robust deterministic transformation inferable from the schema is:
+    1.  Parse `Date` to datetime.
+    2.  Format `Date` to `YYYY-MM-DD 00:00:00` and name it `date`.
+    3.  Select columns `Hr 1` to `Hr 24`.
+    4.  Rename them to `value1` to `value24`.
+    5.  Drop other columns.
+
+    This matches the target column names, types, and row count. The value discrepancy is likely due to the target sample being illustrative or relying on hidden logic not present in the source schema. Given the constraints, structural transformation is the only valid path.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column and format it as required
+    # Source format is m/d/yyyy (e.g., 1/1/2014)
+    # Target format is YYYY-MM-DD 00:00:00
+    out = pd.DataFrame()
+    out['date'] = pd.to_datetime(source['Date'], format='%m/%d/%Y').dt.strftime('%Y-%m-%d 00:00:00')
+    
+    # Map Hr 1..24 to value1..value24
+    for i in range(1, 25):
+        out[f'value{i}'] = source[f'Hr {i}']
+        
+    return out
+```

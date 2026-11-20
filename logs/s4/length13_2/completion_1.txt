@@ -1,0 +1,232 @@
+Operator plan:
+1. Parse `local_15min` into a datetime object.
+2. Format the datetime as `YYYY-MM-DD HH:MM:SS` for the `datetime` column.
+3. Define categories for energy end-uses based on the source column names:
+    - `hvac`: air1, air2, air3, airwindowunit1, furnace1, furnace2, heater1, heater2, heater3, housefan1, venthood1.
+    - `domestic_water_heating`: waterheater1, waterheater2.
+    - `major_appliances`: refrigerator1, refrigerator2, freezer1, icemaker1, dishwasher1, microwave1, oven1, oven2, clotheswasher1, drye1, dryg1, clotheswasher_dryg1, disposal1.
+    - `lighting`: lights_plugs1, lights_plugs2, lights_plugs3, lights_plugs4, lights_plugs5, lights_plugs6, outsidelights_plugs1, outsidelights_plugs2, poollight1.
+    - `miscellaneous_plug_loads`: car1, car2, jacuzzi1, pool1, pool2, poolpump1, sprinkler1, security1, shed1, winecooler1, aquarium1, battery1, circpump1, sewerump1, sumppump1, wellpump1, pump1, solar, solar2, grid. (Note: The target has 5 specific aggregation columns plus a dummy total. The mapping of specific source columns to these 5 categories is inferred from standard energy disaggregation schemas or by observing which columns sum up to the target values if sample data was fully aligned. However, looking at the distinct counts and the nature of the problem, it's a specific grouping. Let's look at the remaining columns.
+    
+    Actually, let's look at the target columns again: `hvac`, `domestic_water_heating`, `major_appliances`, `lighting`, `miscellaneous_plug_loads`.
+    
+    Standard REDD (Residential Energy Disaggregation Data) or similar dataset mappings usually group:
+    - **HVAC**: `air1_sum`, `air2_sum`, `air3_sum`, `airwindowunit1_sum`, `furnace1_sum`, `furnace2_sum`, `heater1_sum`, `heater2_sum`, `heater3_sum`, `housefan1_sum`, `venthood1_sum`.
+    - **Domestic Water Heating**: `waterheater1_sum`, `waterheater2_sum`.
+    - **Major Appliances**: `refrigerator1_sum`, `refrigerator2_sum`, `freezer1_sum`, `icemaker1_sum`, `dishwasher1_sum`, `microwave1_sum`, `oven1_sum`, `oven2_sum`, `clotheswasher1_sum`, `drye1_sum`, `dryg1_sum`, `clotheswasher_dryg1_sum`, `disposal1_sum`.
+    - **Lighting**: `lights_plugs1_sum`, `lights_plugs2_sum`, `lights_plugs3_sum`, `lights_plugs4_sum`, `lights_plugs5_sum`, `lights_plugs6_sum`, `outsidelights_plugs1_sum`, `outsidelights_plugs2_sum`, `poollight1_sum`.
+    - **Miscellaneous Plug Loads**: `car1_sum`, `car2_sum`, `jacuzzi1_sum`, `pool1_sum`, `pool2_sum`, `poolpump1_sum`, `sprinkler1_sum`, `security1_sum`, `shed1_sum`, `winecooler1_sum`, `aquarium1_sum`, `battery1_sum`, `circpump1_sum`, `sewerpump1_sum`, `sumppump1_sum`, `wellpump1_sum`, `pump1_sum`, `solar_sum`, `solar2_sum`, `grid_sum`.
+    
+    Wait, `grid_sum` and `solar_sum` are often total meter readings. `miscellaneous_plug_loads` usually includes electronics, entertainment, etc. The columns `kitchen1`, `kitchen2`, `kitchenapp1`, `kitchenapp2`, `livingroom1`, `livingroom2`, `bedroom1`...`bedroom5`, `bathroom1`, `bathroom2`, `diningroom1`, `diningroom2`, `office1`, `utilityroom1`, `garage1`, `garage2` are also present.
+    
+    Let's re-evaluate the grouping based on common sense for these specific column names found in datasets like the "UK-DALE" or "REDD" or similar. The column names look like they come from a specific dataset (possibly the "Smart* Meter" or similar).
+    
+    Let's look at the sample data to reverse engineer the sums.
+    Row 1: `local_15min` "12/5/2015 17:45". Target row 12 is "2015-12-05 17:30:00" with values: `hvac`=29.045, `dwh`=8.81, `maj`=90.921, `lit`=24.9, `misc`=33.824.
+    
+    Source Row 1 (Index 0 in sample): "12/5/2015 17:45".
+    Let's check the sums for this row.
+    HVAC candidates:
+    air1(6.007) + air2(1.327) + air3(0.607) + airwindow(0.0) + furnace1(20.258) + furnace2(7.412) + heater1(0.81) + heater2(null->0) + heater3(null->0) + housefan(0.0) + venthood(0.746).
+    Sum = 6.007+1.327+0.607+0+20.258+7.412+0.81+0+0+0+0.746 = 37.167. This does not match 29.045.
+    
+    Let's try a different subset. Maybe `furnace` and `heater` are separate? Or `air` is separate?
+    
+    Let's look at Row 3 in sample: "8/22/2016 14:00".
+    Target doesn't have this exact date in the small sample, but let's look at the last row of target sample: "2015-12-05 17:30:00".
+    The source sample has "12/5/2015 17:45". The target sample has "2015-12-05 17:30:00". These are different times.
+    
+    However, the note says "Source row count describes a training sample only". The target sample is likely from the same dataset but potentially different rows or aggregated.
+    
+    Let's look at the structure. The target has `total` = 0. This is a dummy column.
+    
+    Let's try to infer the groups from the names again.
+    
+    **HVAC**: `air1_sum`, `air2_sum`, `air3_sum`, `airwindowunit1_sum`, `furnace1_sum`, `furnace2_sum`, `heater1_sum`, `heater2_sum`, `heater3_sum`, `housefan1_sum`, `venthood1_sum`.
+    
+    **Domestic Water Heating**: `waterheater1_sum`, `waterheater2_sum`.
+    
+    **Major Appliances**: `refrigerator1_sum`, `refrigerator2_sum`, `freezer1_sum`, `icemaker1_sum`, `dishwasher1_sum`, `microwave1_sum`, `oven1_sum`, `oven2_sum`, `clotheswasher1_sum`, `drye1_sum`, `dryg1_sum`, `clotheswasher_dryg1_sum`, `disposal1_sum`.
+    
+    **Lighting**: `lights_plugs1_sum`, `lights_plugs2_sum`, `lights_plugs3_sum`, `lights_plugs4_sum`, `lights_plugs5_sum`, `lights_plugs6_sum`, `outsidelights_plugs1_sum`, `outsidelights_plugs2_sum`, `poollight1_sum`.
+    
+    **Miscellaneous Plug Loads**: This is the catch-all. It likely includes:
+    `car1_sum`, `car2_sum`, `jacuzzi1_sum`, `pool1_sum`, `pool2_sum`, `poolpump1_sum`, `sprinkler1_sum`, `security1_sum`, `shed1_sum`, `winecooler1_sum`, `aquarium1_sum`, `battery1_sum`, `circpump1_sum`, `sewerpump1_sum`, `sumppump1_sum`, `wellpump1_sum`, `pump1_sum`.
+    
+    What about `kitchen*`, `livingroom*`, `bedroom*`, `bathroom*`, `diningroom*`, `office*`, `utilityroom*`, `garage*`?
+    And `solar_sum`, `solar2_sum`, `grid_sum`?
+    
+    Usually, `grid` is the total meter. `solar` is generation.
+    
+    If the target columns are `hvac`, `domestic_water_heating`, `major_appliances`, `lighting`, `miscellaneous_plug_loads`, these 5 categories often sum up to the total load (excluding solar/grid).
+    
+    Let's check if the remaining columns (`kitchen1`, `kitchen2`, etc.) are part of `miscellaneous_plug_loads` or if they map to `lighting` or `major_appliances`.
+    `kitchenapp1`, `kitchenapp2` are appliances.
+    `kitchen1`, `kitchen2` might be lighting/plugs.
+    
+    Given the ambiguity and the strict instruction "Infer a general transformation", and observing that `total` is 0, it's possible the task is simply to rename and sum specific known groups.
+    
+    Let's look at the distinct values of `total` in target: `[0]`.
+    
+    Let's assume the standard grouping for this specific dataset (which appears to be the **Smart* Meter** dataset or similar from the **OpenEI** repository).
+    
+    In the **Smart* Meter** dataset documentation or similar REDD datasets:
+    
+    **HVAC**:
+    - air1, air2, air3, airwindowunit1
+    - furnace1, furnace2
+    - heater1, heater2, heater3
+    - housefan1
+    - venthood1 (sometimes here, sometimes appliances)
+    
+    **Domestic Water Heating**:
+    - waterheater1, waterheater2
+    
+    **Major Appliances**:
+    - refrigerator1, refrigerator2
+    - freezer1
+    - icemaker1
+    - dishwasher1
+    - microwave1
+    - oven1, oven2
+    - clotheswasher1
+    - drye1, dryg1, clotheswasher_dryg1
+    - disposal1
+    
+    **Lighting**:
+    - lights_plugs1, lights_plugs2, lights_plugs3, lights_plugs4, lights_plugs5, lights_plugs6
+    - outsidelights_plugs1, outsidelights_plugs2
+    - poollight1
+    
+    **Miscellaneous Plug Loads**:
+    - car1, car2
+    - jacuzzi1
+    - pool1, pool2, poolpump1
+    - sprinkler1
+    - security1
+    - shed1
+    - winecooler1
+    - aquarium1
+    - battery1
+    - circpump1
+    - sewerump1
+    - sumppump1
+    - wellpump1
+    - pump1
+    - **kitchen1, kitchen2** (often plugs)
+    - **kitchenapp1, kitchenapp2** (often appliances, but if not in major, then misc?)
+    - **livingroom1, livingroom2**
+    - **bedroom1..5**
+    - **bathroom1, bathroom2**
+    - **diningroom1, diningroom2**
+    - **office1**
+    - **utilityroom1**
+    - **garage1, garage2**
+    
+    Wait, `kitchenapp` and `disposal` are usually appliances. `oven`, `microwave`, `dishwasher`, `refrigerator`, `freezer`, `icemaker`, `washer`, `dryer` are major appliances.
+    
+    If `kitchenapp1/2` are not in "Major", where are they?
+    
+    Let's look at the sample target values again.
+    Row 3 of Target Sample: "2012-09-17 19:15:00"
+    hvac: 11.237
+    dwh: 0.004
+    maj: 9.798
+    lit: 4.211
+    misc: 12.851
+    
+    I don't have the source row for "2012-09-17 19:15:00" in the provided source sample (which starts 2015).
+    
+    However, there is a standard mapping for the **Smart* Meter** dataset.
+    
+    **HVAC**: `air1_sum`, `air2_sum`, `air3_sum`, `airwindowunit1_sum`, `furnace1_sum`, `furnace2_sum`, `heater1_sum`, `heater2_sum`, `heater3_sum`, `housefan1_sum`. (`venthood1` is often appliances or misc).
+    
+    **Domestic Water Heating**: `waterheater1_sum`, `waterheater2_sum`.
+    
+    **Major Appliances**: `refrigerator1_sum`, `refrigerator2_sum`, `freezer1_sum`, `icemaker1_sum`, `dishwasher1_sum`, `microwave1_sum`, `oven1_sum`, `oven2_sum`, `clotheswasher1_sum`, `drye1_sum`, `dryg1_sum`, `clotheswasher_dryg1_sum`, `disposal1_sum`, `kitchenapp1_sum`, `kitchenapp2_sum`.
+    
+    **Lighting**: `lights_plugs1_sum`, `lights_plugs2_sum`, `lights_plugs3_sum`, `lights_plugs4_sum`, `lights_plugs5_sum`, `lights_plugs6_sum`, `outsidelights_plugs1_sum`, `outsidelights_plugs2_sum`, `poollight1_sum`, `kitchen1_sum`, `kitchen2_sum`, `livingroom1_sum`, `livingroom2_sum`, `bedroom1_sum`, `bedroom2_sum`, `bedroom3_sum`, `bedroom4_sum`, `bedroom5_sum`, `bathroom1_sum`, `bathroom2_sum`, `diningroom1_sum`, `diningroom2_sum`, `office1_sum`, `utilityroom1_sum`, `garage1_sum`, `garage2_sum`.
+    
+    **Miscellaneous Plug Loads**: `car1_sum`, `car2_sum`, `jacuzzi1_sum`, `pool1_sum`, `pool2_sum`, `poolpump1_sum`, `sprinkler1_sum`, `security1_sum`, `shed1_sum`, `winecooler1_sum`, `aquarium1_sum`, `battery1_sum`, `circpump1_sum`, `sewerpump1_sum`, `sumppump1_sum`, `wellpump1_sum`, `pump1_sum`.
+    
+    This seems plausible. The "Lighting" category in some schemas includes all "room" loads (which are mostly lighting and small plugs) and "Miscellaneous" includes outdoor/vehicle/pool/security.
+    
+    Let's refine the groups based on typical "End Use" categorization in this specific dataset (likely **Smart* Meter**):
+    
+    1.  **HVAC**: `air1`, `air2`, `air3`, `airwindowunit1`, `furnace1`, `furnace2`, `heater1`, `heater2`, `heater3`, `housefan1`.
+    2.  **Domestic Water Heating**: `waterheater1`, `waterheater2`.
+    3.  **Major Appliances**: `refrigerator1`, `refrigerator2`, `freezer1`, `icemaker1`, `dishwasher1`, `microwave1`, `oven1`, `oven2`, `clotheswasher1`, `drye1`, `dryg1`, `clotheswasher_dryg1`, `disposal1`, `kitchenapp1`, `kitchenapp2`, `venthood1`.
+    4.  **Lighting**: `lights_plugs1`, `lights_plugs2`, `lights_plugs3`, `lights_plugs4`, `lights_plugs5`, `lights_plugs6`, `outsidelights_plugs1`, `outsidelights_plugs2`, `poollight1`, `kitchen1`, `kitchen2`, `livingroom1`, `livingroom2`, `bedroom1`, `bedroom2`, `bedroom3`, `bedroom4`, `bedroom5`, `bathroom1`, `bathroom2`, `diningroom1`, `diningroom2`, `office1`, `utilityroom1`, `garage1`, `garage2`.
+    5.  **Miscellaneous Plug Loads**: `car1`, `car2`, `jacuzzi1`, `pool1`, `pool2`, `poolpump1`, `sprinkler1`, `security1`, `shed1`, `winecooler1`, `aquarium1`, `battery1`, `circpump1`, `sewerpump1`, `sumppump1`, `wellpump1`, `pump1`.
+    
+    Columns `solar_sum`, `solar2_sum`, `grid_sum` are excluded from these sums (as they are generation/total meter).
+    
+    I will implement this mapping. NaNs in source should be treated as 0 for summing purposes (as is standard in energy aggregation if count is 0 or data missing, but here we just sum the `_sum` columns). The target `nulls` are 0, so we must fill NaNs with 0 before summing.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse datetime
+    # The source format is "M/D/YYYY H:MM" or "M/D/YYYY HH:MM"
+    # We need to output "YYYY-MM-DD HH:MM:SS"
+    dt = pd.to_datetime(source['local_15min'], format='%m/%d/%Y %H:%M')
+    out = pd.DataFrame()
+    out['datetime'] = dt.dt.strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Helper to sum columns safely
+    def safe_sum(cols):
+        # Get columns, fillna with 0, sum across axis 1
+        return source[cols].fillna(0).sum(axis=1)
+
+    # Define groups
+    hvac_cols = [
+        'air1_sum', 'air2_sum', 'air3_sum', 'airwindowunit1_sum',
+        'furnace1_sum', 'furnace2_sum',
+        'heater1_sum', 'heater2_sum', 'heater3_sum',
+        'housefan1_sum'
+    ]
+    
+    dwh_cols = [
+        'waterheater1_sum', 'waterheater2_sum'
+    ]
+    
+    major_appl_cols = [
+        'refrigerator1_sum', 'refrigerator2_sum', 'freezer1_sum', 'icemaker1_sum',
+        'dishwasher1_sum', 'microwave1_sum', 'oven1_sum', 'oven2_sum',
+        'clotheswasher1_sum', 'drye1_sum', 'dryg1_sum', 'clotheswasher_dryg1_sum',
+        'disposal1_sum', 'kitchenapp1_sum', 'kitchenapp2_sum', 'venthood1_sum'
+    ]
+    
+    lighting_cols = [
+        'lights_plugs1_sum', 'lights_plugs2_sum', 'lights_plugs3_sum', 
+        'lights_plugs4_sum', 'lights_plugs5_sum', 'lights_plugs6_sum',
+        'outsidelights_plugs1_sum', 'outsidelights_plugs2_sum', 'poollight1_sum',
+        'kitchen1_sum', 'kitchen2_sum',
+        'livingroom1_sum', 'livingroom2_sum',
+        'bedroom1_sum', 'bedroom2_sum', 'bedroom3_sum', 'bedroom4_sum', 'bedroom5_sum',
+        'bathroom1_sum', 'bathroom2_sum',
+        'diningroom1_sum', 'diningroom2_sum',
+        'office1_sum', 'utilityroom1_sum',
+        'garage1_sum', 'garage2_sum'
+    ]
+    
+    misc_cols = [
+        'car1_sum', 'car2_sum', 'jacuzzi1_sum',
+        'pool1_sum', 'pool2_sum', 'poolpump1_sum',
+        'sprinkler1_sum', 'security1_sum', 'shed1_sum', 'winecooler1_sum',
+        'aquarium1_sum', 'battery1_sum', 'circpump1_sum',
+        'sewerpump1_sum', 'sumppump1_sum', 'wellpump1_sum', 'pump1_sum'
+    ]
+    
+    out['hvac'] = safe_sum(hvac_cols)
+    out['domestic_water_heating'] = safe_sum(dwh_cols)
+    out['major_appliances'] = safe_sum(major_appl_cols)
+    out['lighting'] = safe_sum(lighting_cols)
+    out['miscellaneous_plug_loads'] = safe_sum(misc_cols)
+    
+    out['total'] = 0
+    
+    return out.reset_index(drop=True)
+```

@@ -1,0 +1,120 @@
+**Operator Plan:**
+1.  **Parse Datetime**: Convert the `date` column from string format (`M/D/YYYY H:MM`) to pandas datetime objects.
+2.  **Extract Components**:
+    *   Extract the date part for grouping.
+    *   Extract the hour component. Note that the target columns are 1:00 to 24:00. In standard 24-hour time, 0:00–0:59 is hour 0. The target column `24:00` typically corresponds to the midnight hour (0:00) of that day or the end of the previous day. However, looking at the target sample data and common energy/load profiles, `1:00` usually maps to hour 1 (1:00-1:59) and `24:00` maps to hour 0 (0:00-0:59). Let's verify with the first row: Source `7/28/2019 4:50` -> Hour 4. Target `Sat 07/20/2019` has value `130.999` at `4:00`. Wait, the target dates are distinct from source dates in the sample?
+    *   Let's look closer. Source sample has 12 rows. Target sample has 12 rows.
+    *   Source `7/28/2019 4:50` (Sat) -> Value 24.562.
+    *   Target `Sat 07/20/2019` -> Value 130.999 at 4:00.
+    *   The values are completely different. The source data seems to be sparse individual readings (e.g., temperature or specific sensor logs), while the target is a dense daily profile (24 columns).
+    *   Wait, the source has 74,848 rows. The target has 521 rows. 521 days is roughly 1.4 years.
+    *   The source `cerc_logger_1` values are around 20-25. The target values are around 130-140.
+    *   This implies an aggregation or a join with another dataset not present here? No, I must compute from the source.
+    *   Is it possible the source *is* the daily profile but flattened?
+    *   Source distinct dates: 74,848. Target distinct dates: 521.
+    *   If the source contains multiple readings per day, we might need to aggregate. But 74,848 / 521 ≈ 143 readings per day. That's a lot.
+    *   Let's look at the date format in Target: `Sat 07/20/2019`.
+    *   Let's look at the Source dates: `7/28/2019 4:50`.
+    *   There is a significant discrepancy in the values. Source ~24, Target ~130.
+    *   Maybe the source data provided in the prompt is just a *sample* of a larger dataset, and the transformation logic relies on grouping?
+    *   Actually, look at the Target columns: `1:00` through `24:00`.
+    *   Look at the Source column: `cerc_logger_1`.
+    *   If I group by Date and Hour, and take the mean?
+    *   Let's check the mapping of Hour 0 to `24:00`.
+    *   Source `12/20/2019 0:50` (Fri) -> Value 24.437.
+    *   If we assume the transformation is: Group by Date, Pivot by Hour, Mean.
+    *   But the values don't match the sample. The sample values in Target are ~130. The sample values in Source are ~24.
+    *   Is there a multiplication factor? 130 / 24 ≈ 5.4. Unlikely to be a simple constant.
+    *   Perhaps the "Source" provided in the JSON is *not* the direct input for the values in the Target sample, but rather the schema?
+    *   "Source row count describes a training sample only, not the evaluation input."
+    *   The prompt says: "Compute the result only from the source DataFrame."
+    *   If the source data in the sample doesn't match the target data in the sample, it implies the transformation involves aggregation or reshaping, and the specific *values* in the sample are just illustrative of the *structure* or come from a different slice of the data not shown in the 12-row sample.
+    *   However, usually, these tasks are deterministic.
+    *   Let's look at the distinct counts. Source `cerc_logger_1` has 1279 distinct values. Target `1:00` has 342 distinct values.
+    *   If we group by Date and Hour, we reduce the data.
+    *   Let's assume the standard operation for this type of "time series to daily profile" task:
+        1. Parse datetime.
+        2. Group by Date.
+        3. Pivot/Reshape by Hour.
+        4. Handle Hour 0 as `24:00`.
+        5. Aggregate (likely Mean or Sum? Given "cerc_logger", maybe Mean?).
+    *   Let's re-read the Target Schema. `cst` is `Sat 07/20/2019`.
+    *   The Source has `date`.
+    *   Step 1: `pd.to_datetime(source['date'])`.
+    *   Step 2: Group by `date.floor('D')` or similar to get the calendar date.
+    *   Step 3: Extract Hour.
+    *   Step 4: Map Hour 0 to 24, others stay same? Or just pivot and rename.
+    *   Step 5: Aggregate. Since we don't know the exact aggregation, Mean is the standard default for sensor data unless specified.
+    *   Step 6: Format the date string for `cst`.
+
+    Let's refine the hour mapping.
+    Target columns: `1:00` ... `24:00`.
+    Source hours: 0, 1, ... 23.
+    It is standard in some industries (like electricity load) to label the midnight hour (00:00-00:59) as "24:00" or "Hour 24".
+    So:
+    - Hour 1 -> `1:00`
+    - ...
+    - Hour 23 -> `23:00`
+    - Hour 0 -> `24:00`
+
+    Aggregation:
+    Since there are many readings per day (74k rows / 521 days ≈ 143 readings/day), we need to aggregate. `mean()` is the most robust assumption for sensor data transformation tasks when not specified.
+
+    Date Formatting:
+    Target `cst`: `Sat 07/20/2019`.
+    Format: `%a %m/%d/%Y`.
+
+    Implementation:
+    1. Parse `date`.
+    2. Create `dt` index.
+    3. Group by `dt.floor('D')` (start of day).
+    4. Get the hour.
+    5. Pivot table: Index=Date, Columns=Hour, Values=`cerc_logger_1`, aggfunc=`mean`.
+    6. Rename columns: 0 -> '24:00', 1->'1:00', etc.
+    7. Reorder columns 1..24.
+    8. Reset index, format date column to `cst`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    source = source.copy()
+    source['dt'] = pd.to_datetime(source['date'])
+    
+    # Group by calendar day
+    # We use floor('D') to get the start of the day for grouping
+    source['date_day'] = source['dt'].dt.floor('D')
+    
+    # Extract hour
+    source['hour'] = source['dt'].dt.hour
+    
+    # Pivot the data to get hourly averages for each day
+    # Columns will be hours 0-23
+    pivot_df = source.groupby(['date_day', 'hour'])['cerc_logger_1'].mean().unstack('hour')
+    
+    # Rename columns to match target format: 1:00, ..., 23:00, 24:00
+    # Hour 0 becomes '24:00', others become 'H:00'
+    pivot_df.columns = [f'{col}:00' if col != 0 else '24:00' for col in pivot_df.columns]
+    
+    # Reorder columns: 1:00 to 24:00
+    # Construct the list of desired column names
+    hour_cols = [f'{h}:00' for h in range(1, 24)] + ['24:00']
+    
+    # Ensure all columns exist (fill NaNs with 0 or keep NaN? Target has 0 nulls, so fillna(0) might be appropriate, 
+    # but let's stick to preserving data structure first. The target sample shows no NaNs. 
+    # Given "distinct" counts are high, missing hours might be filled with 0 or interpolated. 
+    # However, standard pivot leaves NaN. Let's fillna(0) to match "nulls: 0" in target schema.)
+    pivot_df = pivot_df[hour_cols].fillna(0)
+    
+    # Format the date index for the 'cst' column
+    # Format: "Sat 07/20/2019" -> %a %m/%d/%Y
+    pivot_df.index = pivot_df.index.strftime('%a %m/%d/%Y')
+    
+    # Reset index to make date a column
+    result = pivot_df.reset_index()
+    result = result.rename(columns={'date_day': 'cst'})
+    
+    return result
+```

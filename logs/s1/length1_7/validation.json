@@ -1,0 +1,75 @@
+{
+  "case": "length1_7",
+  "length": 1,
+  "strategy": "s1",
+  "model": "qwen36-27b",
+  "is_demo": false,
+  "parameters": {
+    "output": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment",
+    "model": "qwen36-27b",
+    "base_url": "https://openai.rc.asu.edu/v1",
+    "max_tokens": 6000,
+    "reasoning_effort": "none",
+    "k": 5,
+    "sample_rows": 12,
+    "timeout": 120,
+    "api_timeout": 3600,
+    "replay_only": true,
+    "strategy": "s1",
+    "python": "3.14.4 (main, Apr  7 2026, 13:13:20) [Clang 21.0.0 (clang-2100.0.123.102)]",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "pandas": "3.1.1",
+    "held_out": [
+      "length1_1",
+      "length1_2",
+      "length1_3",
+      "length2_1",
+      "length3_1"
+    ],
+    "benchmark": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split"
+  },
+  "prompt_path": "logs/s1/length1_7/prompt.json",
+  "completion_path": "logs/s1/length1_7/response.json",
+  "error": "RuntimeError: No fenced Python block",
+  "execution": {
+    "status": "generation_error"
+  },
+  "generation": {
+    "request_hash": "12f98f3afad8773d0f3902193f536cdc4ccf91bb0eebf39200e76be0fffe4404",
+    "usage": {
+      "completion_tokens": 6000,
+      "prompt_tokens": 9008,
+      "total_tokens": 15008,
+      "completion_tokens_details": null,
+      "prompt_tokens_details": {
+        "audio_tokens": null,
+        "cache_write_tokens": null,
+        "cached_tokens": 0,
+        "image_tokens": null,
+        "text_tokens": null,
+        "created_cache_tokens": 8960,
+        "multimodal_tokens": null
+      },
+      "co2_g": 4.824023,
+      "energy_wh": 14.314608
+    },
+    "latency_seconds": 179.8162005419981,
+    "api_attempts": 1,
+    "cached": true,
+    "candidate_count": 1,
+    "api_timeout_seconds": 600,
+    "reasoning_effort_header": "none"
+  },
+  "autopipeline": {
+    "accuracy": 0.0,
+    "is_correct": false,
+    "similarities": {}
+  },
+  "hard_match": {
+    "accuracy": 0.0,
+    "is_correct": false,
+    "similarities": {}
+  },
+  "wall_seconds": 179.82053645799897,
+  "replay_wall_seconds": 0.003326625002955552
+}

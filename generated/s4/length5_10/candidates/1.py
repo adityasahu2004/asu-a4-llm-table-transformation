@@ -1,0 +1,25 @@
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date
+    dt = pd.to_datetime(source['Date'], format='%a %m/%d/%Y')
+    
+    # Create target dataframe
+    out = pd.DataFrame(index=source.index)
+    
+    # Format date column
+    out['date'] = dt.dt.strftime('%a %m/%d/%Y')
+    
+    # Map hourly columns to value columns
+    # Source columns: '1:00'...'23:00', '24:00:00'
+    # Target columns: 'value1'...'value24'
+    
+    for h in range(1, 25):
+        if h < 24:
+            src_col = f'{h}:00'
+        else:
+            src_col = '24:00:00'
+        
+        out[f'value{h}'] = source[src_col]
+        
+    return out.reset_index(drop=True)

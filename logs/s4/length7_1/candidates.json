@@ -1,0 +1,87 @@
+[
+  {
+    "index": 0,
+    "finish_reason": "stop",
+    "path": "generated/s4/length7_1/candidates/0.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+      "seconds": 0.7101868329991703,
+      "shape": [
+        1339,
+        26
+      ],
+      "fingerprint": "5ebe414a2843f8307a78f84f4abc50d132864d3b58fa2a295f984a40bd7ad1ba"
+    }
+  },
+  {
+    "index": 1,
+    "finish_reason": "stop",
+    "path": "generated/s4/length7_1/candidates/1.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+      "seconds": 0.7124617920053424,
+      "shape": [
+        1339,
+        26
+      ],
+      "fingerprint": "5ebe414a2843f8307a78f84f4abc50d132864d3b58fa2a295f984a40bd7ad1ba"
+    }
+  },
+  {
+    "index": 2,
+    "finish_reason": "stop",
+    "path": "generated/s4/length7_1/candidates/2.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+      "seconds": 0.7068976669979747,
+      "shape": [
+        1339,
+        26
+      ],
+      "fingerprint": "5ebe414a2843f8307a78f84f4abc50d132864d3b58fa2a295f984a40bd7ad1ba"
+    }
+  },
+  {
+    "index": 3,
+    "finish_reason": "stop",
+    "path": "generated/s4/length7_1/candidates/3.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+      "seconds": 0.7202037919996656,
+      "shape": [
+        1339,
+        26
+      ],
+      "fingerprint": "5ebe414a2843f8307a78f84f4abc50d132864d3b58fa2a295f984a40bd7ad1ba"
+    }
+  },
+  {
+    "index": 4,
+    "finish_reason": "stop",
+    "path": "generated/s4/length7_1/candidates/4.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+      "seconds": 0.7110420829994837,
+      "shape": [
+        1339,
+        26
+      ],
+      "fingerprint": "65a80608f370a966edf656f4f8179141535d46f268d1961ea14f7a3ae7b51729"
+    }
+  }
+]

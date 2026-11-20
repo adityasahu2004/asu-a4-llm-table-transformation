@@ -1,0 +1,56 @@
+{
+  "candidate_count": 6,
+  "selected_index": 1,
+  "baseline_index": 1,
+  "selection_reason": "SC winner retained: no strict constraint improvement",
+  "constraints": {
+    "columns": [
+      "datetime",
+      "hvac",
+      "domestic_water_heating",
+      "major_appliances",
+      "lighting",
+      "miscellaneous_plug_loads",
+      "total"
+    ],
+    "relations": []
+  },
+  "policy": {
+    "version": "schema-weekday-v1",
+    "pool": "five few-shot SC samples + one greedy few-shot sample",
+    "constraints": [
+      "exact target schema",
+      "uniquely identified date-to-weekday relation"
+    ],
+    "target_rows": "the same 12-row prompt sample as the baselines",
+    "output_rows": "up to 128 evenly spaced training-output rows",
+    "selection": "strictly lower lexicographic constraint loss; preserve SC winner on ties",
+    "forbidden_inputs": [
+      "test_0.csv",
+      "validator results",
+      "case-specific rules",
+      "target row counts"
+    ]
+  },
+  "usage": {
+    "prompt_tokens": 89186,
+    "completion_tokens": 16810,
+    "total_tokens": 105996
+  },
+  "api_attempts": 2,
+  "marginal_api_attempts": 0,
+  "latency_seconds": 129.4718438739983,
+  "inherited_api_seconds": 129.4718438739983,
+  "clusters": {
+    "f7f31c256b4030136afeee0f211d3b9b96d5bf14974d12d917773b6f5932b8da": [
+      1
+    ],
+    "1d498b9605d2398ffc3e6d2d6d4b3e5b76c5a4308c1b9da77344b1379f38829d": [
+      2
+    ],
+    "7dcf11910959e443ce0d9f6b0fbcdbd8ffed4038b1938946b714f95f9529865a": [
+      4
+    ]
+  },
+  "cost_basis": "standalone logical pool cost; reused requests have zero marginal API cost"
+}

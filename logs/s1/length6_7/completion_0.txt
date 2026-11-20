@@ -1,0 +1,57 @@
+### Operator Plan
+
+1.  **Select Columns**: The target schema contains `Date` and hourly columns (`Hr 1` to `Hr 24`). The source has `Segment`, `Date`, and hourly columns (`1:00` to `24:00:00`). We will drop the `Segment` column as it is not in the target.
+2.  **Rename Columns**:
+    *   Keep `Date` as is.
+    *   Map source hourly columns to target hourly columns:
+        *   `1:00` -> `Hr 1`
+        *   `2:00` -> `Hr 2`
+        *   ...
+        *   `23:00` -> `Hr 23`
+        *   `24:00:00` -> `Hr 24`
+3.  **Reorder Columns**: Ensure the final DataFrame columns are ordered exactly as specified in the target: `Date`, `Hr 1`, `Hr 2`, ..., `Hr 24`.
+4.  **Data Types**: The source numeric columns are already `float64`, matching the target. The `Date` column is `str` in both, so no parsing/formatting is required (just pass through).
+
+### Assumptions
+*   The mapping between source time labels (e.g., "1:00") and target hour labels (e.g., "Hr 1") is direct based on the hour number.
+*   The last source column "24:00:00" corresponds to "Hr 24".
+*   No data transformation (scaling, filtering) is applied to the values, only structural changes (rename/drop/reorder).
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    """
+    Transforms the source DataFrame by:
+    1. Dropping the 'Segment' column.
+    2. Renaming hourly columns from 'H:MM' format to 'Hr H' format.
+    3. Reordering columns to match the target schema.
+    """
+    # Create a copy to avoid modifying the original
+    df = source.copy()
+    
+    # Define the mapping from source column names to target column names
+    # Source columns: '1:00', '2:00', ..., '23:00', '24:00:00'
+    # Target columns: 'Hr 1', 'Hr 2', ..., 'Hr 23', 'Hr 24'
+    
+    rename_map = {}
+    for hour in range(1, 24):
+        rename_map[f"{hour}:00"] = f"Hr {hour}"
+    rename_map["24:00:00"] = "Hr 24"
+    
+    # Apply renaming
+    df = df.rename(columns=rename_map)
+    
+    # Drop the 'Segment' column
+    if 'Segment' in df.columns:
+        df = df.drop(columns=['Segment'])
+    
+    # Define the target column order
+    target_columns = ['Date'] + [f'Hr {i}' for i in range(1, 25)]
+    
+    # Select and reorder columns
+    df = df[target_columns]
+    
+    return df
+```

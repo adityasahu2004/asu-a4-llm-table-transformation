@@ -1,0 +1,60 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `date` column to a datetime object to extract the year, month, and hour. The format is `%m/%d/%Y %H:%M`.
+2.  **Extract Components**: Create columns for `Year`, `Month`, and `Hour` from the parsed datetime.
+3.  **Pivot Data**: Pivot the dataframe so that:
+    *   The index is `Hour` (0-23).
+    *   The columns are `Month` (1-12).
+    *   The values are the mean of `cerc_logger_1` for each Hour/Month combination across all years. This aggregation handles the varying number of years/days and results in a single value per hour per month, matching the target row count of 24 (one per hour).
+4.  **Rename Columns**: Rename the month numbers (1-12) to their full English names (January, February, etc.).
+5.  **Format Output**:
+    *   Reset the index to make `Hour` a column.
+    *   Sort by `Hour`.
+    *   Ensure `Hour` is integer type.
+    *   Select/Order columns to match the target schema: `Hour`, `January` through `December`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    # Format observed: "7/28/2019 4:50" -> %m/%d/%Y %H:%M
+    df = source.copy()
+    df['dt'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract components
+    df['Hour'] = df['dt'].dt.hour
+    df['Month'] = df['dt'].dt.month
+    
+    # Pivot table: Index=Hour, Columns=Month, Values=Mean of cerc_logger_1
+    # This aggregates across all years and days
+    pivoted = df.pivot_table(
+        index='Hour', 
+        columns='Month', 
+        values='cerc_logger_1', 
+        aggfunc='mean'
+    )
+    
+    # Rename months to English names
+    month_names = {
+        1: 'January', 2: 'February', 3: 'March', 4: 'April',
+        5: 'May', 6: 'June', 7: 'July', 8: 'August',
+        9: 'September', 10: 'October', 11: 'November', 12: 'December'
+    }
+    pivoted.columns = [month_names[m] for m in pivoted.columns]
+    
+    # Reset index to make Hour a column
+    result = pivoted.reset_index()
+    
+    # Ensure Hour is int
+    result['Hour'] = result['Hour'].astype(int)
+    
+    # Sort by Hour to ensure 0-23 order
+    result = result.sort_values('Hour').reset_index(drop=True)
+    
+    # Ensure column order matches target
+    target_cols = ['Hour', 'January', 'February', 'March', 'April', 'May', 'June', 
+                   'July', 'August', 'September', 'October', 'November', 'December']
+    
+    return result[target_cols]
+```

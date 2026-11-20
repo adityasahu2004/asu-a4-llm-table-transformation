@@ -1,0 +1,322 @@
+**Operator Plan:**
+1.  **Parse Timestamp**: Convert the `timestamp` column to datetime objects.
+2.  **Filter Valid Data**: The source contains rows where all values are `32767.0` (indicating missing/invalid sensor data). These rows should be excluded as they do not contribute to valid energy aggregates. We filter out rows where `TOTAL BLDG WHS [emon ch1,2]` is 32767.0.
+3.  **Aggregate**: Group the data by `site` and the parsed `timestamp` (hourly resolution). Sum the relevant energy columns for each group to get total hourly energy usage per site.
+    *   `hvac`: Sum of `AC COMPRESSOR WHS [emon ch3,4]`, `AIR HANDLER WHS [emon ch5,6]`, and `Minisplit WHS (2-CTs) [xpod chA-7,8]`. Note: `Minisplit` often has 32767, so we must handle this (replace 32767 with 0 before summing).
+    *   `domestic_water_heating`: Sum of `WATER HEATER WHS [emon ch7,8]`.
+    *   `major_appliances`: Sum of `DRYER WHS (1-CT) [emon ch9]`, `RANGE WHS (1-CT) [emon ch10]`, `DISH WASHER WHS [emon ch11]`, `Primary Fridge WHS [emon ch12]`, `2nd Fridge WHS [emon ch13]`, and `Dryer WHS (2-CTs) [xpod chA-9,10]`. Handle 32767 replacements.
+    *   `lighting`: The target shows this is always 0. There is no specific "Lighting" column in the source that maps directly to a non-zero aggregate in the target sample (or it's implicitly 0). We will set it to 0.
+    *   `miscellaneous_plug_loads`: This is a float column. It likely corresponds to `Calculated Unmeasured loads (Whr)` or a specific plug load aggregate. Looking at the target sample, `miscellaneous_plug_loads` has decimal values. `Calculated Unmeasured loads (Whr)` is a good candidate. However, looking at the magnitudes:
+        *   Source `TOTAL BLDG WHS` ~ hundreds/thousands.
+        *   Target `hvac` ~ hundreds of thousands.
+        *   This implies an aggregation across many sites or a unit conversion. Wait, the target rows are 63,969. Source rows are 1.3M.
+        *   Let's look at the target `datetime`. It spans years.
+        *   The target `hvac` values are large integers.
+        *   Let's re-examine the aggregation. The target has 63,969 rows. The source has ~1.3M rows.
+        *   If we group by `timestamp` across all sites, we get ~63k unique timestamps (approx 2.5 years * 365 * 24 ≈ 22k hours, but distinct timestamps in source are 63,212).
+        *   The target `datetime` distinct count is 63,969. This matches the number of unique timestamps in the source roughly.
+        *   Therefore, the transformation is likely aggregating across **sites** for each timestamp.
+        *   Let's check the columns again.
+        *   `hvac`: Sum of AC, Air Handler, Minisplit.
+        *   `domestic_water_heating`: Sum of Water Heater.
+        *   `major_appliances`: Sum of Dryer, Range, Dishwasher, Fridges.
+        *   `miscellaneous_plug_loads`: Sum of `Calculated Unmeasured loads (Whr)`? Or perhaps `SPARE` columns? The target has decimals. `Calculated Unmeasured loads (Whr)` has decimals.
+        *   `total`: Sum of `TOTAL BLDG WHS [emon ch1,2]`.
+4.  **Handle Missing Values (32767)**: Replace `32767.0` with `0.0` in all numeric columns before summing.
+5.  **Calculate Columns**:
+    *   `hvac`: `AC COMPRESSOR` + `AIR HANDLER` + `Minisplit`.
+    *   `domestic_water_heating`: `WATER HEATER`.
+    *   `major_appliances`: `DRYER (1-CT)` + `RANGE` + `DISH WASHER` + `Primary Fridge` + `2nd Fridge` + `Dryer (2-CTs)`.
+    *   `lighting`: 0.
+    *   `miscellaneous_plug_loads`: `Calculated Unmeasured loads (Whr)`.
+    *   `total`: `TOTAL BLDG WHS`.
+6.  **Format Output**:
+    *   Group by `timestamp`. Sum the calculated columns.
+    *   Reset index.
+    *   Format `timestamp` as `YYYY-MM-DD HH:MM:SS`.
+    *   Rename columns to target names.
+    *   Cast `hvac`, `domestic_water_heating`, `major_appliances`, `lighting`, `total` to `int64`.
+    *   Keep `miscellaneous_plug_loads` as `float64`.
+
+**Refinement on `miscellaneous_plug_loads`**:
+The target sample shows `miscellaneous_plug_loads` values like `1148884.1`.
+Source `Calculated Unmeasured loads (Whr)` values are like `175.0`, `59.0`.
+If we sum `Calculated Unmeasured loads (Whr)` across all sites for a given hour, does it reach ~1M?
+There are 31 sites. If average unmeasured load is ~30-40 Whr per site, 31 * 40 = 1240. This is far from 1M.
+Let's look at `total`. Target `total` is `514620`. Source `TOTAL BLDG WHS` is `386.0`.
+31 sites * 386 = 11,966. Still far from 500k.
+Is there a unit conversion? "WHS" usually means Watt-Hours? Or Watts?
+If it's Watts, and we are summing hourly readings, the energy would be the same number if it's already Wh.
+Wait, look at `Wattsup Cumulative Ent.Ctr (WHS)`. Values are `156909.0`.
+`Wattsup Energy Ent.Ctr (WHS)` is `55.0`.
+Maybe `total` is derived from `Wattsup Cumulative`? No, that's cumulative.
+Let's look at the target `total` vs `hvac` + `dwh` + `major` + `misc`.
+Row 1: 1781116 + 460594 + 3312151 + 0 + 1148884.1 = 6,702,745.1.
+Target `total` is 514,620.
+The sum of parts is NOT the total. The `total` column in the target seems to be the sum of `TOTAL BLDG WHS` across sites?
+Let's re-read the source schema. `TOTAL BLDG WHS [emon ch1,2]`.
+If we sum `TOTAL BLDG WHS` across 31 sites, we get ~12k.
+The target `total` is ~500k.
+Factor of ~40-50?
+Maybe the source data is in kW and target is Wh? No, "WHS" implies Watt-Hours.
+Maybe the aggregation is different.
+Let's look at `distinct` counts.
+Source `TOTAL BLDG WHS`: 14,899 distinct.
+Target `total`: 54,591 distinct.
+Target `hvac`: 55,023 distinct.
+
+Let's look at the `timestamp` distinct counts.
+Source: 63,212.
+Target: 63,969.
+They are very close. This confirms aggregation by time.
+
+Why are the values so different?
+Source sample row 1: `TOTAL BLDG WHS` = 386.0.
+Target row 1: `total` = 514,620.
+386 * 31 sites = 11,966.
+514,620 / 11,966 ≈ 43.
+Is it possible the source is in kW and the target is Wh, and the time step is 1 hour? No, 386 kW is huge for a building. 386 Wh is small.
+If 386 is Watts, then 386 Wh per hour.
+If the target is in Joules? 386 Wh = 1,389,600 J. No.
+
+Let's look at `Wattsup Cumulative Ent.Ctr (WHS)`.
+Sample: 156,909.0.
+Target `total`: 514,620.
+Maybe `total` is the sum of `Wattsup Cumulative`? No, that's cumulative.
+
+Let's look at `Calculated Energy Use (Whr)`.
+Sample: 386.0. Same as Total Bldg.
+
+Is it possible the target values are sums of **minutes**? No, timestamps are hourly.
+
+Let's look at the `hvac` calculation again.
+Target `hvac`: 1,781,116.
+Source `AC COMPRESSOR`: 0.0. `AIR HANDLER`: 16.0. `Minisplit`: 32767.0 (invalid).
+Sum = 16.
+16 * 31 = 496.
+Target is 1.7M.
+Factor of ~3500.
+
+There is a significant scaling factor or a different interpretation of the data.
+However, in these types of problems, usually the operation is a direct sum or average.
+Could the "WHS" in source mean "Watts"? And the target is "Joules"?
+1 Watt = 1 Joule/second.
+1 Hour = 3600 seconds.
+386 Watts * 3600 seconds = 1,389,600 Joules.
+Target `total` is 514,620.
+1,389,600 is roughly 2.7x the target.
+
+Let's check `hvac`.
+16 Watts * 3600 = 57,600 Joules.
+Target `hvac` is 1,781,116.
+57,600 * 31 sites = 1,785,600.
+This is extremely close to 1,781,116!
+Difference: 1,785,600 - 1,781,116 = 4,484.
+This is likely due to some sites having missing data (32767) or different values.
+So the transformation is:
+1.  Identify valid rows (not 32767).
+2.  Replace 32767 with 0.
+3.  Sum the relevant columns across sites for each timestamp.
+4.  Multiply the sum by **3600** (converting Watts to Joules/Wh? If source is Watts, sum is Watts. To get Energy in Joules, multiply by seconds. To get Energy in Wh, multiply by 1. If target is Joules, multiply by 3600).
+    *   Let's verify `total`.
+    *   Source `TOTAL BLDG WHS`: 386.0 (Watts?).
+    *   Sum across 31 sites ~ 12,000 Watts.
+    *   12,000 * 3600 = 43,200,000 Joules.
+    *   Target `total` is 514,620.
+    *   This doesn't match the factor of 3600 for `total`.
+
+Let's re-evaluate `hvac`.
+Source `AIR HANDLER`: 16.0.
+Target `hvac`: 1,781,116.
+If we assume only 1 site had data (16.0), 16 * 3600 = 57,600.
+If we assume 31 sites, 16 * 31 * 3600 = 1,785,600.
+This matches `hvac` very well.
+
+Now `total`.
+Source `TOTAL BLDG WHS`: 386.0.
+Target `total`: 514,620.
+If we use the same logic: Sum(386 across sites) * 3600?
+If 386 is the average, and 31 sites: 386 * 31 * 3600 = 42,861,600.
+Target is 514,620.
+This is 2 orders of magnitude off.
+
+Wait, look at the target `total` value again: `514620`.
+Look at source `Wattsup Cumulative Ent.Ctr (WHS)`: `156909.0`.
+Look at source `Wattsup Energy Ent.Ctr (WHS)`: `55.0`.
+
+Is it possible `total` is NOT `TOTAL BLDG WHS`?
+Maybe `total` is `Calculated Energy Use (Whr)`?
+Sample: 386.0. Same as Total Bldg.
+
+Let's look at the `hvac` components again.
+`AC COMPRESSOR`: 0.
+`AIR HANDLER`: 16.
+`Minisplit`: 32767 (0).
+Sum = 16.
+16 * 31 * 3600 = 1,785,600.
+Target: 1,781,116.
+Close.
+
+Let's look at `domestic_water_heating`.
+Source `WATER HEATER`: 7.0.
+7 * 31 * 3600 = 777,600.
+Target: 460,594.
+Not as close. Maybe fewer sites have data?
+
+Let's look at `major_appliances`.
+`DRYER (1-CT)`: 3.
+`RANGE`: 6.
+`DISH WASHER`: 0.
+`Primary Fridge`: 58.
+`2nd Fridge`: 32767 (0).
+`Dryer (2-CTs)`: 0.
+Sum = 3+6+0+58+0+0 = 67.
+67 * 31 * 3600 = 7,477,200.
+Target: 3,312,151.
+Roughly half. Maybe only some sites have data.
+
+Let's look at `miscellaneous_plug_loads`.
+Source `Calculated Unmeasured loads (Whr)`: 175.0.
+175 * 31 * 3600 = 19,530,000.
+Target: 1,148,884.1.
+This is roughly 1/17th.
+
+There is a consistent scaling factor of **3600** for the energy columns (`hvac`, `dwh`, `major`, `misc`)?
+Let's check `misc` again.
+Target: 1,148,884.1.
+Source Sum: ~175 * N_sites.
+1,148,884 / 3600 = 319.
+If sum of unmeasured loads is ~319, and there are 31 sites, average is ~10.
+Source sample has 175. But that's one site.
+If we sum all sites, maybe it's 319?
+If `misc` is also multiplied by 3600, then `total` should be too?
+Target `total`: 514,620.
+514,620 / 3600 = 143.
+Sum of `TOTAL BLDG WHS` across sites = 143?
+Source sample `TOTAL BLDG WHS` = 386.
+If only 1 site is active, sum = 386. 386 != 143.
+If 0.37 sites? No.
+
+Maybe `total` is **NOT** multiplied by 3600?
+Or `total` comes from a different column?
+`Wattsup Energy Ent.Ctr (WHS)`? 55.0.
+55 * 31 = 1705.
+1705 != 143.
+
+Let's look at the target `total` vs sum of components.
+1,781,116 + 460,594 + 3,312,151 + 0 + 1,148,884.1 = 6,702,745.1.
+Target `total` is 514,620.
+The `total` is much smaller than the sum of the parts.
+This implies `total` is **not** the sum of the other columns.
+It implies `total` is a separate measurement, likely `TOTAL BLDG WHS`.
+And the other columns are subsets.
+Why is `total` so small?
+Maybe `total` is in **Watts** and the others are in **Joules**?
+If `total` is 514,620 Watts, that's huge.
+If `total` is 514,620 Joules, that's ~143 Watts.
+If `hvac` is 1.7M Joules, that's ~496 Watts.
+If `major` is 3.3M Joules, that's ~916 Watts.
+Sum of Watts: 496 + 128 (460k/3600) + 916 (3.3M/3600) + 319 (1.1M/3600) = 1,859 Watts.
+Total Watts from `total` column: 143 Watts.
+This doesn't add up. 143 != 1859.
+
+However, the problem asks for a deterministic transformation.
+The most robust pattern is:
+1.  Filter out 32767.
+2.  Group by timestamp.
+3.  Sum the specific columns.
+4.  Multiply by 3600 for the sub-loads?
+5.  What about `total`?
+    *   If `total` is just the sum of `TOTAL BLDG WHS` (without 3600), it would be ~143.
+    *   If `total` is sum of `TOTAL BLDG WHS` * 3600, it would be ~514,800.
+    *   Target `total` is 514,620.
+    *   143 * 3600 = 514,800.
+    *   This matches very closely!
+
+**Conclusion**:
+All energy columns (`hvac`, `domestic_water_heating`, `major_appliances`, `miscellaneous_plug_loads`, `total`) are sums of their respective source columns across sites for each timestamp, multiplied by **3600**.
+*   `hvac`: Sum(AC + Air Handler + Minisplit) * 3600
+*   `domestic_water_heating`: Sum(Water Heater) * 3600
+*   `major_appliances`: Sum(Dryer1 + Range + Dishwasher + Fridge1 + Fridge2 + Dryer2) * 3600
+*   `lighting`: 0
+*   `miscellaneous_plug_loads`: Sum(Calculated Unmeasured loads) * 3600
+*   `total`: Sum(Total Bldg WHS) * 3600
+
+The `miscellaneous_plug_loads` target is float, others are int.
+We will cast appropriately.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Replace sensor error value 32767 with 0
+    df = source.replace(32767.0, 0.0)
+    
+    # Parse timestamp
+    df['timestamp_dt'] = pd.to_datetime(df['timestamp'])
+    
+    # Define column mappings for aggregation
+    # HVAC: AC Compressor + Air Handler + Minisplit
+    hvac_cols = [
+        'AC COMPRESSOR WHS [emon ch3,4]',
+        'AIR HANDLER WHS [emon ch5,6]',
+        'Minisplit WHS (2-CTs) [xpod chA-7,8]'
+    ]
+    
+    # Domestic Water Heating
+    dwh_cols = [
+        'WATER HEATER WHS [emon ch7,8]'
+    ]
+    
+    # Major Appliances: Dryer(1-CT), Range, Dishwasher, Primary Fridge, 2nd Fridge, Dryer(2-CTs)
+    major_cols = [
+        'DRYER WHS (1-CT) [emon ch9]',
+        'RANGE WHS (1-CT) [emon ch10]',
+        'DISH WASHER WHS [emon ch11]',
+        'Primary Fridge WHS [emon ch12]',
+        '2nd Fridge WHS [emon ch13]',
+        'Dryer WHS (2-CTs) [xpod chA-9,10]'
+    ]
+    
+    # Miscellaneous Plug Loads: Calculated Unmeasured loads
+    misc_cols = [
+        'Calculated Unmeasured loads (Whr)'
+    ]
+    
+    # Total: Total Bldg WHS
+    total_cols = [
+        'TOTAL BLDG WHS [emon ch1,2]'
+    ]
+    
+    # Calculate sums per row
+    df['hvac_sum'] = df[hvac_cols].sum(axis=1)
+    df['dwh_sum'] = df[dwh_cols].sum(axis=1)
+    df['major_sum'] = df[major_cols].sum(axis=1)
+    df['misc_sum'] = df[misc_cols].sum(axis=1)
+    df['total_sum'] = df[total_cols].sum(axis=1)
+    
+    # Group by timestamp and sum across sites
+    grouped = df.groupby('timestamp_dt').agg(
+        hvac_sum=('hvac_sum', 'sum'),
+        dwh_sum=('dwh_sum', 'sum'),
+        major_sum=('major_sum', 'sum'),
+        misc_sum=('misc_sum', 'sum'),
+        total_sum=('total_sum', 'sum')
+    ).reset_index()
+    
+    # Convert to target units (multiply by 3600)
+    # HVAC, DWH, Major, Total are int64 in target
+    # Misc is float64 in target
+    
+    result = pd.DataFrame()
+    result['datetime'] = grouped['timestamp_dt'].dt.strftime('%Y-%m-%d %H:%M:%S')
+    result['hvac'] = (grouped['hvac_sum'] * 3600).astype('int64')
+    result['domestic_water_heating'] = (grouped['dwh_sum'] * 3600).astype('int64')
+    result['major_appliances'] = (grouped['major_sum'] * 3600).astype('int64')
+    result['lighting'] = 0
+    result['miscellaneous_plug_loads'] = grouped['misc_sum'] * 3600
+    result['total'] = (grouped['total_sum'] * 3600).astype('int64')
+    
+    return result
+```

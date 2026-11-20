@@ -1,0 +1,7 @@
+[
+  {
+    "status": null,
+    "type": "APIConnectionError",
+    "reason": "Stale API connection across overnight system sleep; controller restarted."
+  }
+]

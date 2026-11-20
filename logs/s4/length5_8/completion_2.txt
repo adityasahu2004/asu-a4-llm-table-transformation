@@ -1,0 +1,238 @@
+**Operator Plan:**
+1.  **Parse Dates**: Convert the `date` column from the source format (`m/d/Y`) to a datetime object.
+2.  **Shift Dates**: Subtract 180 days from the parsed dates to align with the target date range (e.g., `7/3/2015` -> `1/5/2015`, though looking at the sample `7/3/2015` in source corresponds to `1/1/2016`? No, let's look closer.
+    *   Source `7/3/2015` (Fri) -> Target `2015-01-01` (Thu)? No, `2015-01-01` is Thursday. `7/3/2015` is Friday.
+    *   Let's check the offset. `7/3/2015` minus `180` days is `1/5/2015`.
+    *   Let's check `12/31/2015` (Thu). Target last row is `2015-07-02` (Thu).
+    *   `12/31/2015` - `180` days = `7/4/2015`.
+    *   Let's look at the first target row: `2015-01-01`.
+    *   Let's look at the last target row: `2015-07-02`.
+    *   The target has 183 rows. Source has 182 rows.
+    *   The target dates seem to be `date - 183 days`?
+        *   `7/3/2015` - 183 days = `1/3/2015`.
+    *   Let's look at the distinct values.
+        *   Source `date`: `7/3/2015` to `12/31/2015`.
+        *   Target `date`: `2015-01-01` to `2015-07-02`.
+    *   Wait, the target sample shows `2015-01-01` as the first row. The source sample shows `7/3/2015` as the first row.
+    *   Is there a constant offset?
+        *   `2015-01-01` + 183 days = `2015-07-02` (approx).
+        *   `7/3/2015` - 183 days = `1/3/2015`.
+    *   Let's check the day of week.
+        *   Source `7/3/2015` is Friday.
+        *   Target `2015-01-01` is Thursday.
+    *   Let's check the next row.
+        *   Source `7/19/2015` (Sunday).
+        *   Target `2015-01-17` (Saturday).
+    *   It seems the target dates are exactly **184 days prior** to the source dates?
+        *   `7/3/2015` - 184 days = `1/2/2015`. Close to Jan 1.
+        *   `7/19/2015` - 184 days = `1/17/2015`. Matches exactly.
+        *   `8/4/2015` - 184 days = `2/1/2015`? Target is `2015-02-03`. No.
+    *   Let's re-examine the target sample data vs source sample data.
+        *   Source Row 0: `7/3/2015`. Values: `0.000239...`
+        *   Target Row 0: `2015-01-01`. Values: `0.000239...`
+        *   Source Row 1: `7/19/2015`. Values: `0.000239...`
+        *   Target Row 1: `2015-01-17`. Values: `0.000239...`
+        *   Source Row 2: `8/4/2015`. Values: `0.000239...`
+        *   Target Row 2: `2015-02-03`. Values: `0.000239...`
+    *   Let's calculate the difference in days between Source Date and Target Date for Row 0:
+        *   `2015-01-01` to `2015-07-03` is 183 days.
+    *   Row 1: `2015-01-17` to `2015-07-19` is 183 days.
+    *   Row 2: `2015-02-03` to `2015-08-04` is 183 days.
+    *   So, `Target Date = Source Date - 183 days`.
+    *   Wait, `7/3/2015` minus 183 days is `1/3/2015`. The target is `1/1/2015`.
+    *   Let's check `7/19/2015` minus 183 days.
+        *   July has 31 days. 19 days in July.
+        *   June (30) + May (31) + Apr (30) + Mar (31) + Feb (28) + Jan (31) = 181 days back to Jan 1?
+        *   Days from Jan 1 to July 19: 31+28+31+30+31+30+19 = 200 days.
+        *   200 - 183 = 17. So Jan 17. Correct.
+    *   Days from Jan 1 to July 3: 31+28+31+30+31+30+3 = 184 days.
+        *   184 - 183 = 1. So Jan 1. Correct.
+    *   So the transformation is `date - 183 days`.
+    *   However, the target has 183 rows, source has 182. The target first row is `2015-01-01`. The source first row is `7/3/2015`.
+    *   Is there a row missing in source or added in target?
+    *   Target last row: `2015-07-02`. Source last row: `12/31/2015`.
+    *   `12/31/2015` - 183 days = `7/3/2015`.
+    *   Wait. `7/3/2015` is the *first* source row.
+    *   Let's check the target last row `2015-07-02`.
+    *   `2015-07-02` + 183 days = `2016-01-01`.
+    *   This implies the target dates are `Source Date - 183 days`?
+        *   If Source is `12/31/2015`, Target is `7/3/2015`.
+        *   But the target sample ends at `7/2/2015`.
+    *   Let's look at the target sample again.
+        *   First row: `2015-01-01`.
+        *   Last row: `2015-07-02`.
+    *   Let's look at the source sample again.
+        *   First row: `7/3/2015`.
+        *   Last row: `12/31/2015`.
+    *   If I subtract 183 days from `7/3/2015`, I get `1/3/2015`.
+    *   If I subtract 183 days from `12/31/2015`, I get `7/3/2015`.
+    *   The target dates are `1/1/2015` to `7/2/2015`.
+    *   This looks like `Source Date - 184 days`?
+        *   `7/3/2015` - 184 = `1/2/2015`.
+        *   `12/31/2015` - 184 = `7/2/2015`.
+    *   So the last row matches `184` days offset.
+    *   But the first row is `1/1/2015`. `1/2/2015` - 1 day = `1/1/2015`.
+    *   There is a discrepancy of 1 day on the first row if we assume a constant offset.
+    *   Let's check the second row.
+        *   Source `7/19/2015`. Target `1/17/2015`.
+        *   `7/19/2015` - 184 days = `1/17/2015`. Matches.
+    *   Third row.
+        *   Source `8/4/2015`. Target `2/3/2015`.
+        *   `8/4/2015` - 184 days.
+        *   Days from Jan 1 to Aug 4: 31+28+31+30+31+30+31+4 = 216.
+        *   216 - 184 = 32.
+        *   Jan has 31 days. So Feb 1?
+        *   Wait. 216 days from Jan 1 (exclusive) is Aug 4.
+        *   Let's just use python logic. `pd.to_datetime('8/4/2015') - pd.Timedelta(days=184)` = `2015-02-02`.
+        *   Target is `2015-02-03`.
+    *   Okay, so it's not a simple constant day subtraction.
+    *   Let's look at the structure.
+    *   Source: Bi-weekly?
+        *   7/3 to 7/19 (16 days)
+        *   7/19 to 8/4 (16 days)
+        *   8/4 to 8/21 (17 days)
+        *   8/21 to 9/6 (16 days)
+    *   Target: Bi-weekly?
+        *   1/1 to 1/17 (16 days)
+        *   1/17 to 2/3 (17 days)
+        *   2/3 to 2/19 (16 days)
+    *   The intervals are preserved.
+    *   So it is a shift. Why did the calculation fail?
+    *   `8/4/2015` - `2/3/2015` = 182 days.
+    *   `7/19/2015` - `1/17/2015` = 183 days.
+    *   `7/3/2015` - `1/1/2015` = 183 days.
+    *   `12/31/2015` - `7/2/2015` = 182 days.
+    *   The offset alternates between 182 and 183? Or depends on leap years? 2015 is not a leap year.
+    *   Let's check `7/3/2015` (Row 0). Offset 183.
+    *   `7/19/2015` (Row 1). Offset 183.
+    *   `8/4/2015` (Row 2). Offset 182.
+    *   `8/21/2015` (Row 3). Target `2/19/2015`. Offset: `8/21` - `2/19`.
+        *   Feb 19 to Aug 21.
+        *   Feb: 9 days left (28-19). Mar: 31. Apr: 30. May: 31. Jun: 30. Jul: 31. Aug: 21.
+        *   9+31+30+31+30+31+21 = 183.
+    *   `9/6/2015` (Row 4). Target `3/8/2015`.
+        *   Mar 8 to Sep 6.
+        *   Mar: 23. Apr: 30. May: 31. Jun: 30. Jul: 31. Aug: 31. Sep: 6.
+        *   23+30+31+30+31+31+6 = 182.
+    *   It seems the offset is `183` for some, `182` for others.
+    *   Actually, look at the target dates. They are every 2 weeks.
+    *   Look at the source dates. They are every 2 weeks.
+    *   The transformation is likely just `Source Date - 183 days` and then maybe rounding or adjusting?
+    *   Or perhaps the target dates are generated independently?
+    *   Wait, the problem says "Infer the transformation... Compute the result only from the source DataFrame."
+    *   If the offset varies, it must be derived from the data.
+    *   However, usually these problems involve a constant shift.
+    *   Let's re-read the first target date: `2015-01-01`.
+    *   Source: `7/3/2015`.
+    *   Difference: 183 days.
+    *   Last target: `2015-07-02`.
+    *   Source: `12/31/2015`.
+    *   Difference: 182 days.
+    *   Why the difference?
+    *   Maybe the target is `Source Date - 183 days`?
+        *   `12/31/2015` - 183 days = `7/3/2015`.
+        *   But target is `7/2/2015`.
+    *   Maybe the target is `Source Date - 182 days`?
+        *   `7/3/2015` - 182 days = `1/3/2015`.
+        *   Target is `1/1/2015`.
+    *   Is it possible the target dates are `Source Date - 183 days` but the sample provided in the prompt has a typo or I am miscounting?
+    *   Let's check the distinct count.
+    *   Source: 182 rows.
+    *   Target: 183 rows.
+    *   This implies a row was added or the range expanded.
+    *   The target starts at `1/1/2015` and ends at `7/2/2015`.
+    *   The source starts at `7/3/2015` and ends at `12/31/2015`.
+    *   If we shift the source back by ~183 days, we cover Jan-July 2015.
+    *   Since the row counts differ (182 vs 183), and the start/end dates don't align perfectly with a single constant integer day shift for all rows (183 vs 182), there might be a more complex logic or a "nearest" logic.
+    *   However, looking at the data values, they are identical.
+    *   `Source[0]` values == `Target[0]` values.
+    *   `Source[1]` values == `Target[1]` values.
+    *   So the rows are mapped 1-to-1.
+    *   Row 0: Source `7/3/2015` -> Target `1/1/2015`. Diff 183.
+    *   Row 1: Source `7/19/2015` -> Target `1/17/2015`. Diff 183.
+    *   Row 2: Source `8/4/2015` -> Target `2/3/2015`. Diff 182.
+    *   Row 3: Source `8/21/2015` -> Target `2/19/2015`. Diff 183.
+    *   Row 4: Source `9/6/2015` -> Target `3/8/2015`. Diff 182.
+    *   Row 5: Source `9/23/2015` -> Target `3/24/2015`. Diff 182.
+        *   `9/23` - `3/24`. Mar 24 to Sep 23.
+        *   Mar: 7. Apr: 30. May: 31. Jun: 30. Jul: 31. Aug: 31. Sep: 23.
+        *   7+30+31+30+31+31+23 = 183.
+    *   It seems the difference is either 182 or 183.
+    *   This pattern `183, 183, 182, 183, 182, 183...` suggests that the target dates are simply `Source Date - 183 days`?
+    *   If I do `Source Date - 183 days`:
+        *   Row 0: `1/3/2015`. Target `1/1/2015`.
+        *   Row 2: `2/1/2015`. Target `2/3/2015`.
+    *   This doesn't match.
+    *   What if the target dates are `Source Date - 182 days`?
+        *   Row 0: `1/3/2015` - 1 day = `1/2`? No.
+    *   Let's look at the target column `date` format: `YYYY-MM-DD 00:00:00`.
+    *   The values are just shifted.
+    *   Is it possible the shift is based on the day of the week?
+    *   Source `7/3/2015` (Fri). Target `1/1/2015` (Thu).
+    *   Source `7/19/2015` (Sun). Target `1/17/2015` (Sat).
+    *   Source `8/4/2015` (Tue). Target `2/3/2015` (Tue).
+    *   Source `8/21/2015` (Fri). Target `2/19/2015` (Thu).
+    *   It seems `Target Day of Week = Source Day of Week - 1` (mod 7)?
+        *   Fri -> Thu.
+        *   Sun -> Sat.
+        *   Tue -> Tue? No.
+    *   Let's check Row 2 again. `8/4/2015` is Tuesday. `2/3/2015` is Tuesday.
+    *   Row 3: `8/21/2015` (Fri) -> `2/19/2015` (Thu).
+    *   Row 4: `9/6/2015` (Sun) -> `3/8/2015` (Sun).
+    *   Row 5: `9/23/2015` (Wed) -> `3/24/2015` (Tue).
+    *   So for some rows the DOW is preserved, for others it shifts by -1.
+    *   This is getting complicated.
+    *   Let's look at the target row count: 183. Source: 182.
+    *   Maybe the target includes a row for `1/1/2015` which is not in the shifted source?
+    *   But the values in Target Row 0 match Source Row 0.
+    *   So Source Row 0 *becomes* Target Row 0.
+    *   So the date transformation is `Source Date -> Target Date`.
+    *   Given the complexity and the fact that `183` is the average offset, and the dates are bi-weekly, maybe the target dates are just `Source Date - 183 days`?
+    *   Let's check if the prompt's target sample dates are actually `Source Date - 183 days` and I made a calculation error.
+    *   `7/3/2015` - 183 days.
+        *   2015 is not a leap year.
+        *   Days in 2015 before July 3: 31+28+31+30+31+30+3 = 184.
+        *   So July 3 is the 184th day of the year.
+        *   184 - 183 = 1.
+        *   The 1st day of the year is Jan 1.
+        *   So `7/3/2015` - 183 days = `1/1/2015`. **Matches.**
+    *   `7/19/2015` - 183 days.
+        *   July 19 is day 184 + 16 = 200.
+        *   200 - 183 = 17.
+        *   17th day of year is Jan 17. **Matches.**
+    *   `8/4/2015` - 183 days.
+        *   Aug 4 is day 200 + 16 = 216.
+        *   216 - 183 = 33.
+        *   33rd day of year. Jan 31 + 2 = Feb 2.
+        *   Target is `2/3/2015`.
+        *   Why Feb 3?
+        *   Maybe the offset is 182?
+        *   216 - 182 = 34.
+        *   34th day is Feb 3. **Matches.**
+    *   `8/21/2015` - 183 days.
+        *   Aug 21 is day 216 + 17 = 233.
+        *   233 - 183 = 50.
+        *   50th day. Jan 31 + 19 = Feb 19. **Matches.**
+    *   `9/6/2015` - 182 days?
+        *   Sep 6 is day 233 + 16 = 249.
+        *   249 - 182 = 67.
+        *   67th day. Jan 31 + 28 + 8 = Mar 8. **Matches.**
+    *   So the offset is **not constant**. It alternates or depends on the month?
+    *   Row 0: 183.
+    *   Row 1: 183.
+    *   Row 2: 182.
+    *   Row 3: 183.
+    *   Row 4: 182.
+    *   Row 5: 183.
+    *   This looks like `183 - (row_index % 2 == 0 ? 0 : 0)`? No.
+    *   It looks like `183` for odd indices? No, Row 1 is 183. Row 3 is 183. Row 5 is 183.
+    *   Row 0 is 183.
+    *   Row 2 is 182.
+    *   Row 4 is 182.
+    *   So even indices > 0 are 182? Row 0 is 183.
+    *   This is inconsistent.
+    *   Let's check the next few.
+    *   Row 6: `9/23/2015`. Target `3/24/2015`.
+        *   Sep 23 is day 249 + 17 = 266.
+        *   266 - 183 = 83.
+        *   83rd day. Jan 31 + Feb 28 + Mar 24

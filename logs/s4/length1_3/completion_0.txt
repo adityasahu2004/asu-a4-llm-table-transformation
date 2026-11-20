@@ -1,0 +1,107 @@
+**Operator plan:**
+1.  **Parse Dates:** Convert the `date` column from `MM/DD/YYYY` format to datetime objects.
+2.  **Generate Target Rows:** Create a complete daily frequency index (or series of dates) covering the range of the source data (from min to max date inclusive). This accounts for the target row count being slightly higher than the source (183 vs 182), implying missing days in the source are filled or the source is a subset of a continuous range. *Correction*: The prompt says "Compute the result only from the source DataFrame". However, the target has 183 rows and source has 182. The target dates are "Wed 01/01/2014" to "Wed 07/02/2014". The source dates are "7/3/2014" to "12/31/2014". Wait, looking closely at the sample data:
+    *   Source `date` sample: "7/3/2014" ... "12/31/2014".
+    *   Target `cst` sample: "Wed 01/01/2014" ... "Wed 07/02/2014".
+    *   The values in the target columns (e.g., `1:00` = 0.401886 for "Wed 01/01/2014") do *not* appear in the source sample rows provided.
+    *   Actually, let's look at the structure. The source has 182 rows. The target has 183 rows.
+    *   Source distinct dates: 182. Target distinct `cst`: 183.
+    *   The target column `cst` format is `DayOfWeek MM/DD/YYYY`.
+    *   The target hour columns are `1:00` through `24:00`.
+    *   The source hour columns are `1:00 AM` through `12:00 PM` etc.
+    *   Mapping source hours to target hours:
+        *   `1:00 AM` -> `1:00`
+        *   ...
+        *   `11:00 AM` -> `11:00`
+        *   `12:00 PM` -> `12:00` (Source has `12:00 AM` and `12:00 PM`. `12:00 AM` is midnight/start of day, usually hour 0 or 24? But target starts at 1:00. Let's look at the source columns again.
+        *   Source: `1:00 AM`, `2:00 AM` ... `11:00 AM`, `12:00 AM`, `1:00 PM` ... `12:00 PM`.
+        *   Standard 24h clock mapping:
+            *   1:00 AM -> 1:00
+            *   2:00 AM -> 2:00
+            *   ...
+            *   11:00 AM -> 11:00
+            *   12:00 PM -> 12:00
+            *   1:00 PM -> 13:00
+            *   ...
+            *   11:00 PM -> 23:00
+            *   12:00 AM -> 24:00 (Midnight at the end of the day)
+    *   Let's verify this mapping with the data if possible. We don't have overlapping rows in the sample to verify values, but the column count matches (24 hours).
+    *   The target `cst` is formatted as `%a %m/%d/%Y`.
+    *   Since the target row count (183) differs from source (182), and the date ranges in the samples are disjoint (Source: July-Dec 2014, Target: Jan-July 2014), this implies the transformation involves **reindexing to a complete date range** or the provided sample is just a snippet and the full evaluation set contains all dates. However, I cannot generate dates not in the source.
+    *   *Re-reading the note*: "Source row count describes a training sample only, not the evaluation input." This suggests the evaluation input might have all dates. But I must write a function that works on the *source* DataFrame provided. If the source has gaps, should I fill them? The target has 183 rows, source has 182. 182 days in July-Dec? July(31)+Aug(31)+Sep(30)+Oct(31)+Nov(30)+Dec(31) = 184 days. The source has 182 rows. So the source is missing 2 days. The target has 183 rows. The target range Jan(31)+Feb(28)+Mar(31)+Apr(30)+May(31)+Jun(30)+July(2) = 183 days.
+    *   This implies the target represents a *complete* daily series. The source is a sparse subset.
+    *   However, I cannot "infer" missing data values. I can only transform existing data.
+    *   Wait, is it possible the source *is* the target but shuffled/renamed? No, the dates are completely different.
+    *   Is it possible the `date` column in source needs to be parsed, and then the DataFrame is simply reformatted? If I just reformat the 182 rows of the source, I will get 182 rows. The target specification says 183 rows.
+    *   Constraint: "Compute the result only from the source DataFrame."
+    *   If the evaluation source contains the full 183 rows (or more), my code should handle it. The sample provided in the prompt is just a sample. The "Source" block describes the *schema* and *sample*. The "Target" block describes the *expected output schema* and *sample*.
+    *   If the evaluation input is the full dataset (which likely has no gaps or has the specific gaps filled), I should just process the rows present.
+    *   Let's assume the transformation is row-wise mapping.
+    *   Step 1: Parse `date` column.
+    *   Step 2: Format `date` to `cst` (`%a %m/%d/%Y`).
+    *   Step 3: Rename and reorder hour columns to `1:00`...`24:00`.
+    *   Step 4: Drop unused columns (`DSL`).
+
+    **Hour Mapping Logic:**
+    1.  `1:00 AM` -> `1:00`
+    2.  `2:00 AM` -> `2:00`
+    3.  `3:00 AM` -> `3:00`
+    4.  `4:00 AM` -> `4:00`
+    5.  `5:00 AM` -> `5:00`
+    6.  `6:00 AM` -> `6:00`
+    7.  `7:00 AM` -> `7:00`
+    8.  `8:00 AM` -> `8:00`
+    9.  `9:00 AM` -> `9:00`
+    10. `10:00 AM` -> `10:00`
+    11. `11:00 AM` -> `11:00`
+    12. `12:00 PM` -> `12:00`
+    13. `1:00 PM` -> `13:00`
+    14. `2:00 PM` -> `14:00`
+    15. `3:00 PM` -> `15:00`
+    16. `4:00 PM` -> `16:00`
+    17. `5:00 PM` -> `17:00`
+    18. `6:00 PM` -> `18:00`
+    19. `7:00 PM` -> `19:00`
+    20. `8:00 PM` -> `20:00`
+    21. `9:00 PM` -> `21:00`
+    22. `10:00 PM` -> `22:00`
+    23. `11:00 PM` -> `23:00`
+    24. `12:00 AM` -> `24:00`
+
+    This covers all 24 target columns.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    dt = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    
+    # Create the output dataframe
+    out = pd.DataFrame(index=source.index)
+    
+    # Format the date as "DayOfWeek MM/DD/YYYY"
+    out['cst'] = dt.dt.strftime('%a %m/%d/%Y')
+    
+    # Define the mapping from source column names to target column names
+    # Source: 1:00 AM ... 11:00 AM, 12:00 PM, 1:00 PM ... 11:00 PM, 12:00 AM
+    # Target: 1:00 ... 24:00
+    
+    # Mapping for AM hours (1-11)
+    for h in range(1, 12):
+        out[f'{h}:00'] = source[f'{h}:00 AM']
+        
+    # Mapping for 12:00 PM
+    out['12:00'] = source['12:00 PM']
+    
+    # Mapping for PM hours (1-11) -> 13:00 - 23:00
+    for h in range(1, 12):
+        target_h = h + 12
+        out[f'{target_h}:00'] = source[f'{h}:00 PM']
+        
+    # Mapping for 12:00 AM -> 24:00
+    out['24:00'] = source['12:00 AM']
+    
+    # Reset index to ensure clean integer index
+    return out.reset_index(drop=True)
+```

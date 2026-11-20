@@ -1,0 +1,165 @@
+Operator plan:
+1. Parse the `date` column into a datetime object.
+2. Shift the dates forward by 6 months to align with the target date range (e.g., source `7/3/2015` becomes `1/3/2016`? No, target starts `01/01/2015`. Let's look closer.
+   Source first date: `7/3/2015`. Target first date: `Thu 01/01/2015`.
+   Source last date: `12/31/2015`. Target last date: `Thu 07/02/2015`.
+   This looks like a subtraction of 6 months.
+   `7/3/2015` - 6 months = `1/3/2015`.
+   `12/31/2015` - 6 months = `6/30/2015`.
+   Wait, the target sample has `Thu 01/01/2015` as the first row.
+   Let's check the distinct counts. Source has 182 rows. Target has 183 rows.
+   The target sample shows dates starting from `01/01/2015` and ending at `07/02/2015`.
+   The source sample shows dates starting from `7/3/2015` and ending at `12/31/2015`.
+   
+   Let's look at the mapping of values.
+   Source row 0: `7/3/2015`. Values: `0.000239...` for hours 1-5, `0.000119...` for hour 6, `0.0` for 7-8, `0` for 9-16, `0.0` for 17, `0.0` for 18-21, `0.000239...` for 22-24.
+   Target row 0: `Thu 01/01/2015`. Values: `0.000239...` for hours 1-6, `0.000239...` for 7, `0.000119...` for 8, `0` for 9-16, `0.000119...` for 17, `0.000239...` for 18-24.
+   
+   The values don't match directly row-by-row with a simple shift. The distinct values in target are different.
+   However, notice the pattern of "Hour X" columns.
+   Source: `Hour 1` to `Hour 24`.
+   Target: `1:00` to `24:00`.
+   
+   Let's look at the date transformation again.
+   Source `7/3/2015` (Friday). Target `Thu 01/01/2015`.
+   Source `7/19/2015` (Sunday). Target `Sat 01/17/2015`.
+   Source `8/4/2015` (Tuesday). Target `Tue 02/03/2015`.
+   
+   It seems the dates are shifted back by 6 months.
+   `7/3/2015` -> `1/3/2015`. But target is `1/1/2015`.
+   `7/19/2015` -> `1/19/2015`. But target is `1/17/2015`.
+   `8/4/2015` -> `2/4/2015`. But target is `2/3/2015`.
+   
+   Actually, let's look at the day of week.
+   Source `7/3/2015` is a Friday. Target `01/01/2015` is a Thursday.
+   Source `7/19/2015` is a Sunday. Target `01/17/2015` is a Saturday.
+   Source `8/4/2015` is a Tuesday. Target `02/03/2015` is a Tuesday.
+   
+   Wait, `8/4/2015` - 6 months = `2/4/2015` (Wednesday). Target is `2/3/2015` (Tuesday).
+   `7/3/2015` - 6 months = `1/3/2015` (Saturday). Target is `1/1/2015` (Thursday).
+   
+   Let's check the offset in days.
+   `1/1/2015` is 2 days before `1/3/2015`.
+   `1/17/2015` is 2 days before `1/19/2015`.
+   `2/3/2015` is 1 day before `2/4/2015`.
+   
+   This is inconsistent. Let's look at the values again.
+   Source Row 0 (`7/3/2015`): H6=0.000119, H7=0, H8=0.
+   Target Row 0 (`01/01/2015`): H6=0.000239, H7=0.000239, H8=0.000119.
+   
+   Source Row 1 (`7/19/2015`): H6=0.000119, H7=0, H8=0.
+   Target Row 1 (`01/17/2015`): H6=0.000239, H7=0.000239, H8=0.0.
+   
+   Source Row 2 (`8/4/2015`): H6=0.000119, H7=0, H8=0.
+   Target Row 2 (`02/03/2015`): H6=0.000239, H7=0.000239, H8=0.0.
+   
+   It seems the values are not simply copied. The target data has different distributions.
+   However, the problem states "Infer a general transformation... Compute the result only from the source DataFrame."
+   And "Do not use information from any evaluation file."
+   
+   Is it possible that the target is just the source with renamed columns and formatted dates?
+   Let's check the distinct counts.
+   Source `Hour 1`: 1 distinct value. Target `1:00`: 1 distinct value.
+   Source `Hour 6`: 2 distinct values. Target `6:00`: 3 distinct values.
+   
+   If the values are different, I cannot just copy them. But I must compute the result from the source.
+   This implies there might be a mathematical operation or a lookup.
+   However, usually these tasks are about reshaping and formatting.
+   
+   Let's look at the date format in target: `Thu 01/01/2015`.
+   Format: `%a %m/%d/%Y`.
+   
+   Let's look at the column names: `Hour 1` -> `1:00`.
+   
+   If the values are strictly derived from the source, and the distinct counts differ, maybe there's a calculation.
+   But looking at Source `Hour 1` (all 0.0002398657) and Target `1:00` (all 0.0002398657), they are identical.
+   Source `Hour 2` (all 0.0002398657) and Target `2:00` (all 0.0002398657), identical.
+   Source `Hour 22` (all 0.0002398657) and Target `22:00` (all 0.0002398657), identical.
+   
+   Source `Hour 6` has values `0.0001199328` and `0.0002398657`.
+   Target `6:00` has values `0.0002398657`, `0.0001199328`, `0.0`.
+   
+   Source `Hour 7` has values `0.0`, `0.0001199328`, `0.0002398657`.
+   Target `7:00` has values `0.0002398657`, `0.0001199328`, `0.0`.
+   
+   The sets of values are similar but the counts and distribution might differ due to row count difference (182 vs 183).
+   Target has 183 rows. Source has 182 rows.
+   Target first date: `01/01/2015`. Target last date: `07/02/2015`.
+   Source first date: `7/3/2015`. Source last date: `12/31/2015`.
+   
+   If we subtract 6 months from Source dates:
+   `7/3/2015` -> `1/3/2015`.
+   `12/31/2015` -> `6/30/2015`.
+   This range (`1/3/2015` to `6/30/2015`) is contained within (`01/01/2015` to `07/02/2015`).
+   Target has 2 extra days: `01/01`, `01/02` and `07/01`, `07/02`.
+   
+   The target sample shows `01/01/2015` as the first row.
+   The source sample does not have a corresponding row for `01/01/2015` (which would be `07/01/2015` in source).
+   Source starts at `7/3/2015`.
+   
+   This suggests that the transformation might involve generating a full date range and merging, or the source provided is a subset.
+   However, I must compute the result *from the source DataFrame*. I cannot generate arbitrary rows if they are not in the source.
+   But the target has 183 rows and source has 182.
+   
+   Let's check if the target rows correspond to the source rows shifted by 6 months, plus some boundary rows.
+   If I simply format the source dates as `date - 6 months` and rename columns, I will get 182 rows.
+   The target has 183 rows.
+   
+   Perhaps the `date` column in source is not the only key.
+   Or perhaps the "note" implies the sample is small.
+   
+   Let's assume the standard transformation:
+   1. Rename columns `Hour X` to `X:00`.
+   2. Parse `date`, subtract 6 months, format as `%a %m/%d/%Y`.
+   3. Return the dataframe.
+   
+   If the row count differs, it might be due to the evaluation set having different boundaries. The instruction says "Source row count describes a training sample only, not the evaluation input." This implies the code should handle the general case. If the evaluation source has 183 rows, my code will produce 183 rows. If the training source has 182, it produces 182. The discrepancy in the sample might be due to the specific dates in the sample.
+   
+   Let's verify the date shift.
+   Source `7/3/2015` -> Target `1/3/2015`?
+   Target sample starts `1/1/2015`.
+   If the source had `7/1/2015`, it would map to `1/1/2015`.
+   The source sample starts at `7/3/2015`.
+   So, if the full source dataset includes `7/1/2015` and `7/2/2015`, they would map to `1/1/2015` and `1/2/2015`.
+   The sample just skipped them.
+   
+   So the transformation is:
+   1. Parse `date`.
+   2. Subtract 6 months.
+   3. Format as `cst` with `%a %m/%d/%Y`.
+   4. Rename `Hour X` to `X:00`.
+   5. Keep the values as is.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Create a copy to avoid modifying the original
+    df = source.copy()
+    
+    # Parse the date and subtract 6 months
+    # Using pd.tseries.offsets.MonthBegin might be safer, but simple subtraction is often intended.
+    # Given 7/3 -> 1/3, simple month subtraction works.
+    df['cst'] = pd.to_datetime(df['date'], format='%m/%d/%Y') - pd.offsets.MonthEnd(0) # This subtracts 0 months? No.
+    # Correct way to subtract 6 months:
+    df['cst'] = pd.to_datetime(df['date'], format='%m/%d/%Y') + pd.DateOffset(months=-6)
+    
+    # Format the date
+    df['cst'] = df['cst'].dt.strftime('%a %m/%d/%Y')
+    
+    # Rename columns
+    rename_dict = {}
+    for i in range(1, 25):
+        rename_dict[f'Hour {i}'] = f'{i}:00'
+    
+    df.rename(columns=rename_dict, inplace=True)
+    
+    # Drop the original date column
+    df.drop(columns=['date'], inplace=True)
+    
+    # Reorder columns to match target: cst first, then hours
+    cols = ['cst'] + [f'{i}:00' for i in range(1, 25)]
+    df = df[cols]
+    
+    return df
+```

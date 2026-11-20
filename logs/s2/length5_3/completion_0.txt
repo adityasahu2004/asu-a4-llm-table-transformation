@@ -1,0 +1,75 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `date` column from string format (`M/D/YYYY H:MM`) to a pandas datetime object.
+2.  **Extract Components**:
+    *   Extract the calendar date (year, month, day) to group rows.
+    *   Extract the hour (0-23) to determine the column index for the wide format.
+3.  **Pivot/Reshape**:
+    *   Group by the calendar date.
+    *   For each date, map the `cerc_logger_1` values to columns `value1` through `value24` based on the extracted hour (Hour 0 -> `value1`, Hour 1 -> `value2`, ..., Hour 23 -> `value24`).
+    *   Since the source data appears to have one reading per hour per day (based on the distinct count of dates in target matching the number of days, and 24 columns), we can pivot the data. If multiple readings exist for the same hour/day, the problem implies a deterministic mapping or aggregation, but given the "distinct" counts and typical sensor data patterns in these tasks, it's likely a direct pivot where each hour maps to one value. If there are duplicates, standard pivot behavior (or taking the first/mean) might be needed, but usually, these datasets are clean 1:1 per hour. Let's assume a direct mapping.
+    *   Actually, looking at the source sample, the times are not exactly on the hour (e.g., 4:50, 9:30). However, the target has 24 columns. The source has 74,848 rows. The target has 521 rows. 521 days * 24 hours = 12,504 slots. This doesn't match 74,848.
+    *   Let's re-examine. Source `date` has 74,848 distinct values. This means every row is a unique timestamp.
+    *   Target `date` has 521 distinct values. These are calendar dates.
+    *   Target has 24 value columns.
+    *   This implies we need to aggregate the source data into daily profiles.
+    *   How do we map irregular timestamps (4:50, 9:30) to 24 hourly buckets?
+    *   Usually, "Hour 1" corresponds to the 00:00-00:59 bucket, "Hour 2" to 01:00-01:59, etc.
+    *   We should group by Calendar Date and Hour (0-23).
+    *   Then, for each group, we need a single value. The source has many readings per hour?
+    *   Let's check the distinct values. Source `cerc_logger_1` has 1279 distinct values.
+    *   If we group by Date and Hour, and there are multiple readings, we likely need to take the **mean** or **first**. Given the precision of the target values (e.g., 24.25, 22.187), which look like averages or specific sensor readings, and the fact that sensor data often requires averaging over an hour, **mean** is the standard aggregation for time-series bucketing.
+    *   Let's verify with the sample.
+        *   Target row `05/08/2019`, `value1` (Hour 0) is 24.25.
+        *   We don't have the source rows for 05/08/2019 in the sample to verify the aggregation logic directly, but the pattern of "irregular timestamps -> hourly buckets" strongly suggests grouping by hour and aggregating.
+    *   Steps:
+        1. Parse `date` to datetime.
+        2. Create a `date_only` column (YYYY-MM-DD).
+        3. Create an `hour` column (0-23).
+        4. Group by `date_only` and `hour`.
+        5. Aggregate `cerc_logger_1` using `mean`.
+        6. Pivot the result so `hour` becomes columns 1-24.
+        7. Rename columns to `value1`...`value24`.
+        8. Format `date_only` as `MM/DD/YYYY`.
+        9. Sort by date.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    df = source.copy()
+    df['datetime'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract date and hour
+    df['date_only'] = df['datetime'].dt.date
+    df['hour'] = df['datetime'].dt.hour
+    
+    # Group by date and hour, and calculate the mean of the sensor value
+    # This handles the irregular timestamps by bucketing them into hours
+    grouped = df.groupby(['date_only', 'hour'])['cerc_logger_1'].mean().reset_index()
+    
+    # Pivot the table to have hours as columns
+    # hour 0 -> value1, hour 1 -> value2, ..., hour 23 -> value24
+    pivoted = grouped.pivot(index='date_only', columns='hour', values='cerc_logger_1')
+    
+    # Rename columns to value1, value2, ... value24
+    pivoted.columns = [f'value{h+1}' for h in pivoted.columns]
+    
+    # Reset index to make date_only a column
+    pivoted = pivoted.reset_index()
+    
+    # Format the date column as MM/DD/YYYY
+    pivoted['date'] = pd.to_datetime(pivoted['date_only']).dt.strftime('%m/%d/%Y')
+    
+    # Select and order the columns
+    result = pivoted[['date', 'value1', 'value2', 'value3', 'value4', 'value5', 'value6', 
+                      'value7', 'value8', 'value9', 'value10', 'value11', 'value12', 
+                      'value13', 'value14', 'value15', 'value16', 'value17', 'value18', 
+                      'value19', 'value20', 'value21', 'value22', 'value23', 'value24']]
+    
+    # Sort by date to ensure consistent ordering
+    result = result.sort_values('date').reset_index(drop=True)
+    
+    return result
+```

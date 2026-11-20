@@ -1,0 +1,225 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `Date` column from `M/D/YYYY` format to a datetime object.
+2.  **Format Date**: Convert the datetime object to the target string format `YYYY-MM-DD 00:00:00` and assign to `date`.
+3.  **Map Hour Columns**: The source has columns `Hr 1` through `Hr 24`. The target has columns labeled with 12-hour clock times (AM/PM).
+    *   Source `Hr 1` (1:00 AM) -> Target `1:00 AM`
+    *   Source `Hr 2` (2:00 AM) -> Target `2:00 AM`
+    *   ...
+    *   Source `Hr 11` (11:00 AM) -> Target `11:00 AM`
+    *   Source `Hr 12` (12:00 PM) -> Target `12:00 PM` (Note: Target sample shows `12:00 PM` at the end, but let's verify the order. The target columns are: `1:00 AM`...`11:00 AM`, `12:00 AM`?? No, looking at the target schema: `1:00 AM`...`11:00 AM`, `12:00 AM` is listed in the schema but the sample data order is `1:00 AM`...`11:00 AM`, `12:00 AM`? Wait.
+    *   Let's look closely at the target sample columns: `1:00 AM`, `2:00 AM`, ..., `11:00 AM`, `12:00 AM`, `1:00 PM`, ..., `11:00 PM`, `12:00 PM`.
+    *   Wait, the target schema lists `12:00 AM` after `11:00 AM`? That seems odd for chronological order, but let's check the values.
+    *   Source `Hr 12` is typically noon (12:00 PM). Source `Hr 24` is midnight (12:00 AM) or end of day.
+    *   Let's check the first row of source data: `Hr 1` = 2.43, `Hr 12` = 2.41, `Hr 24` = 2.60.
+    *   Let's check the first row of target data: `1:00 AM` = 0.91, `12:00 AM` = 0.91, `12:00 PM` = 0.91. The values are different. This implies a transformation or a different dataset?
+    *   Actually, looking at the distinct counts: Source `Hr 1` has 1127 distinct. Target `1:00 AM` has 2166 distinct. The row counts are the same (2190). The values are clearly different.
+    *   Let's re-read the prompt. "Infer the transformation".
+    *   Is it possible the target is just a re-labeling and the values in the sample are from a different run or I am misinterpreting the sample?
+    *   Let's look at the second row. Source `Hr 1` = 1.15. Target `1:00 AM` = 0.63.
+    *   Let's look at the third row. Source `Hr 1` = 16.64. Target `1:00 AM` = 7.96.
+    *   There is a significant value change. However, usually these tasks are structural (renaming, reshaping). If the values change, there might be a calculation.
+    *   Let's look at the columns again.
+    *   Source: `Hr 1` ... `Hr 24`.
+    *   Target: `1:00 AM` ... `12:00 PM`.
+    *   Let's check if the target values are simply the source values mapped to different columns.
+    *   Source Row 1: `Hr 1`=2.43, `Hr 2`=2.33... `Hr 12`=2.41... `Hr 24`=2.60.
+    *   Target Row 1: `1:00 AM`=0.91... `12:00 PM`=0.91.
+    *   The values are completely different. This suggests the "sample" data in the prompt might be illustrative of the *schema* but not the exact *values* from the source sample provided, OR there is a complex calculation.
+    *   However, in these types of "infer transformation" tasks, if the values don't match, it's often because the sample data provided in the JSON is just a snapshot of the *target* file which might have been processed differently, or I need to look for a pattern.
+    *   Let's look at the distinct counts. Source `Hr 1` (1127) vs Target `1:00 AM` (2166). The target has *more* distinct values? That's impossible if it's a direct mapping from the same rows.
+    *   Wait, the source has 2190 rows. The target has 2190 rows.
+    *   Source `Hr 1` distinct: 1127. Target `1:00 AM` distinct: 2166.
+    *   This implies the target values are NOT just a rename of the source values.
+    *   Is it possible the target is an aggregation? No, row count is the same.
+    *   Is it possible the target is a different dataset entirely? The prompt says "Infer the transformation from this schema/sample block".
+    *   Let's look at the date. Source `1/1/2014`. Target `2014-01-01 00:00:00`. This is a format change.
+    *   Let's look at the column names. `Hr 1` -> `1:00 AM`. `Hr 12` -> `12:00 PM`? Or `12:00 AM`?
+    *   Standard 24-hour to 12-hour conversion:
+        *   1 -> 1:00 AM
+        *   2 -> 2:00 AM
+        *   ...
+        *   11 -> 11:00 AM
+        *   12 -> 12:00 PM
+        *   13 -> 1:00 PM
+        *   ...
+        *   23 -> 11:00 PM
+        *   24 -> 12:00 AM (or 12:00 AM for midnight start?)
+    *   Let's check the target column order in the sample:
+        `1:00 AM`, `2:00 AM`, ..., `11:00 AM`, `12:00 AM`, `1:00 PM`, ..., `11:00 PM`, `12:00 PM`.
+        This order is weird. `12:00 AM` is between `11:00 AM` and `1:00 PM`? That would be noon? No, 12:00 AM is midnight. 12:00 PM is noon.
+        If `12:00 AM` is in the middle, it's likely a typo in the target schema description or the sample column list order is not chronological.
+        Let's look at the target schema list:
+        `1:00 AM` ... `11:00 AM`, `12:00 AM`, `1:00 PM` ... `11:00 PM`, `12:00 PM`.
+        This looks like `12:00 AM` is placed where `12:00 PM` (noon) usually is in a 1-12 sequence if one mistakenly uses AM for noon? Or maybe `12:00 AM` refers to noon in this specific (incorrect) labeling?
+        Actually, let's look at the values in the target sample again.
+        Row 1: `11:00 AM` = 0.86, `12:00 AM` = 0.93, `1:00 PM` = 0.84.
+        Row 1 Source: `Hr 11` = 2.41, `Hr 12` = 2.41, `Hr 13` = 2.25.
+        The values are still not matching.
+
+    *   **Hypothesis**: The provided "sample" data in the JSON for the target is **not** derived from the provided "sample" data in the source. It is just a sample of the *target file* which contains different data. The task is to infer the **structural** transformation (column renaming, date formatting) based on the schema and column names, assuming the values in the evaluation set will follow the same structural rules. The distinct count discrepancy confirms the values are different (likely different underlying data or a calculation I can't reverse engineer from just one sample row without more context, but usually these tasks are about schema mapping).
+    *   Given the constraints "Compute the result only from the source DataFrame", and the inability to reverse-engineer a value transformation from mismatched samples, I will assume the task is **structural mapping**:
+        1.  Format `Date` to `YYYY-MM-DD 00:00:00`.
+        2.  Rename `Hr N` to the corresponding 12-hour format string.
+        3.  Preserve the values from the source `Hr N` columns.
+
+    *   **Mapping Logic**:
+        *   `Hr 1` -> `1:00 AM`
+        *   `Hr 2` -> `2:00 AM`
+        *   ...
+        *   `Hr 11` -> `11:00 AM`
+        *   `Hr 12` -> `12:00 PM` (Standard noon)
+        *   `Hr 13` -> `1:00 PM`
+        *   ...
+        *   `Hr 23` -> `11:00 PM`
+        *   `Hr 24` -> `12:00 AM` (Standard midnight/end of day)
+
+    *   **Target Column Order**: The target schema lists columns in a specific order. I must respect this order.
+        Target Columns:
+        `date`
+        `1:00 AM`
+        `2:00 AM`
+        `3:00 AM`
+        `4:00 AM`
+        `5:00 AM`
+        `6:00 AM`
+        `7:00 AM`
+        `8:00 AM`
+        `9:00 AM`
+        `10:00 AM`
+        `11:00 AM`
+        `12:00 AM`  <-- Note: This is listed here. In standard time, 12:00 AM is midnight. But in the sequence 1..11 AM, then 12 AM, then 1 PM... this is non-standard. Usually it's 12 AM, 1 AM... or 11 AM, 12 PM, 1 PM.
+        Let's look at the target sample data values for `12:00 AM` vs `12:00 PM`.
+        Target Sample Row 1: `12:00 AM` = 0.93132. `12:00 PM` = 0.91513.
+        Source Sample Row 1: `Hr 12` = 2.4108. `Hr 24` = 2.60843.
+        If I assume the structural mapping is correct, `Hr 12` maps to `12:00 PM` and `Hr 24` maps to `12:00 AM`.
+        However, the target schema lists `12:00 AM` *before* `1:00 PM`.
+        If `12:00 AM` is midnight, it should be at the start or end.
+        If `12:00 AM` is a typo for `12:00 PM` (noon), then the order is 1-11 AM, 12 PM, 1-11 PM, 12 AM? No, the last column is `12:00 PM`.
+        Let's look at the last column in target schema: `12:00 PM`.
+        Let's look at the column before last: `11:00 PM`.
+        So the end of the day is `11:00 PM`, `12:00 PM`. This implies `12:00 PM` is midnight? No, 12:00 PM is noon. 12:00 AM is midnight.
+        There is a confusion in the target schema labels or my interpretation.
+        
+        Let's look at the distinct values in the target schema again.
+        `12:00 AM` distinct: 2174.
+        `12:00 PM` distinct: 2174.
+        
+        Let's assume the standard mapping:
+        1-11 -> 1-11 AM
+        12 -> 12 PM
+        13-23 -> 1-11 PM
+        24 -> 12 AM
+        
+        Now, let's look at the target column *order* in the schema:
+        `1:00 AM` ... `11:00 AM`
+        `12:00 AM`  <-- This is the 13th column.
+        `1:00 PM` ... `11:00 PM`
+        `12:00 PM`  <-- This is the 25th column.
+        
+        If I map `Hr 12` to `12:00 PM` and `Hr 24` to `12:00 AM`, then:
+        `Hr 12` goes to the last column.
+        `Hr 24` goes to the 13th column.
+        
+        This seems highly unlikely for a time series. Usually `Hr 12` (noon) is in the middle.
+        Is it possible `12:00 AM` in the target schema actually means Noon (12:00 PM) and `12:00 PM` means Midnight (12:00 AM)?
+        Or is it possible the labels are just swapped?
+        
+        Let's look at the source `Hr 12` and `Hr 24` values in the sample.
+        Row 1: `Hr 12` = 2.41, `Hr 24` = 2.60.
+        Row 2: `Hr 12` = 1.68, `Hr 24` = 1.41.
+        
+        Let's look at the target sample values for the columns at positions 13 and 25.
+        Target Col 13 (`12:00 AM`): Row 1 = 0.93, Row 2 = 0.86.
+        Target Col 25 (`12:00 PM`): Row 1 = 0.91, Row 2 = 0.63.
+        
+        The values are still not matching the source.
+        
+        However, there is a strong pattern in these problems: **Rename columns**.
+        The most logical mapping for `Hr 12` is `12:00 PM` (Noon).
+        The most logical mapping for `Hr 24` is `12:00 AM` (Midnight).
+        
+        If the target schema has `12:00 AM` at position 13 and `12:00 PM` at position 25, and I map `Hr 12` to `12:00 PM` and `Hr 24` to `12:00 AM`, I am putting `Hr 12` at the end and `Hr 24` in the middle. This breaks the chronological order of the columns.
+        
+        Alternative: The target labels are just names.
+        Maybe `12:00 AM` in the target *is* Noon? (Some systems use 12:00 AM for noon incorrectly).
+        Maybe `12:00 PM` in the target *is* Midnight?
+        
+        Let's look at the column names in the target sample data list:
+        `1:00 AM` ... `11:00 AM`, `12:00 AM`, `1:00 PM` ... `11:00 PM`, `12:00 PM`.
+        
+        If I assume the target columns are in chronological order:
+        1. 1:00 AM
+        ...
+        11. 11:00 AM
+        12. 12:00 PM (Noon) -> But the label is `12:00 AM`?
+        13. 1:00 PM
+        ...
+        23. 11:00 PM
+        24. 12:00 AM (Midnight) -> But the label is `12:00 PM`?
+        
+        This suggests the labels `12:00 AM` and `12:00 PM` in the target schema are **swapped** relative to standard time, OR the labels are correct and the order is not chronological.
+        
+        However, looking at the source `Hr 12` and `Hr 24`:
+        `Hr 12` is the 12th hour.
+        `Hr 24` is the 24th hour.
+        
+        If I simply rename `Hr 12` to `12:00 PM` and `Hr 24` to `12:00 AM`, and then select the columns in the order specified by the target schema, I will get:
+        ... `11:00 AM` (`Hr 11`), `12:00 AM` (`Hr 24`), `1:00 PM` (`Hr 13`) ... `12:00 PM` (`Hr 12`).
+        
+        This results in a non-chronological column order.
+        
+        Let's try the other mapping:
+        `Hr 12` -> `12:00 AM` (Label in target at pos 13)
+        `Hr 24` -> `12:00 PM` (Label in target at pos 25)
+        
+        This results in:
+        ... `11:00 AM` (`Hr 11`), `12:00 AM` (`Hr 12`), `1:00 PM` (`Hr 13`) ... `12:00 PM` (`Hr 24`).
+        
+        This preserves the chronological order of the *data* (1, 2, ... 11, 12, 13... 24) into the target columns, even if the labels `12:00 AM` and `12:00 PM` are semantically swapped (i.e., the column labeled `12:00 AM` contains the noon data, and the column labeled `12:00 PM` contains the midnight data).
+        
+        Given that `Hr 12` is physically the 12th column and `Hr 24` is the 24th, and the target has 24 hour columns, it is most likely that the transformation is a direct positional rename where:
+        `Hr 1` -> `1:00 AM`
+        ...
+        `Hr 11` -> `11:00 AM`
+        `Hr 12` -> `12:00 AM` (Target Label)
+        `Hr 13` -> `1:00 PM`
+        ...
+        `Hr 23` -> `11:00 PM`
+        `Hr 24` -> `12:00 PM` (Target Label)
+        
+        This assumes the target labels for 12 are swapped or non-standard. I will follow the target schema's column names exactly.
+
+4.  **Construct DataFrame**:
+    *   Create `date` column.
+    *   Create columns `1:00 AM` through `12:00 PM` by mapping from `Hr 1` through `Hr 24`.
+    *   Return the DataFrame with the exact target column order.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date and format it as YYYY-MM-DD 00:00:00
+    dt = pd.to_datetime(source['Date'], format='%m/%d/%Y')
+    out = pd.DataFrame()
+    out['date'] = dt.strftime('%Y-%m-%d 00:00:00')
+    
+    # Mapping from Source Hour to Target Label
+    # Source Hr 1-11 -> 1:00 AM - 11:00 AM
+    # Source Hr 12 -> 12:00 AM (Based on target column order position 13)
+    # Source Hr 13-23 -> 1:00 PM - 11:00 PM
+    # Source Hr 24 -> 12:00 PM (Based on target column order position 25)
+    
+    target_cols = [
+        '1:00 AM', '2:00 AM', '3:00 AM', '4:00 AM', '5:00 AM', '6:00 AM', 
+        '7:00 AM', '8:00 AM', '9:00 AM', '10:00 AM', '11:00 AM', '12:00 AM',
+        '1:00 PM', '2:00 PM', '3:00 PM', '4:00 PM', '5:00 PM', '6:00 PM', 
+        '7:00 PM', '8:00 PM', '9:00 PM', '10:00 PM', '11:00 PM', '12:00 PM'
+    ]
+    
+    source_cols = [f'Hr {i}' for i in range(1, 25)]
+    
+    for t_col, s_col in zip(target_cols, source_cols):
+        out[t_col] = source[s_col]
+        
+    return out
+```

@@ -1,0 +1,161 @@
+Operator plan:
+1. Parse the `timestamp` column into a datetime object and format it as `YYYY-MM-DD HH:MM:SS` for the `datetime` column.
+2. Map specific source columns to the target columns:
+   - `AC COMPRESSOR WHS [emon ch3,4]` + `AIR HANDLER WHS [emon ch5,6]` + `Minisplit WHS (2-CTs) [xpod chA-7,8]` -> `hvac` (Summing these three HVAC-related columns. Note: In the sample, `hvac` values like 98301.0 seem to be sentinel or aggregated differently, but looking at valid rows like `2012-08-27 13:00:00`, `hvac` is 33294.0. Source `AC COMP` is 32767.0 (sentinel?), `AIR HANDLER` is 32767.0 (sentinel?), `Minisplit` is 32767.0. This suggests simple mapping might be tricky if sentinels are involved. However, looking at row `2015-11-14 02:00:00` in source: `AC COMP`=0, `AIR HANDLER`=16, `Minisplit`=32767. Target `hvac`=18.0. 0+16+2? No. Let's look at `2013-08-11 11:00:00`. Source: `AC COMP`=898, `AIR HANDLER`=273, `Minisplit`=32767. Target `hvac`=1395. 898+273 = 1171. Not 1395.
+   Let's re-examine `hvac`.
+   Row `2012-08-27 13:00:00`: Target `hvac`=33294. Source `AC COMP`=32767, `AIR HANDLER`=32767, `Minisplit`=32767.
+   Row `2013-10-17 19:00:00`: Target `hvac`=34123. Source `AC COMP`=32767, `AIR HANDLER`=32767, `Minisplit`=32767.
+   Row `2015-11-27 22:00:00`: Target `hvac`=18. Source `AC COMP`=0, `AIR HANDLER`=0, `Minisplit`=0.
+   Row `2013-09-25 03:00:00`: Target `hvac`=32773. Source `AC COMP`=0, `AIR HANDLER`=0, `Minisplit`=0.
+   
+   Actually, looking at the distinct values and the nature of the data, `32767` is a common "bad data" or "null" sentinel in this dataset (emonitor).
+   Let's look at `water_heating`. Target `water_heating` maps to `WATER HEATER WHS [emon ch7,8]`.
+   Row `2012-08-27 13:00:00`: Target `water_heating`=1074. Source `WATER HEATER`=1074. Match.
+   Row `2015-11-27 22:00:00`: Target `water_heating`=0. Source `WATER HEATER`=0. Match.
+   
+   Let's look at `refrigerator`. Target `refrigerator` maps to `Primary Fridge WHS [emon ch12]` + `2nd Fridge WHS [emon ch13]`?
+   Row `2012-08-27 13:00:00`: Target `refrigerator`=479. Source `Primary Fridge`=479, `2nd Fridge`=0. Sum=479. Match.
+   Row `2015-11-27 22:00:00`: Target `refrigerator`=32816. Source `Primary Fridge`=32767, `2nd Fridge`=49? No, `2nd Fridge` is 49 in source? No, `2nd Fridge` is 49 in row `2015-11-27`? Let's check source row `2015-11-27 22:00:00`. It's not in the sample.
+   Let's check sample row `2013-08-11 11:00:00`. Target `refrigerator`=91. Source `Primary Fridge`=91, `2nd Fridge`=0. Sum=91. Match.
+   
+   Let's look at `clothes_dryer`. Target `clothes_dryer` maps to `DRYER WHS (1-CT) [emon ch9]` + `Dryer WHS (2-CTs) [xpod chA-9,10]`?
+   Row `2012-08-27 13:00:00`: Target `clothes_dryer`=32849. Source `DRYER (1-CT)`=0, `Dryer (2-CTs)`=32767. Sum=32767. Close but not exact.
+   Row `2015-11-14 02:00:00`: Target `clothes_dryer`=2. Source `DRYER (1-CT)`=3, `Dryer (2-CTs)`=0. Sum=3. Mismatch.
+   Wait, look at `2015-11-14 02:00:00`. Source `DRYER (1-CT)`=3. Target `clothes_dryer`=2.
+   Look at `2013-12-07 23:00:00`. Target `clothes_dryer`=4. Source `DRYER (1-CT)`=0, `Dryer (2-CTs)`=4. Sum=4. Match.
+   
+   Let's look at `dishwasher`. Target `dishwasher` maps to `DISH WASHER WHS [emon ch11]`.
+   Row `2012-08-27 13:00:00`: Target `dishwasher`=0. Source `DISH WASHER`=0. Match.
+   Row `2013-09-25 03:00:00`: Target `dishwasher`=147. Source `DISH WASHER`=147. Match.
+   
+   Let's look at `cooking_range`. Target `cooking_range` maps to `RANGE WHS (1-CT) [emon ch10]`.
+   Row `2012-08-27 13:00:00`: Target `cooking_range`=311. Source `RANGE`=311. Match.
+   
+   Let's look at `pool_spa_pumps`. Target `pool_spa_pumps` maps to `POOL PUMP WHS (2-CTs) [xpod chA-3,4]`.
+   Row `2012-08-27 13:00:00`: Target `pool_spa_pumps`=1333. Source `POOL PUMP`=1333. Match.
+   
+   The columns `clothes_washer`, `interior_lighting`, `exterior_lighting`, `lighting`, `plug`, `pool_spa_heater` are all 0 in the target sample.
+   
+   Re-evaluating `hvac`.
+   Row `2012-08-27 13:00:00`: Target `hvac`=33294.
+   Source `AC COMP`=32767, `AIR HANDLER`=32767, `Minisplit`=32767.
+   Row `2013-10-17 19:00:00`: Target `hvac`=34123.
+   Source `AC COMP`=32767, `AIR HANDLER`=32767, `Minisplit`=32767.
+   Row `2015-11-27 22:00:00`: Target `hvac`=18.
+   Source `AC COMP`=0, `AIR HANDLER`=0, `Minisplit`=0.
+   Row `2013-09-25 03:00:00`: Target `hvac`=32773.
+   Source `AC COMP`=0, `AIR HANDLER`=0, `Minisplit`=0.
+   
+   It seems `hvac` is not a simple sum. However, notice that `32767` is a sentinel.
+   If we treat 32767 as NaN, then for `2012-08-27`, all are NaN.
+   But the target has a value.
+   Let's look at `TOTAL BLDG WHS`.
+   Row `2012-08-27`: Total=2069.
+   Row `2013-10-17`: Total=1155.
+   Row `2015-11-27`: Total=539.
+   Row `2013-09-25`: Total=32767.
+   
+   There is no obvious arithmetic relationship for `hvac` from the visible columns in the sample for the high-value rows.
+   However, for the low value rows:
+   `2015-11-27 22:00:00`: Target `hvac`=18. Source `AC`=0, `Air`=0, `Mini`=0.
+   `2013-09-25 03:00:00`: Target `hvac`=32773. Source `AC`=0, `Air`=0, `Mini`=0.
+   
+   Wait, look at `2015-11-14 02:00:00` (First sample row).
+   Target `hvac` is not in the target sample for this row? The target sample starts with `2012-08-22`.
+   The source sample has `2015-11-14`. The target sample has `2015-11-14 01:00:00` as the last row.
+   Let's check the last target row `2015-11-14 01:00:00`.
+   Target `hvac`=32782.
+   Source row `2015-11-14 02:00:00` is not `01:00:00`.
+   
+   Let's assume the mapping is:
+   `hvac` = `AC COMPRESSOR WHS [emon ch3,4]` + `AIR HANDLER WHS [emon ch5,6]` + `Minisplit WHS (2-CTs) [xpod chA-7,8]`
+   `water_heating` = `WATER HEATER WHS [emon ch7,8]`
+   `refrigerator` = `Primary Fridge WHS [emon ch12]` + `2nd Fridge WHS [emon ch13]`
+   `clothes_dryer` = `DRYER WHS (1-CT) [emon ch9]` + `Dryer WHS (2-CTs) [xpod chA-9,10]`
+   `dishwasher` = `DISH WASHER WHS [emon ch11]`
+   `cooking_range` = `RANGE WHS (1-CT) [emon ch10]`
+   `pool_spa_pumps` = `POOL PUMP WHS (2-CTs) [xpod chA-3,4]`
+   Others are 0.
+
+   The discrepancies in the sample (e.g., `hvac` 33294 vs sum of sentinels) might be due to:
+   1. Different rows in source vs target (the samples are just "samples", not necessarily aligned row-by-row in the JSON snippet, although the note says "Source row count describes a training sample only"). The target sample rows are likely a subset of the full dataset.
+   2. Sentinel handling. If 32767 is treated as 0, sums might work for some, but not the high ones.
+   
+   Given the instruction "Infer a general transformation", and the clear column name mappings for the non-zero/non-sentinel rows, I will proceed with the summation mappings. The integer columns `clothes_washer`, `interior_lighting`, `exterior_lighting`, `lighting`, `plug`, `pool_spa_heater` are set to 0.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse timestamp
+    dt = pd.to_datetime(source['timestamp'])
+    out = pd.DataFrame()
+    out['datetime'] = dt.strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Define column mappings
+    # hvac: AC Compressor + Air Handler + Minisplit
+    hvac_cols = [
+        'AC COMPRESSOR WHS [emon ch3,4]',
+        'AIR HANDLER WHS [emon ch5,6]',
+        'Minisplit WHS (2-CTs) [xpod chA-7,8]'
+    ]
+    out['hvac'] = source[hvac_cols].sum(axis=1)
+    
+    # water_heating: Water Heater
+    out['water_heating'] = source['WATER HEATER WHS [emon ch7,8]']
+    
+    # refrigerator: Primary Fridge + 2nd Fridge
+    fridge_cols = [
+        'Primary Fridge WHS [emon ch12]',
+        '2nd Fridge WHS [emon ch13]'
+    ]
+    out['refrigerator'] = source[fridge_cols].sum(axis=1)
+    
+    # clothes_washer: Not clearly mapped, default to 0
+    out['clothes_washer'] = 0
+    
+    # clothes_dryer: Dryer (1-CT) + Dryer (2-CTs)
+    dryer_cols = [
+        'DRYER WHS (1-CT) [emon ch9]',
+        'Dryer WHS (2-CTs) [xpod chA-9,10]'
+    ]
+    out['clothes_dryer'] = source[dryer_cols].sum(axis=1)
+    
+    # dishwasher: Dish Washer
+    out['dishwasher'] = source['DISH WASHER WHS [emon ch11]']
+    
+    # cooking_range: Range
+    out['cooking_range'] = source['RANGE WHS (1-CT) [emon ch10]']
+    
+    # pool_spa_pumps: Pool Pump
+    out['pool_spa_pumps'] = source['POOL PUMP WHS (2-CTs) [xpod chA-3,4]']
+    
+    # interior_lighting: Default to 0
+    out['interior_lighting'] = 0
+    
+    # exterior_lighting: Default to 0
+    out['exterior_lighting'] = 0
+    
+    # lighting: Default to 0
+    out['lighting'] = 0
+    
+    # plug: Default to 0
+    out['plug'] = 0
+    
+    # pool_spa_heater: Default to 0
+    out['pool_spa_heater'] = 0
+    
+    # Ensure dtypes match target
+    # float64
+    float_cols = ['hvac', 'water_heating', 'refrigerator', 'clothes_dryer', 'dishwasher', 'cooking_range', 'pool_spa_pumps']
+    for col in float_cols:
+        out[col] = out[col].astype('float64')
+        
+    # int64
+    int_cols = ['clothes_washer', 'interior_lighting', 'exterior_lighting', 'lighting', 'plug', 'pool_spa_heater']
+    for col in int_cols:
+        out[col] = out[col].astype('int64')
+        
+    return out
+```

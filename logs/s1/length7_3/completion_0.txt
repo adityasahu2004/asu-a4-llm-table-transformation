@@ -1,0 +1,397 @@
+### Operator Plan
+
+1.  **Map Month Names**: The source `Month` column contains abbreviated months (e.g., "Mar", "Apr"). The target `month` column contains full month names (e.g., "September", "October").
+    *   Observation: The source months are Mar, Apr, May, Jun, Jul, Aug. The target months are Sep, Oct, Nov, Dec, Jan, Feb.
+    *   Logic: This represents a shift of +6 months in the calendar year.
+        *   Mar (3) -> Sep (9)
+        *   Apr (4) -> Oct (10)
+        *   May (5) -> Nov (11)
+        *   Jun (6) -> Dec (12)
+        *   Jul (7) -> Jan (1)
+        *   Aug (8) -> Feb (2)
+    *   Implementation: Create a mapping dictionary from source abbreviations to target full names based on this +6 month shift.
+
+2.  **Map Day Types**: The source `Daytype` column contains "WD" and "WE". The target `day` column contains "weekday" and "weekend".
+    *   Implementation: Map "WD" -> "weekday" and "WE" -> "weekend".
+
+3.  **Transform Hourly Values**: The source has columns "1:00" through "24:00". The target has columns "hr1" through "hr24".
+    *   Observation: Comparing specific values between source and target for the same logical row (e.g., Source Mar WD vs Target Sep WD):
+        *   Source `1:00` = 0.6, Target `hr1` = 0.5. Difference: -0.1
+        *   Source `6:00` = 0.8, Target `hr6` = 0.6. Difference: -0.2
+        *   Source `12:00` = 0.8, Target `hr12` = 0.6. Difference: -0.2
+        *   Source `17:00` = 0.9, Target `hr17` = 0.8. Difference: -0.1
+        *   Source `24:00` = 0.7, Target `hr24` = 0.6. Difference: -0.1
+    *   Let's check another row. Source Apr WD vs Target Oct WD:
+        *   Source `1:00` = 0.5, Target `hr1` = 0.5. Difference: 0.0
+        *   Source `6:00` = 0.6, Target `hr6` = 0.6. Difference: 0.0
+        *   Source `12:00` = 0.7, Target `hr12` = 0.6. Difference: -0.1
+        *   Source `17:00` = 0.8, Target `hr17` = 0.8. Difference: 0.0
+    *   Let's check Source May WD vs Target Nov WD:
+        *   Source `1:00` = 0.5, Target `hr1` = 0.6. Difference: +0.1
+        *   Source `6:00` = 0.6, Target `hr6` = 0.7. Difference: +0.1
+        *   Source `12:00` = 0.7, Target `hr12` = 0.7. Difference: 0.0
+        *   Source `17:00` = 0.8, Target `hr17` = 0.9. Difference: +0.1
+    *   Let's check Source Jun WD vs Target Dec WD:
+        *   Source `1:00` = 0.6, Target `hr1` = 0.7. Difference: +0.1
+        *   Source `6:00` = 0.6, Target `hr6` = 0.7. Difference: +0.1
+        *   Source `12:00` = 0.7, Target `hr12` = 0.8. Difference: +0.1
+        *   Source `17:00` = 0.9, Target `hr17` = 1.1. Difference: +0.2
+    *   Let's check Source Jul WD vs Target Jan WD:
+        *   Source `1:00` = 0.8, Target `hr1` = 0.8. Difference: 0.0
+        *   Source `6:00` = 0.6, Target `hr6` = 0.9. Difference: +0.3
+        *   Source `12:00` = 1.0, Target `hr12` = 0.9. Difference: -0.1
+        *   Source `17:00` = 1.1, Target `hr17` = 1.1. Difference: 0.0
+    *   Let's check Source Aug WD vs Target Feb WD:
+        *   Source `1:00` = 0.8, Target `hr1` = 0.7. Difference: -0.1
+        *   Source `6:00` = 0.7, Target `hr6` = 0.9. Difference: +0.2
+        *   Source `12:00` = 1.0, Target `hr12` = 0.9. Difference: -0.1
+        *   Source `17:00` = 1.2, Target `hr17` = 1.2. Difference: 0.0
+
+    The differences are not constant across all hours or all rows. This suggests the transformation is not a simple arithmetic operation on the values themselves, but rather a **reordering** or **shifting** of the data based on the month shift.
+    
+    Wait, look at the target distinct values.
+    Source `1:00` distinct: [0.6, 0.7, 0.5, 0.8]
+    Target `hr1` distinct: [0.5, 0.6, 0.7, 0.8]
+    
+    Source `24:00` distinct: [0.7, 0.8, 0.6, 0.9]
+    Target `hr24` distinct: [0.6, 0.7, 0.8, 0.9]
+    
+    Let's look at the mapping again.
+    Source Mar -> Target Sep.
+    Source Apr -> Target Oct.
+    ...
+    
+    Is it possible that the values in the target are simply the values from the source, but the *rows* are permuted?
+    No, the row count is the same (12).
+    
+    Let's look at the values for `hr1` in the target.
+    Target `hr1` values:
+    Sep WD: 0.5
+    Sep WE: 0.6
+    Oct WD: 0.5
+    Oct WE: 0.5
+    Nov WD: 0.6
+    Nov WE: 0.6
+    Dec WD: 0.7
+    Dec WE: 0.7
+    Jan WD: 0.8
+    Jan WE: 0.8
+    Feb WD: 0.7
+    Feb WE: 0.8
+    
+    Source `1:00` values:
+    Mar WD: 0.6
+    Mar WE: 0.7
+    Apr WD: 0.5
+    Apr WE: 0.6
+    May WD: 0.5
+    May WE: 0.6
+    Jun WD: 0.6
+    Jun WE: 0.6
+    Jul WD: 0.8
+    Jul WE: 0.7
+    Aug WD: 0.8
+    Aug WE: 0.7
+    
+    There is no direct 1-to-1 value mapping between Source `1:00` and Target `hr1`.
+    
+    However, notice the pattern in the target `hr` columns.
+    Target `hr1` for Sep WD is 0.5.
+    Source `1:00` for Apr WD is 0.5.
+    Source `1:00` for May WD is 0.5.
+    
+    Let's look at Target `hr6` for Sep WD: 0.6.
+    Source `6:00` for Apr WD: 0.6.
+    Source `6:00` for May WD: 0.6.
+    Source `6:00` for Jun WD: 0.6.
+    
+    Let's look at Target `hr12` for Sep WD: 0.6.
+    Source `12:00` for Apr WD: 0.7.
+    Source `12:00` for May WD: 0.7.
+    Source `12:00` for Jun WD: 0.7.
+    
+    This hypothesis is weak. Let's look closer at the differences calculated earlier.
+    
+    Mar WD -> Sep WD:
+    1:00: 0.6 -> 0.5 (-0.1)
+    2:00: 0.6 -> 0.5 (-0.1)
+    3:00: 0.6 -> 0.5 (-0.1)
+    4:00: 0.6 -> 0.5 (-0.1)
+    5:00: 0.6 -> 0.5 (-0.1)
+    6:00: 0.8 -> 0.6 (-0.2)
+    7:00: 0.9 -> 0.7 (-0.2)
+    8:00: 0.9 -> 0.7 (-0.2)
+    9:00: 0.9 -> 0.7 (-0.2)
+    10:00: 0.8 -> 0.6 (-0.2)
+    11:00: 0.8 -> 0.6 (-0.2)
+    12:00: 0.8 -> 0.6 (-0.2)
+    13:00: 0.8 -> 0.6 (-0.2)
+    14:00: 0.8 -> 0.6 (-0.2)
+    15:00: 0.8 -> 0.6 (-0.2)
+    16:00: 0.8 -> 0.7 (-0.1)
+    17:00: 0.9 -> 0.8 (-0.1)
+    18:00: 1.0 -> 0.9 (-0.1)
+    19:00: 1.1 -> 1.0 (-0.1)
+    20:00: 1.2 -> 1.0 (-0.2)
+    21:00: 1.1 -> 1.0 (-0.1)
+    22:00: 1.0 -> 0.9 (-0.1)
+    23:00: 0.9 -> 0.7 (-0.2)
+    24:00: 0.7 -> 0.6 (-0.1)
+
+    Apr WD -> Oct WD:
+    1:00: 0.5 -> 0.5 (0.0)
+    2:00: 0.5 -> 0.5 (0.0)
+    3:00: 0.5 -> 0.4 (-0.1)
+    4:00: 0.5 -> 0.4 (-0.1)
+    5:00: 0.5 -> 0.5 (0.0)
+    6:00: 0.6 -> 0.6 (0.0)
+    7:00: 0.7 -> 0.7 (0.0)
+    8:00: 0.8 -> 0.7 (-0.1)
+    9:00: 0.7 -> 0.7 (0.0)
+    10:00: 0.7 -> 0.6 (-0.1)
+    11:00: 0.7 -> 0.6 (-0.1)
+    12:00: 0.7 -> 0.6 (-0.1)
+    13:00: 0.7 -> 0.6 (-0.1)
+    14:00: 0.7 -> 0.6 (-0.1)
+    15:00: 0.7 -> 0.6 (-0.1)
+    16:00: 0.7 -> 0.7 (0.0)
+    17:00: 0.8 -> 0.8 (0.0)
+    18:00: 0.9 -> 0.9 (0.0)
+    19:00: 0.9 -> 1.0 (+0.1)
+    20:00: 1.0 -> 1.0 (0.0)
+    21:00: 1.0 -> 1.0 (0.0)
+    22:00: 0.9 -> 0.9 (0.0)
+    23:00: 0.7 -> 0.7 (0.0)
+    24:00: 0.6 -> 0.6 (0.0)
+
+    The differences are not consistent. This implies the transformation is likely **not** a simple arithmetic adjustment.
+    
+    Let's re-read the prompt carefully. "Infer a general transformation from the source schema and target specification."
+    
+    Is it possible the target data is just the source data with the columns renamed and the rows reordered?
+    Source Rows: Mar WD, Mar WE, Apr WD, Apr WE, May WD, May WE, Jun WD, Jun WE, Jul WD, Jul WE, Aug WD, Aug WE.
+    Target Rows: Sep WD, Sep WE, Oct WD, Oct WE, Nov WD, Nov WE, Dec WD, Dec WE, Jan WD, Jan WE, Feb WD, Feb WE.
+    
+    If we assume the *values* in the target correspond to the *values* in the source for the same relative position in the "season" or "year", we might be looking for a shift.
+    
+    Let's look at the distinct values again.
+    Source `1:00`: [0.6, 0.7, 0.5, 0.8]
+    Target `hr1`: [0.5, 0.6, 0.7, 0.8]
+    
+    Source `24:00`: [0.7, 0.8, 0.6, 0.9]
+    Target `hr24`: [0.6, 0.7, 0.8, 0.9]
+    
+    It looks like the set of values is shifted by -0.1?
+    Source `1:00` min 0.5, max 0.8. Target `hr1` min 0.5, max 0.8.
+    Source `24:00` min 0.6, max 0.9. Target `hr24` min 0.6, max 0.9.
+    
+    Let's check `hr12`.
+    Source `12:00`: [0.8, 1.1, 0.7, 0.9, 1.0]
+    Target `hr12`: [0.6, 0.9, 0.7, 1.0, 0.8, 1.1]
+    
+    The sets are different.
+    
+    Let's look at the relationship between Source Month and Target Month again.
+    Mar -> Sep
+    Apr -> Oct
+    May -> Nov
+    Jun -> Dec
+    Jul -> Jan
+    Aug -> Feb
+    
+    This is a +6 month shift.
+    
+    What if the values in the target are actually the values from the source, but from a *different* month?
+    For example, Target Sep WD values might come from Source Mar WD?
+    Source Mar WD `1:00` = 0.6. Target Sep WD `hr1` = 0.5. No.
+    
+    What if Target Sep WD values come from Source *previous* month? No previous month in source.
+    
+    Let's look at the differences again.
+    Mar WD -> Sep WD: mostly -0.1 or -0.2.
+    Apr WD -> Oct WD: mostly 0.0 or -0.1.
+    May WD -> Nov WD: mostly +0.1 or 0.0.
+    Jun WD -> Dec WD: mostly +0.1 or +0.2.
+    Jul WD -> Jan WD: mixed.
+    Aug WD -> Feb WD: mixed.
+    
+    This looks like a seasonal adjustment.
+    
+    However, there is a simpler possibility. What if the target is just the source data, but the *columns* are shifted?
+    No, the column names change from "1:00" to "hr1".
+    
+    Let's look at the target `hr1` values again:
+    Sep WD: 0.5
+    Sep WE: 0.6
+    Oct WD: 0.5
+    Oct WE: 0.5
+    Nov WD: 0.6
+    Nov WE: 0.6
+    Dec WD: 0.7
+    Dec WE: 0.7
+    Jan WD: 0.8
+    Jan WE: 0.8
+    Feb WD: 0.7
+    Feb WE: 0.8
+    
+    Source `1:00` values:
+    Mar WD: 0.6
+    Mar WE: 0.7
+    Apr WD: 0.5
+    Apr WE: 0.6
+    May WD: 0.5
+    May WE: 0.6
+    Jun WD: 0.6
+    Jun WE: 0.6
+    Jul WD: 0.8
+    Jul WE: 0.7
+    Aug WD: 0.8
+    Aug WE: 0.7
+    
+    Is there a mapping between Source Month/Daytype and Target Month/Daytype that preserves values?
+    Target Sep WD (0.5) matches Source Apr WD (0.5) and Source May WD (0.5).
+    Target Sep WE (0.6) matches Source Apr WE (0.6), Source May WE (0.6), Source Jun WD (0.6), Source Jun WE (0.6).
+    
+    This is ambiguous.
+    
+    Let's look at the note: "Source row count describes a training sample only, not the evaluation input."
+    
+    Let's assume the transformation is:
+    1. Rename columns.
+    2. Map Month names.
+    3. Map Daytype names.
+    4. Apply a specific arithmetic transformation to the values.
+    
+    Let's look at the differences for `hr1` again.
+    Mar->Sep: -0.1
+    Apr->Oct: 0.0
+    May->Nov: +0.1
+    Jun->Dec: +0.1
+    Jul->Jan: 0.0
+    Aug->Feb: -0.1
+    
+    Let's look at `hr12`.
+    Mar->Sep: -0.2
+    Apr->Oct: -0.1
+    May->Nov: 0.0
+    Jun->Dec: +0.1
+    Jul->Jan: -0.1
+    Aug->Feb: -0.1
+    
+    Let's look at `hr24`.
+    Mar->Sep: -0.1
+    Apr->Oct: 0.0
+    May->Nov: 0.0
+    Jun->Dec: 0.0
+    Jul->Jan: -0.1
+    Aug->Feb: 0.0
+    
+    The differences vary by hour and by month. This suggests a complex lookup or a shift in the data itself.
+    
+    Wait, look at the target `hr1` for Sep WD: 0.5.
+    Look at Source `1:00` for Apr WD: 0.5.
+    Look at Source `1:00` for May WD: 0.5.
+    
+    Look at Target `hr1` for Oct WD: 0.5.
+    Look at Source `1:00` for Apr WD: 0.5.
+    Look at Source `1:00` for May WD: 0.5.
+    
+    Look at Target `hr1` for Nov WD: 0.6.
+    Look at Source `1:00` for Mar WD: 0.6.
+    Look at Source `1:00` for Apr WE: 0.6.
+    Look at Source `1:00` for May WE: 0.6.
+    Look at Source `1:00` for Jun WD: 0.6.
+    Look at Source `1:00` for Jun WE: 0.6.
+    
+    This is not working.
+    
+    Let's try a different angle. What if the target values are simply the source values, but the *rows* are shifted?
+    Source Row 0 (Mar WD) -> Target Row ?
+    Source Row 1 (Mar WE) -> Target Row ?
+    
+    If we shift the source rows by 6 positions (circularly)?
+    Source has 12 rows.
+    Row 0 (Mar WD) -> Row 6 (Jun WD)? No, Target Row 0 is Sep WD.
+    
+    If we map Source Month to Target Month:
+    Mar -> Sep
+    Apr -> Oct
+    May -> Nov
+    Jun -> Dec
+    Jul -> Jan
+    Aug -> Feb
+    
+    And we keep the Daytype the same (WD->WD, WE->WE).
+    
+    Then we need to transform the values.
+    
+    Let's look at the difference between Source and Target for the same logical entity (e.g. Mar WD -> Sep WD).
+    
+    Maybe the transformation is: `Target = Source - 0.1` for some months, `Source` for others?
+    
+    Let's look at the distinct values in the target again.
+    Target `hr1`: [0.5, 0.6, 0.7, 0.8]
+    Source `1:00`: [0.5, 0.6, 0.7, 0.8]
+    
+    Target `hr2`: [0.5, 0.6, 0.7, 0.8]
+    Source `2:00`: [0.5, 0.6, 0.7]
+    
+    Target `hr3`: [0.4, 0.5, 0.6, 0.7]
+    Source `3:00`: [0.5, 0.6, 0.7]
+    
+    Target `hr4`: [0.4, 0.5, 0.6, 0.7]
+    Source `4:00`: [0.4, 0.5, 0.6]
+    
+    Target `hr5`: [0.5, 0.6, 0.7]
+    Source `5:00`: [0.5, 0.6]
+    
+    Target `hr6`: [0.5, 0.6, 0.7, 0.8, 0.9]
+    Source `6:00`: [0.5, 0.6, 0.7, 0.8]
+    
+    It seems the target values are just the source values, but potentially shifted by a constant per month?
+    
+    Let's check the difference for `hr1` again.
+    Mar->Sep: -0.1
+    Apr->Oct: 0.0
+    May->Nov: +0.1
+    Jun->Dec: +0.1
+    Jul->Jan: 0.0
+    Aug->Feb: -0.1
+    
+    Let's check the difference for `hr12` again.
+    Mar->Sep: -0.2
+    Apr->Oct: -0.1
+    May->Nov: 0.0
+    Jun->Dec: +0.1
+    Jul->Jan: -0.1
+    Aug->Feb: -0.1
+    
+    Let's check the difference for `hr24` again.
+    Mar->Sep: -0.1
+    Apr->Oct: 0.0
+    May->Nov: 0.0
+    Jun->Dec: 0.0
+    Jul->Jan: -0.1
+    Aug->Feb: 0.0
+    
+    The differences are not consistent across hours.
+    
+    However, notice that the target `hr` columns have the same *structure* as the source `:00` columns.
+    
+    What if the transformation is simply:
+    1. Rename columns.
+    2. Map Month.
+    3. Map Daytype.
+    4. **Do not change the values.**
+    
+    Let's check if the target values are present in the source values for the corresponding row.
+    Target Sep WD `hr1` = 0.5. Source Mar WD `1:00` = 0.6. No.
+    
+    What if the target values are from a *different* source row?
+    Target Sep WD `hr1` = 0.5.
+    Source Apr WD `1:00` = 0.5.
+    Source May WD `1:00` = 0.5.
+    
+    Target Sep WD `hr2` = 0.5.
+    Source Apr WD `2:00` = 0.5.
+    Source May WD `2:00` = 0.5.

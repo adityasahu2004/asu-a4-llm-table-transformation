@@ -1,0 +1,96 @@
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse time
+    dt = pd.to_datetime(source['time'])
+    
+    # Create output dataframe
+    out = pd.DataFrame(index=source.index)
+    
+    # 1. datetime
+    out['datetime'] = dt.strftime('%Y-%m-%d %H:%M:%S')
+    
+    # 2. hvac: Sum of all heating and cooling components
+    # Heating components
+    heating_cols = [
+        'electricity_heating_kwh',
+        'electricity_central_system_heating_kwh',
+        'electricity_fans_heating_kwh',
+        'electricity_pumps_heating_kwh',
+        'electricity_central_system_pumps_heating_kwh'
+    ]
+    # Cooling components
+    cooling_cols = [
+        'electricity_cooling_kwh',
+        'electricity_central_system_cooling_kwh',
+        'electricity_fans_cooling_kwh',
+        'electricity_pumps_cooling_kwh',
+        'electricity_central_system_pumps_cooling_kwh'
+    ]
+    
+    hvac_sum = pd.Series(0.0, index=source.index)
+    for col in heating_cols + cooling_cols:
+        if col in source.columns:
+            hvac_sum += source[col].fillna(0)
+    out['hvac'] = hvac_sum
+    
+    # 3. water_heating
+    out['water_heating'] = source['electricity_water_systems_kwh']
+    
+    # 4. refrigerator
+    out['refrigerator'] = source['electricity_refrigerator_kwh']
+    
+    # 5. clothes_washer
+    out['clothes_washer'] = source['electricity_clothes_washer_kwh']
+    
+    # 6. clothes_dryer
+    out['clothes_dryer'] = source['electricity_clothes_dryer_kwh']
+    
+    # 7. dishwasher
+    out['dishwasher'] = source['electricity_dishwasher_kwh']
+    
+    # 8. cooking_range
+    out['cooking_range'] = source['electricity_cooking_range_kwh']
+    
+    # 9. pool_spa_pumps: pool pump + hot tub pump
+    pool_pump = source['electricity_pool_pump_kwh'].fillna(0)
+    hot_tub_pump = source['electricity_hot_tub_pump_kwh'].fillna(0)
+    out['pool_spa_pumps'] = pool_pump + hot_tub_pump
+    
+    # 10. interior_lighting
+    out['interior_lighting'] = source['electricity_interior_lighting_kwh']
+    
+    # 11. exterior_lighting
+    out['exterior_lighting'] = source['electricity_exterior_lighting_kwh']
+    
+    # 12. lighting: interior + exterior
+    out['lighting'] = out['interior_lighting'] + out['exterior_lighting']
+    
+    # 13. plug
+    out['plug'] = source['electricity_plug_loads_kwh']
+    
+    # 14. pool_spa_heater: pool heater + hot tub heater
+    pool_heater = source['electricity_pool_heater_kwh'].fillna(0)
+    hot_tub_heater = source['electricity_hot_tub_heater_kwh'].fillna(0)
+    out['pool_spa_heater'] = pool_heater + hot_tub_heater
+    
+    # Select and order columns
+    cols = [
+        'datetime',
+        'hvac',
+        'water_heating',
+        'refrigerator',
+        'clothes_washer',
+        'clothes_dryer',
+        'dishwasher',
+        'cooking_range',
+        'pool_spa_pumps',
+        'interior_lighting',
+        'exterior_lighting',
+        'lighting',
+        'plug',
+        'pool_spa_heater'
+    ]
+    
+    return out[cols].reset_index(drop=True)

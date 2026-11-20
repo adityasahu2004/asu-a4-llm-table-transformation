@@ -1,0 +1,286 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `Date` column from string format (`M/D/YYYY`) to `datetime` objects.
+2.  **Generate Full Date Range**: The source data contains bi-weekly snapshots (182 rows for a year implies ~2 weeks per row). The target data contains daily records (183 rows for a year implies daily). We need to expand the source data to a daily frequency.
+    *   Determine the start and end dates of the source data.
+    *   Create a complete daily date range covering the source period.
+    *   Since the source has 182 rows and the target has 183, and the dates in the target sample start at `01/01/2013` while the source sample starts at `7/3/2013`, it implies the source data covers a full year but is sampled. However, looking at the distinct counts and the nature of the data (hourly profiles), it is highly likely that the source represents specific days, and we need to interpolate or forward-fill values to create a daily time series.
+    *   *Correction/Refinement*: Let's look closer. Source has 182 rows. Target has 183 rows. Source dates in sample: `7/3/2013` to `12/31/2013`. Target dates in sample: `01/01/2013` to `07/02/2013`. This suggests the source and target samples are from different parts of the year, or the source data is just a subset.
+    *   Actually, a simpler interpretation for "deterministic transformation" without external knowledge of missing data: The source likely contains *all* the data needed, but perhaps the "182 rows" vs "183 rows" discrepancy is due to the specific evaluation set.
+    *   Let's look at the column mapping. Source columns `1` through `24` map to Target columns `1:00 AM` through `12:00 PM` (with AM/PM logic).
+        *   Source `1` -> Target `1:00 AM`
+        *   Source `2` -> Target `2:00 AM`
+        *   ...
+        *   Source `12` -> Target `12:00 PM`? No, wait.
+        *   Target columns: `1:00 AM` ... `11:00 AM`, `12:00 AM`, `1:00 PM` ... `11:00 PM`, `12:00 PM`.
+        *   This is a non-standard order. Let's map indices:
+            *   Source `1` (Hour 1) -> `1:00 AM`
+            *   Source `2` (Hour 2) -> `2:00 AM`
+            *   ...
+            *   Source `11` (Hour 11) -> `11:00 AM`
+            *   Source `12` (Hour 12) -> `12:00 PM` (Noon)
+            *   Source `13` (Hour 13) -> `1:00 PM`
+            *   ...
+            *   Source `23` (Hour 23) -> `11:00 PM`
+            *   Source `24` (Hour 24/0) -> `12:00 AM` (Midnight)
+        *   Let's check the target column order again:
+            `1:00 AM`, `2:00 AM`, ..., `11:00 AM`, `12:00 AM`, `1:00 PM`, ..., `11:00 PM`, `12:00 PM`.
+            This order is weird. `12:00 AM` is usually hour 0 or 24. `12:00 PM` is hour 12.
+            Let's re-read the target columns carefully:
+            1. `1:00 AM` (Src 1)
+            2. `2:00 AM` (Src 2)
+            3. `3:00 AM` (Src 3)
+            4. `4:00 AM` (Src 4)
+            5. `5:00 AM` (Src 5)
+            6. `6:00 AM` (Src 6)
+            7. `7:00 AM` (Src 7)
+            8. `8:00 AM` (Src 8)
+            9. `9:00 AM` (Src 9)
+            10. `10:00 AM` (Src 10)
+            11. `11:00 AM` (Src 11)
+            12. `12:00 AM` (Src 24? or Src 12?) -> Usually 12:00 AM is midnight. In 24h clock, 00:00. Source col 24 is likely 24:00/00:00.
+            13. `1:00 PM` (Src 13)
+            14. `2:00 PM` (Src 14)
+            15. `3:00 PM` (Src 15)
+            16. `4:00 PM` (Src 16)
+            17. `5:00 PM` (Src 17)
+            18. `6:00 PM` (Src 18)
+            19. `7:00 PM` (Src 19)
+            20. `8:00 PM` (Src 20)
+            21. `9:00 PM` (Src 21)
+            22. `10:00 PM` (Src 22)
+            23. `11:00 PM` (Src 23)
+            24. `12:00 PM` (Src 12)
+
+            Let's verify this mapping with data values if possible.
+            Source Row 1 (`7/3/2013`):
+            Src 12: 0.82. Src 24: 0.96.
+            Target Row for `7/3/2013`? The target sample doesn't show `7/3/2013`. It shows `01/01/2013` to `07/02/2013`.
+            However, the logic of 1-11 AM, then 12 AM, then 1-11 PM, then 12 PM is a specific permutation.
+            Standard 12-hour clock:
+            1 AM = 1
+            ...
+            11 AM = 11
+            12 PM = 12
+            1 PM = 13
+            ...
+            11 PM = 23
+            12 AM = 24 (or 0)
+
+            Target Column Order:
+            1:00 AM (1)
+            2:00 AM (2)
+            ...
+            11:00 AM (11)
+            12:00 AM (24)  <-- Note: This is midnight.
+            1:00 PM (13)
+            ...
+            11:00 PM (23)
+            12:00 PM (12)  <-- Note: This is noon.
+
+            So the mapping is:
+            Target `1:00 AM` <- Source `1`
+            Target `2:00 AM` <- Source `2`
+            ...
+            Target `11:00 AM` <- Source `11`
+            Target `12:00 AM` <- Source `24`
+            Target `1:00 PM` <- Source `13`
+            Target `2:00 PM` <- Source `14`
+            ...
+            Target `11:00 PM` <- Source `23`
+            Target `12:00 PM` <- Source `12`
+
+3.  **Date Expansion/Interpolation**:
+    The source has 182 rows. The target has 183 rows.
+    Source dates: `7/3/2013` to `12/31/2013` (Sample).
+    Target dates: `01/01/2013` to `07/02/2013` (Sample).
+    This implies the source data provided in the schema description is just a *sample* of the full source, or the full source contains all days.
+    Wait, the prompt says "Source row count describes a training sample only".
+    If the source has 182 rows and target has 183, and they cover the same year (2013 is not a leap year, 365 days), 182 is roughly half.
+    However, usually in these problems, if the row counts differ significantly (182 vs 183), it might be a simple re-indexing or the source *is* the daily data but missing one day?
+    Let's look at the distinct dates. Source: 182 distinct. Target: 183 distinct.
+    If the source is bi-weekly, we would need to interpolate. But interpolation is complex and non-deterministic without a specified method.
+    Is it possible the source *is* daily data, but the sample shown is just a subset?
+    "Source row count: 182". "Target row count: 183".
+    If the source is daily, 182 days is about 6 months.
+    The sample source dates are July-Dec. The sample target dates are Jan-July.
+    This suggests the source and target are disjoint in the sample, but the *full* source likely contains all the data for the year, or the transformation involves shifting/rolling?
+    
+    Actually, let's look at the "Class" column. It's constant "RESIDENT".
+    
+    Let's reconsider the row count. 182 vs 183.
+    If the source is daily data for a specific period, and the target is daily data for the same period, why the difference?
+    Maybe the source is missing the first or last day?
+    Or maybe the source is *weekly*? 182 / 7 = 26 weeks.
+    If it's weekly, we can't deterministically get daily data without interpolation.
+    
+    However, there is a common pattern in these datasets where the "Source" is actually the full dataset, but the *sample* shown is truncated. The schema says "rows: 182". If the evaluation input has different rows, we must handle the general case.
+    
+    Let's look at the date format.
+    Source: `7/3/2013` (M/D/YYYY).
+    Target: `01/01/2013` (MM/DD/YYYY).
+    
+    If the source has 182 rows and target has 183, and the dates in the target sample start at `01/01/2013`, it is highly probable that the source data *also* starts at `01/01/2013` in the full evaluation set, but the sample provided in the prompt is just a slice (July-Dec).
+    Why 182 vs 183?
+    2013 has 365 days.
+    182 is exactly half of 364.
+    Maybe the source is every other day?
+    If the source is every other day, we need to interpolate.
+    
+    Let's check the distinct values in the sample.
+    Source Sample Dates:
+    7/3, 7/19, 8/4, 8/21, 9/6, 9/23, 10/9, 10/26, 11/11, 11/28, 12/14, 12/31.
+    Differences:
+    7/3 to 7/19: 16 days.
+    7/19 to 8/4: 16 days.
+    8/4 to 8/21: 17 days.
+    It looks like bi-weekly (14 days) or roughly 2 weeks.
+    
+    If the source is bi-weekly, we cannot deterministically generate daily data without a specific interpolation rule (e.g., linear).
+    However, often in these "infer transformation" tasks, if the row counts are close (182 vs 183), it might be that the source *is* daily, and the "182" count in the schema is just for the *sample* provided in the JSON, not the full source?
+    No, the schema says `"rows": 182` under `"source"`. And `"rows": 183` under `"target"`.
+    And the note says: "Source row count describes a training sample only, not the evaluation input."
+    This is the key. The evaluation input will have a different number of rows.
+    The transformation must work for *any* source.
+    
+    If the source is bi-weekly and the target is daily, the transformation would require resampling.
+    But if the source is daily and the target is daily, it's just a rename and reorder.
+    
+    Let's look at the distinct counts.
+    Source `Date` distinct: 182.
+    Target `date` distinct: 183.
+    
+    If the evaluation source has, say, 365 rows (daily), and the target has 365 rows, then the operation is just renaming/reordering.
+    If the evaluation source has 182 rows (bi-weekly) and the target has 365 rows, we need interpolation.
+    
+    Given the ambiguity, let's look at the column values.
+    Source `1` (Hour 1) values are around 0.5-1.0.
+    Target `1:00 AM` values are around 0.5-1.0.
+    
+    Let's assume the standard case for these problems: **The source and target have the same granularity (daily), and the row count difference in the sample is due to the sample being a subset or a slight offset.**
+    Why? Because interpolating bi-weekly to daily is a heavy assumption. Renaming columns is a light assumption.
+    Also, 182 and 183 are very close. If it were bi-weekly to daily, the ratio would be 1:14. 182 * 14 = 2548. The target has 183. So the target is NOT daily if the source is bi-weekly.
+    If the source is bi-weekly (182 rows), and the target is also bi-weekly (183 rows), then it's just a rename/reorder.
+    
+    Let's check the target sample dates again:
+    `01/01/2013`, `01/17/2013`, `02/03/2013`, `02/19/2013`...
+    Differences:
+    1/1 to 1/17: 16 days.
+    1/17 to 2/3: 17 days.
+    2/3 to 2/19: 16 days.
+    
+    Both Source and Target samples show ~16-17 day intervals.
+    Therefore, **both Source and Target are bi-weekly (or similar frequency) data.**
+    The transformation is **not** a change in frequency. It is a **column rename and reorder**, and a **date format change**.
+    
+    Steps:
+    1.  Parse `Date` to datetime.
+    2.  Format `Date` to `MM/DD/YYYY` string. Rename to `date`.
+    3.  Map source columns `1`-`24` to the specific target column names in the specific target order.
+    4.  Drop the `Class` column.
+    5.  Return the DataFrame with the new columns.
+
+    Mapping:
+    Target Columns:
+    `1:00 AM` <- `1`
+    `2:00 AM` <- `2`
+    `3:00 AM` <- `3`
+    `4:00 AM` <- `4`
+    `5:00 AM` <- `5`
+    `6:00 AM` <- `6`
+    `7:00 AM` <- `7`
+    `8:00 AM` <- `8`
+    `9:00 AM` <- `9`
+    `10:00 AM` <- `10`
+    `11:00 AM` <- `11`
+    `12:00 AM` <- `24`
+    `1:00 PM` <- `13`
+    `2:00 PM` <- `14`
+    `3:00 PM` <- `15`
+    `4:00 PM` <- `16`
+    `5:00 PM` <- `17`
+    `6:00 PM` <- `18`
+    `7:00 PM` <- `19`
+    `8:00 PM` <- `20`
+    `9:00 PM` <- `21`
+    `10:00 PM` <- `22`
+    `11:00 PM` <- `23`
+    `12:00 PM` <- `12`
+
+    Date Format:
+    Source: `7/3/2013` -> `pd.to_datetime`
+    Target: `01/01/2013` -> `dt.strftime('%m/%d/%Y')`
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse the Date column
+    df = source.copy()
+    df['Date'] = pd.to_datetime(df['Date'])
+    
+    # 2. Format the Date column to MM/DD/YYYY and rename to 'date'
+    df['date'] = df['Date'].dt.strftime('%m/%d/%Y')
+    
+    # 3. Define the mapping from source columns to target columns
+    # Source columns are strings '1' through '24'
+    # Target columns are specific time strings
+    
+    # Create a dictionary for renaming
+    # We will construct the new dataframe by selecting and renaming columns
+    
+    # Target column order and their corresponding source columns
+    col_mapping = {
+        '1:00 AM': '1',
+        '2:00 AM': '2',
+        '3:00 AM': '3',
+        '4:00 AM': '4',
+        '5:00 AM': '5',
+        '6:00 AM': '6',
+        '7:00 AM': '7',
+        '8:00 AM': '8',
+        '9:00 AM': '9',
+        '10:00 AM': '10',
+        '11:00 AM': '11',
+        '12:00 AM': '24',
+        '1:00 PM': '13',
+        '2:00 PM': '14',
+        '3:00 PM': '15',
+        '4:00 PM': '16',
+        '5:00 PM': '17',
+        '6:00 PM': '18',
+        '7:00 PM': '19',
+        '8:00 PM': '20',
+        '9:00 PM': '21',
+        '10:00 PM': '22',
+        '11:00 PM': '23',
+        '12:00 PM': '12'
+    }
+    
+    # Select the columns in the target order
+    # Note: Source columns are strings in the schema, but might be ints in the dataframe if read differently.
+    # The schema says dtype str for Date, float64 for 1-24. The names are "1", "2", etc.
+    # We need to ensure we use the correct type for column access.
+    # In pandas, if columns are strings, we use strings.
+    
+    target_cols = list(col_mapping.keys())
+    source_cols = [col_mapping[t] for t in target_cols]
+    
+    # Ensure source_cols are strings if the dataframe columns are strings
+    # The schema shows names as "1", "2", etc.
+    source_cols_str = [str(c) for c in source_cols]
+    
+    # Select and rename
+    result = df[source_cols_str].copy()
+    result.columns = target_cols
+    
+    # Add the date column at the beginning
+    result.insert(0, 'date', df['date'])
+    
+    # Ensure numeric types are float64
+    for col in target_cols:
+        result[col] = pd.to_numeric(result[col], errors='coerce')
+        
+    return result
+```

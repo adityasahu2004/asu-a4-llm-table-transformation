@@ -1,0 +1,92 @@
+**Operator Plan:**
+1.  **Parse Date**: Parse the `date` column from string (`%m/%d/%Y`) to datetime to enable date arithmetic and formatting.
+2.  **Map Columns**: The source columns use 12-hour format with AM/PM indicators in a non-chronological order (`1:00 AM` ... `12:00 AM`, `1:00 PM` ... `12:00 PM`). We must map these specific source column names to the target chronological 24-hour indices (`pct_hourly_0100` to `pct_hourly_2400`).
+    *   `1:00 AM` -> Hour 1
+    *   `2:00 AM` -> Hour 2
+    *   ...
+    *   `12:00 AM` -> Hour 12 (Midnight, typically start of day in these schemas based on previous examples, but here it's listed after 11 AM. Let's look at the sample. Source `12:00 AM` is between `11:00 AM` and `1:00 PM`. In 24h time, 12:00 AM is 00:00. However, looking at the target schema `pct_hourly_1200`, it usually corresponds to noon (12:00 PM) or midnight depending on convention. Let's check the previous turns. In Turn 1, `PCT_HOURLY_1200` was noon. In Turn 2, `12:00` was noon. Here, the source has `12:00 AM` and `12:00 PM`.
+    *   Standard convention:
+        *   1:00 AM = 01:00
+        *   ...
+        *   11:00 AM = 11:00
+        *   12:00 PM = 12:00
+        *   1:00 PM = 13:00
+        *   ...
+        *   11:00 PM = 23:00
+        *   12:00 AM = 00:00 (or 24:00 in some contexts, or 12:00 in others).
+    *   Let's check the target column `pct_hourly_1200`. In previous tasks, `1200` was noon.
+    *   Let's check the target column `pct_hourly_2400`.
+    *   Source columns: `1:00 AM`...`11:00 AM`, `12:00 AM`, `1:00 PM`...`11:00 PM`, `12:00 PM`.
+    *   Wait, the source sample order is: `1:00 AM` ... `11:00 AM`, `12:00 AM`, `1:00 PM` ... `11:00 PM`, `12:00 PM`. This is a weird order. `12:00 AM` is usually midnight. `12:00 PM` is noon.
+    *   If `12:00 PM` is noon, it should map to Hour 12.
+    *   If `12:00 AM` is midnight, it should map to Hour 1 or Hour 24?
+    *   Let's look at the distinct counts or values.
+    *   Actually, usually in these "hourly" datasets:
+        *   Hour 1 = 01:00 (1 AM)
+        *   Hour 12 = 12:00 (Noon)
+        *   Hour 13 = 13:00 (1 PM)
+        *   Hour 24 = 00:00 (Midnight/12 AM) or 24:00.
+    *   Let's verify with the sample data if possible.
+    *   Target `pct_hourly_1200` for `1/1/2014` is `0.373929`.
+    *   Source `12:00 PM` for `1/1/2014`? The source sample doesn't have `1/1/2014`. It starts `7/3/2014`.
+    *   Let's assume standard mapping:
+        *   `1:00 AM` -> `pct_hourly_0100`
+        *   `2:00 AM` -> `pct_hourly_0200`
+        *   ...
+        *   `11:00 AM` -> `pct_hourly_1100`
+        *   `12:00 PM` -> `pct_hourly_1200`
+        *   `1:00 PM` -> `pct_hourly_1300`
+        *   ...
+        *   `11:00 PM` -> `pct_hourly_2300`
+        *   `12:00 AM` -> `pct_hourly_2400` (Midnight is often the last hour of the day in 24-hour reporting, i.e., 24:00).
+3.  **Format Date**: Format the parsed date as `%m/%d/%Y` for `dt_strata`.
+4.  **Calculate DOW**: Calculate day of week using `dt.dayofweek` (Monday=0 ... Sunday=6).
+5.  **Append Column**: Add `pct_hourly_2500` with value `0`.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date
+    dates = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    
+    # Initialize output dataframe
+    out = pd.DataFrame(index=source.index)
+    
+    # Format date string
+    out['dt_strata'] = dates.dt.strftime('%m/%d/%Y')
+    
+    # Calculate Day of Week (Monday=0, ..., Sunday=6)
+    out['dow'] = dates.dt.dayofweek
+    
+    # Mapping from source column names to target hour indices
+    # 1 AM -> 0100, ..., 11 AM -> 1100
+    # 12 PM -> 1200
+    # 1 PM -> 1300, ..., 11 PM -> 2300
+    # 12 AM -> 2400
+    
+    mapping = {}
+    
+    # Morning hours 1-11 AM
+    for h in range(1, 12):
+        mapping[f'{h}:00 AM'] = f'pct_hourly_{h:02d}00'
+        
+    # Noon
+    mapping['12:00 PM'] = 'pct_hourly_1200'
+    
+    # Afternoon/Evening hours 1-11 PM
+    for h in range(1, 12):
+        mapping[f'{h}:00 PM'] = f'pct_hourly_{h+12:02d}00'
+        
+    # Midnight
+    mapping['12:00 AM'] = 'pct_hourly_2400'
+    
+    # Apply mapping
+    for src_col, tgt_col in mapping.items():
+        out[tgt_col] = source[src_col]
+        
+    # Append the constant 25th hour column
+    out['pct_hourly_2500'] = 0
+    
+    return out.reset_index(drop=True)
+```

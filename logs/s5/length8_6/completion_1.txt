@@ -1,0 +1,136 @@
+**Operator Plan:**
+
+1.  **Parse Date**: Convert the `date` column from string format (`m/d/yyyy`) to a pandas datetime object to extract month and hour information.
+2.  **Map Hours**: Create a mapping from the source column names (e.g., "1:00 AM", "12:00 PM") to 24-hour format integers (1-24).
+    *   "12:00 AM" -> 0 (or 24? Target shows `hour` 1-24. Let's look at target `hour` values: 1, 11, 13, 15, 17, 19, 20, 22, 24, 4, 6, 9.
+    *   Source columns:
+        *   1:00 AM -> 1
+        *   2:00 AM -> 2
+        *   ...
+        *   11:00 AM -> 11
+        *   12:00 AM -> 0? Or 24? In 24-hour clock, midnight is 0 or 24. The target has a `hour` column. Let's check the target sample data.
+        *   Target row with `hour` 24 has values. Target row with `hour` 1 has values.
+        *   Usually, 12:00 AM is 0:00. 12:00 PM is 12:00.
+        *   Let's check the mapping carefully.
+        *   Source: `1:00 AM`, `2:00 AM` ... `11:00 AM`, `12:00 AM` (Midnight), `1:00 PM` ... `12:00 PM` (Noon).
+        *   Wait, standard 12-hour clock:
+            *   12:00 AM is Midnight (0:00).
+            *   1:00 AM is 1:00.
+            *   ...
+            *   11:00 AM is 11:00.
+            *   12:00 PM is Noon (12:00).
+            *   1:00 PM is 13:00.
+            *   ...
+            *   11:00 PM is 23:00.
+        *   The target `hour` column contains integers. If the target uses 1-24, then Midnight (12:00 AM) is likely 24. Let's verify with data if possible, or assume standard 1-24 mapping where 12:00 AM = 24.
+        *   Let's look at the target sample again. It has `hour` 24. It does not have `hour` 0. It has `hour` 1. So 12:00 AM maps to 24.
+3.  **Pivot/Aggregate**:
+    *   The target has one row per hour (1-24).
+    *   The target has columns for each month (january, february, ...).
+    *   This implies we need to group the data by `Hour` (derived from source column) and `Month` (derived from `date`).
+    *   Wait, the source has *one value per hour per day*. The target has *one value per hour per month*.
+    *   This implies an aggregation (likely mean or sum) across all days in that month for that specific hour.
+    *   Let's check the distinct counts. Source has 182 rows (July 3, 2014 to Dec 31, 2014 is approx 182 days? July(29)+Aug(31)+Sep(30)+Oct(31)+Nov(30)+Dec(31) = 182 days. Yes, exactly one row per day).
+    *   Target has 24 rows (one per hour).
+    *   Target columns are months.
+    *   So, for each hour (1-24) and each month (1-12), we aggregate the values from the corresponding source columns for all days in that month.
+    *   What aggregation? Mean is standard for "average profile". Sum is possible. Let's look at the magnitude.
+        *   Source values are around 0.1 - 1.0.
+        *   Target values are around 0.2 - 1.4.
+        *   If we summed 30 days, values would be 30x larger. So it's likely **Mean**.
+4.  **Construction**:
+    *   Melt the source dataframe to long format: `date`, `hour_label`, `value`.
+    *   Convert `hour_label` to integer `hour` (1-24).
+    *   Extract `month` from `date`.
+    *   Group by `hour` and `month`, calculate the mean of `value`.
+    *   Pivot the result so `hour` is the index, `month` is the columns, and values are the means.
+    *   Rename month columns to lowercase names (january, february, etc.).
+    *   Ensure all 12 months are present (fill NaN for missing months, e.g., Jan-June might be NaN if source only has Jul-Dec).
+    *   Sort by `hour`.
+
+**Step-by-step Implementation Details:**
+1.  Define mapping for hour strings to integers 1-24.
+    *   "12:00 AM" -> 24
+    *   "1:00 AM" -> 1 ... "11:00 AM" -> 11
+    *   "12:00 PM" -> 12
+    *   "1:00 PM" -> 13 ... "11:00 PM" -> 23
+2.  Melt source DF.
+3.  Parse dates.
+4.  Map hours.
+5.  GroupBy and Mean.
+6.  Pivot.
+7.  Format columns.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Melt the dataframe to long format
+    # Keep 'date' as identifier, unpivot the hour columns
+    id_vars = ['date']
+    value_vars = [col for col in source.columns if col not in id_vars and col != 'DSL']
+    
+    long_df = source.melt(id_vars=id_vars, value_vars=value_vars, var_name='hour_label', value_name='value')
+    
+    # 2. Map hour labels to 24-hour format integers (1-24)
+    # Mapping logic:
+    # 12:00 AM -> 24
+    # 1:00 AM - 11:00 AM -> 1-11
+    # 12:00 PM -> 12
+    # 1:00 PM - 11:00 PM -> 13-23
+    
+    def map_hour(label):
+        if 'AM' in label:
+            if label.startswith('12:'):
+                return 24
+            else:
+                return int(label.split(':')[0])
+        else: # PM
+            if label.startswith('12:'):
+                return 12
+            else:
+                return int(label.split(':')[0]) + 12
+
+    long_df['hour'] = long_df['hour_label'].apply(map_hour)
+    
+    # 3. Parse date and extract month
+    long_df['date_dt'] = pd.to_datetime(long_df['date'], format='%m/%d/%Y')
+    long_df['month'] = long_df['date_dt'].dt.month
+    
+    # 4. Group by hour and month, calculate mean
+    # The target has one row per hour, one col per month.
+    # We aggregate values for each (hour, month) pair.
+    grouped = long_df.groupby(['hour', 'month'])['value'].mean().reset_index()
+    
+    # 5. Pivot the data
+    # Index: hour, Columns: month, Values: mean value
+    pivoted = grouped.pivot(index='hour', columns='month', values='value')
+    
+    # 6. Ensure all months 1-12 are present and rename columns
+    month_names = {
+        1: 'january', 2: 'february', 3: 'march', 4: 'april',
+        5: 'may', 6: 'june', 7: 'july', 8: 'august',
+        9: 'september', 10: 'october', 11: 'november', 12: 'december'
+    }
+    
+    pivoted.rename(columns=month_names, inplace=True)
+    
+    # Ensure all month columns exist, filling with NaN if data is missing
+    for m in range(1, 13):
+        if month_names[m] not in pivoted.columns:
+            pivoted[month_names[m]] = np.nan
+            
+    # 7. Reset index and sort by hour
+    pivoted.reset_index(inplace=True)
+    pivoted.sort_values(by='hour', inplace=True)
+    
+    # 8. Select and order columns as per target
+    target_cols = ['hour'] + [month_names[m] for m in range(1, 13)]
+    result = pivoted[target_cols]
+    
+    # Ensure hour is int64
+    result['hour'] = result['hour'].astype('int64')
+    
+    return result
+```

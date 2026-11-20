@@ -1,0 +1,92 @@
+Operator plan:
+1. Parse the `Date` column (format `%a %m/%d/%Y`) into datetime.
+2. Create the `date` column by formatting the parsed datetime as `%m/%d/%Y`.
+3. Map the 24 hourly columns from the source (`1:00` through `24:00:00`) to the target 12-hour clock format columns (`1:00 AM` through `12:00 PM`).
+   - Source `1:00` -> Target `1:00 AM`
+   - ...
+   - Source `11:00` -> Target `11:00 AM`
+   - Source `12:00` -> Target `12:00 PM` (Noon)
+   - Source `13:00` -> Target `1:00 PM`
+   - ...
+   - Source `23:00` -> Target `11:00 PM`
+   - Source `24:00:00` -> Target `12:00 AM` (Midnight)
+4. Construct the new DataFrame with the specific column order observed in the target: `date`, then `1:00 AM`-`11:00 AM`, then `12:00 AM` (Midnight), then `1:00 PM`-`11:00 PM`, then `12:00 PM` (Noon). Note: The target sample shows `12:00 AM` appearing after `11:00 AM` and `12:00 PM` appearing at the very end. This is a specific permutation. Let's look closely at the target sample columns:
+   `date`, `1:00 AM`, ..., `11:00 AM`, `12:00 AM`, `1:00 PM`, ..., `11:00 PM`, `12:00 PM`.
+   Wait, usually 12:00 AM is midnight (start of day) and 12:00 PM is noon.
+   Source columns are 1:00 to 24:00:00.
+   1:00 -> 1:00 AM
+   ...
+   11:00 -> 11:00 AM
+   12:00 -> 12:00 PM (Noon)
+   13:00 -> 1:00 PM
+   ...
+   23:00 -> 11:00 PM
+   24:00:00 -> 12:00 AM (Midnight)
+
+   Target column order:
+   1. `date`
+   2. `1:00 AM` (Src 1:00)
+   3. `2:00 AM` (Src 2:00)
+   ...
+   12. `11:00 AM` (Src 11:00)
+   13. `12:00 AM` (Src 24:00:00)  <-- Midnight is placed here
+   14. `1:00 PM` (Src 13:00)
+   ...
+   24. `11:00 PM` (Src 23:00)
+   25. `12:00 PM` (Src 12:00)     <-- Noon is placed here
+
+   I will follow this exact column ordering.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date
+    dt = pd.to_datetime(source['Date'], format='%a %m/%d/%Y')
+    out = pd.DataFrame(index=source.index)
+    out['date'] = dt.dt.strftime('%m/%d/%Y')
+    
+    # Map hours to 12-hour format names
+    # Source 1:00 -> 1:00 AM
+    # Source 2:00 -> 2:00 AM
+    # ...
+    # Source 11:00 -> 11:00 AM
+    # Source 12:00 -> 12:00 PM (Noon)
+    # Source 13:00 -> 1:00 PM
+    # ...
+    # Source 23:00 -> 11:00 PM
+    # Source 24:00:00 -> 12:00 AM (Midnight)
+    
+    # Define the mapping from source column to target column
+    mapping = {}
+    for h in range(1, 13):
+        if h == 12:
+            mapping[f'{h}:00'] = '12:00 PM'
+        else:
+            mapping[f'{h}:00'] = f'{h}:00 AM'
+            
+    for h in range(13, 24):
+        target_h = h - 12
+        mapping[f'{h}:00'] = f'{target_h}:00 PM'
+        
+    mapping['24:00:00'] = '12:00 AM'
+    
+    # Assign values
+    for src_col, tgt_col in mapping.items():
+        out[tgt_col] = source[src_col]
+        
+    # Define final column order as observed in target
+    final_cols = ['date']
+    # 1:00 AM to 11:00 AM
+    for h in range(1, 12):
+        final_cols.append(f'{h}:00 AM')
+    # 12:00 AM (Midnight)
+    final_cols.append('12:00 AM')
+    # 1:00 PM to 11:00 PM
+    for h in range(1, 12):
+        final_cols.append(f'{h}:00 PM')
+    # 12:00 PM (Noon)
+    final_cols.append('12:00 PM')
+    
+    return out[final_cols].reset_index(drop=True)
+```

@@ -1,0 +1,89 @@
+{
+  "case": "length7_10",
+  "length": 7,
+  "strategy": "s2",
+  "model": "qwen36-27b",
+  "is_demo": false,
+  "parameters": {
+    "output": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment",
+    "model": "qwen36-27b",
+    "base_url": "https://openai.rc.asu.edu/v1",
+    "max_tokens": 6000,
+    "reasoning_effort": "none",
+    "k": 5,
+    "sample_rows": 12,
+    "timeout": 120,
+    "replay_only": true,
+    "strategy": "s2",
+    "python": "3.14.4 (main, Apr  7 2026, 13:13:20) [Clang 21.0.0 (clang-2100.0.123.102)]",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "pandas": "3.1.1",
+    "held_out": [
+      "length1_1",
+      "length1_2",
+      "length1_3",
+      "length2_1",
+      "length3_1"
+    ],
+    "benchmark": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split"
+  },
+  "prompt_path": "logs/s2/length7_10/prompt.json",
+  "completion_path": "logs/s2/length7_10/response.json",
+  "execution": {
+    "status": "ok",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+    "seconds": 9.362452749999647,
+    "shape": [
+      24,
+      26
+    ],
+    "fingerprint": "9667adc9d25884d4e28f25094c18d58570d659266e452e0b0a974707f6c6155b"
+  },
+  "autopipeline": {
+    "accuracy": 0.0,
+    "is_correct": false,
+    "similarities": {},
+    "info": []
+  },
+  "hard_match": {
+    "accuracy": 0.0,
+    "is_correct": false,
+    "similarities": [
+      "Mismatch - DataFrames lengths differ (pred:24 v.s. gold:84)"
+    ],
+    "info": []
+  },
+  "hard_match_provenance": "course-provided hard_match.py and utils.py",
+  "exact_schema": true,
+  "generation": {
+    "request_hash": "7d272774572c75a965ff117754522b8be4b4562793b8458236c5b36b66dd2823",
+    "usage": {
+      "completion_tokens": 949,
+      "prompt_tokens": 41860,
+      "total_tokens": 42809,
+      "completion_tokens_details": null,
+      "prompt_tokens_details": {
+        "audio_tokens": null,
+        "cache_write_tokens": null,
+        "cached_tokens": 36736,
+        "image_tokens": null,
+        "text_tokens": null,
+        "created_cache_tokens": 4480,
+        "multimodal_tokens": null
+      },
+      "co2_g": 0.55613,
+      "energy_wh": 1.650237
+    },
+    "latency_seconds": 24.5931600829972,
+    "api_attempts": 1,
+    "cached": true,
+    "candidate_count": 1,
+    "reasoning_effort_header": "none",
+    "selected_index": 0,
+    "clusters": {}
+  },
+  "wall_seconds": 33.674316832999466,
+  "replay_wall_seconds": 9.403139542002464
+}

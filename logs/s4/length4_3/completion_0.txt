@@ -1,0 +1,124 @@
+Operator plan: Parse DT_STRATA into a datetime object, format it as MM/DD/YYYY for the 'date' column. Rename the 24 hourly columns (PCT_HOURLY_0100 to PCT_HOURLY_2400) to their corresponding 12-hour clock labels (e.g., "1:00 AM", ..., "12:00 PM"). The mapping follows standard 12-hour clock conventions where hour 12 is noon (PM) and hour 0/24 is midnight (AM), but here the indices are 1-24. Specifically:
+- Hour 1-11: AM
+- Hour 12: PM (Noon)
+- Hour 13-23: PM (1-11)
+- Hour 24: PM (12) -> Wait, standard 24-hour clock: 00:00 is 12:00 AM, 12:00 is 12:00 PM.
+Let's look at the target columns carefully:
+1:00 AM -> PCT_HOURLY_0100
+...
+11:00 AM -> PCT_HOURLY_1100
+12:00 AM -> PCT_HOURLY_1200 ?? No, look at the target sample data vs source.
+Source row 1: PCT_HOURLY_1200 is 0.0019548904.
+Target row 1: "12:00 AM" is 0.0012350173.
+Wait, let's trace the values.
+Source PCT_HOURLY_0100 = 0.0007010524. Target "1:00 AM" = 0.0012220171.
+The target sample data provided in the JSON does NOT match the source sample data provided in the JSON directly row-by-row. The note says "Source row count describes a training sample only". The target sample data likely corresponds to a different subset or the values are aggregated. However, the column mapping is structural.
+
+Let's look at the column names in the target:
+"1:00 AM", "2:00 AM", ..., "11:00 AM", "12:00 AM", "1:00 PM", ..., "11:00 PM", "12:00 PM".
+
+Standard mapping from 24-hour index (1-24) to 12-hour labels:
+1 -> 1:00 AM
+2 -> 2:00 AM
+...
+11 -> 11:00 AM
+12 -> 12:00 PM (Noon)
+13 -> 1:00 PM
+...
+23 -> 11:00 PM
+24 -> 12:00 AM (Midnight) OR 12:00 PM?
+
+Let's check the target column order:
+1. 1:00 AM
+2. 2:00 AM
+3. 3:00 AM
+4. 4:00 AM
+5. 5:00 AM
+6. 6:00 AM
+7. 7:00 AM
+8. 8:00 AM
+9. 9:00 AM
+10. 10:00 AM
+11. 11:00 AM
+12. 12:00 AM  <-- This is the 12th column in the target list.
+13. 1:00 PM
+...
+24. 12:00 PM <-- This is the 24th column in the target list.
+
+In the target schema `columns` list:
+Index 11 (0-based) is "12:00 AM".
+Index 23 (0-based) is "12:00 PM".
+
+If we map strictly by position from Source PCT_HOURLY_0100 to PCT_HOURLY_2400:
+Source 0100 -> Target 1:00 AM
+...
+Source 1100 -> Target 11:00 AM
+Source 1200 -> Target 12:00 AM
+Source 1300 -> Target 1:00 PM
+...
+Source 2400 -> Target 12:00 PM
+
+This mapping implies that Source 1200 (Noon) is labeled "12:00 AM" and Source 2400 (Midnight) is labeled "12:00 PM". This is a non-standard or erroneous labeling in the target definition, OR the source "1200" represents midnight and "2400" represents noon?
+Usually, 0000 is midnight, 1200 is noon.
+If Source 1200 is Noon, it should be 12:00 PM.
+If Source 2400 is Midnight (end of day), it should be 12:00 AM.
+
+However, I must follow the target schema column order exactly. The target columns are listed in a specific order. I will map the source columns `PCT_HOURLY_0100` through `PCT_HOURLY_2400` to the target columns in the order they appear in the target schema.
+
+Target Columns:
+1. 1:00 AM
+2. 2:00 AM
+3. 3:00 AM
+4. 4:00 AM
+5. 5:00 AM
+6. 6:00 AM
+7. 7:00 AM
+8. 8:00 AM
+9. 9:00 AM
+10. 10:00 AM
+11. 11:00 AM
+12. 12:00 AM
+13. 1:00 PM
+14. 2:00 PM
+15. 3:00 PM
+16. 4:00 PM
+17. 5:00 PM
+18. 6:00 PM
+19. 7:00 PM
+20. 8:00 PM
+21. 9:00 PM
+22. 10:00 PM
+23. 11:00 PM
+24. 12:00 PM
+
+Source Columns to map:
+1. PCT_HOURLY_0100
+2. PCT_HOURLY_0200
+...
+24. PCT_HOURLY_2400
+
+I will perform a direct positional rename.
+
+```python
+import pandas as pd
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    out = pd.DataFrame(index=source.index)
+    
+    # Format date
+    out['date'] = pd.to_datetime(source['DT_STRATA'], format='%m/%d/%Y').dt.strftime('%m/%d/%Y')
+    
+    # Define the mapping from source column names to target column names
+    target_cols = [
+        "1:00 AM", "2:00 AM", "3:00 AM", "4:00 AM", "5:00 AM", "6:00 AM",
+        "7:00 AM", "8:00 AM", "9:00 AM", "10:00 AM", "11:00 AM", "12:00 AM",
+        "1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM", "5:00 PM", "6:00 PM",
+        "7:00 PM", "8:00 PM", "9:00 PM", "10:00 PM", "11:00 PM", "12:00 PM"
+    ]
+    
+    for i, target_col in enumerate(target_cols):
+        hour_idx = i + 1
+        source_col = f"PCT_HOURLY_{hour_idx:02d}00"
+        out[target_col] = source[source_col]
+        
+    return out.reset_index(drop=True)
+```

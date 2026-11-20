@@ -1,0 +1,376 @@
+Operator plan:
+1. Parse `SEASON DAY TYPE` to extract month and day-type suffix. Map months to seasons (June/August -> SUMMER, others -> SPRING) and suffixes (WD -> WEEKDAY, WE -> WEEKEND).
+2. Rename `HOUR` to `hour`.
+3. Calculate `temperature_range` as the difference between `PROFILE_MAX` and `PROFILE_MIN` (or potentially derived from T_MIN/T_MAX logic, but looking at sample: Row 1 source T_MIN_1=68, T_MAX_1=75, diff=7. Target temp_range=53? No. Let's look at PROFILE_MIN/MAX. Source PROFILE_MIN=0.616, PROFILE_MAX=2.821. Diff=2.2. No.
+   Let's look at the target values.
+   Row 1: Source "June WE", Hour 13. T_MIN_1=68, T_MAX_1=75. T_MIN_2=75, T_MAX_2=82. T_MIN_3=82, T_MAX_3=91.
+   Target: season=SPRING (Wait, June is Summer? The target says SPRING for June? Let's check other rows.
+   Source "July WD" -> Target "SUMMER"? No, sample target row 7 is "SUMMER", source "October WD".
+   Let's re-examine the mapping.
+   Source Sample Row 0: "June WE" -> Target Row 0: "SPRING". This seems odd. June is usually summer.
+   Source Sample Row 1: "July WD" -> Target Row 1: "SPRING".
+   Source Sample Row 6: "October WD" -> Target Row 6: "SUMMER".
+   Source Sample Row 11: "December WE" -> Target Row 11: "SUMMER".
+   
+   Wait, the sample data in `source` and `target` are not aligned row-by-row in the JSON block presentation usually, or the indices are different. The prompt says "Source row count describes a training sample only". The sample arrays have 12 rows each.
+   Let's look at the distinct values.
+   Source SEASON DAY TYPE: June WE, July WD, July WE, August WD, September WD, September WE, October WD, October WE, November WD, November WE, December WD, December WE.
+   Target season: SPRING, SUMMER.
+   Target daytype: WEEKDAY, WEEKEND.
+   
+   Let's check the mapping logic from typical energy strata or similar datasets.
+   Often, "Spring" might include March-May, "Summer" June-August?
+   But here June->Spring?
+   Let's look at the hour.
+   Source Hour 13 -> Target Hour 1.
+   Source Hour 16 -> Target Hour 4.
+   Source Hour 19 -> Target Hour 7.
+   Source Hour 22 -> Target Hour 10.
+   Source Hour 1 -> Target Hour 13.
+   Source Hour 4 -> Target Hour 16.
+   Source Hour 8 -> Target Hour 20.
+   Source Hour 11 -> Target Hour 23.
+   Source Hour 14 -> Target Hour 2.
+   Source Hour 17 -> Target Hour 5.
+   Source Hour 20 -> Target Hour 8.
+   Source Hour 24 -> Target Hour 12.
+   
+   It seems the Target sample rows are NOT in the same order as Source sample rows. The note says "Source row count describes a training sample only". The sample data provided in the JSON is just a subset. I must infer the transformation rules from the schema and values.
+   
+   Let's look at `temperature_range`.
+   Target Row 0: 53. Source Row 0: T_MIN_1=68, T_MAX_1=75. T_MAX_1 - T_MIN_1 = 7.
+   Target Row 0: low_end=9, high_end=62.
+   
+   Let's look at Source Row 4: "September WD", Hour 1. T_MIN_1=41, T_MAX_1=59. Diff=18.
+   Target Row 4: "SPRING", "WEEKDAY", Hour 13. Temp=53. Low=29, High=82.
+   
+   This is tricky because the sample rows are shuffled or different. I need to find a row in Source that matches a row in Target to deduce the logic.
+   
+   Let's try to match by Hour and DayType.
+   Target Row 0: Hour 1, WEEKDAY.
+   Source Row 4: Hour 1, "September WD" (Weekday).
+   If Source Row 4 maps to Target Row 0:
+   Season: September -> SPRING? (Unlikely for standard seasons, but possible in some fiscal/energy calendars).
+   Temp Range: 53. Source T_MAX_1 (59) - T_MIN_1 (41) = 18. No.
+   Source PROFILE_MAX (2.891) - PROFILE_MIN (0.566) = 2.325. No.
+   
+   Let's look at Target Row 6: Hour 20, WEEKDAY.
+   Source Row 10: Hour 20, "December WD".
+   If Source Row 10 maps to Target Row 6:
+   Season: December -> SUMMER?
+   Temp Range: 38.
+   Source T_MAX_1 (32.5) - T_MIN_1 (21) = 11.5.
+   
+   Let's look at Target Row 2: Hour 7, WEEKDAY.
+   Source Row ? No Hour 7 in source sample.
+   
+   Let's look at the `low_end` and `high_end`.
+   Target Row 0: 9, 62.
+   Target Row 1: 0, 62.
+   
+   Maybe `low_end` and `high_end` are derived from `T_MIN` and `T_MAX` of a specific column?
+   Source Row 4 (Sep WD, Hr 1): T_MIN_1=41, T_MAX_1=59. T_MIN_2=59.5, T_MAX_2=68.5. T_MIN_3=68.5, T_MAX_3=76.
+   Target Row 4 (Spring, WD, Hr 13): Low 29, High 82.
+   
+   There is a disconnect. The samples are likely not aligned. I must rely on schema and common patterns.
+   
+   Schema clues:
+   `SEASON DAY TYPE` contains Month and WD/WE.
+   `season` target is SPRING/SUMMER.
+   `daytype` target is WEEKDAY/WEEKEND.
+   
+   Mapping Month to Season:
+   If June->Spring and December->Summer, that's very specific.
+   However, often in these datasets, the "Season" is defined by the utility.
+   Let's look at the distinct values in Source `SEASON DAY TYPE`:
+   June WE, July WD, July WE, August WD, September WD, September WE, October WD, October WE, November WD, November WE, December WD, December WE.
+   
+   If June, July, August are Summer, and Sept, Oct, Nov, Dec are Fall/Winter?
+   But target only has SPRING and SUMMER.
+   
+   Let's look at the `temperature_range`.
+   Target distinct: 44.
+   Source `T_MIN_1` distinct: 64. `T_MAX_1` distinct: 99.
+   
+   Hypothesis: `temperature_range` = `T_MAX_1` - `T_MIN_1`?
+   Source Row 0: 75-68=7.
+   Source Row 1: 78.5-67=11.5.
+   Target values are integers like 53, 62, 54, 29.
+   
+   Hypothesis: `temperature_range` = `PROFILE_MAX` - `PROFILE_MIN`?
+   Source Row 0: 2.821 - 0.616 = 2.2.
+   
+   Hypothesis: `low_end` and `high_end` are `T_MIN_1` and `T_MAX_1`?
+   Source Row 0: 68, 75.
+   Target Row 0: 9, 62.
+   
+   Let's look at `constant` and `coefficient`. Target is all null. Source has values. This implies we are dropping them or setting to null. The prompt says "Preserve NaNs unless the inferred operation requires otherwise." If the target is all null, we likely just don't include them or set them to NaN.
+   
+   Let's look at `hour`.
+   Source Hour 13 -> Target Hour 1?
+   Source Hour 16 -> Target Hour 4?
+   Source Hour 19 -> Target Hour 7?
+   Source Hour 22 -> Target Hour 10?
+   Source Hour 1 -> Target Hour 13?
+   Source Hour 4 -> Target Hour 16?
+   Source Hour 8 -> Target Hour 20?
+   Source Hour 11 -> Target Hour 23?
+   Source Hour 14 -> Target Hour 2?
+   Source Hour 17 -> Target Hour 5?
+   Source Hour 20 -> Target Hour 8?
+   Source Hour 24 -> Target Hour 12?
+   
+   It looks like the Target hours are just the Source hours, but the sample rows are shuffled.
+   Target Row 0 has Hour 1. Source Row 4 has Hour 1.
+   Target Row 1 has Hour 4. Source Row 5 has Hour 4.
+   Target Row 2 has Hour 7. (No Hour 7 in source sample).
+   Target Row 3 has Hour 10. (No Hour 10 in source sample).
+   Target Row 4 has Hour 13. Source Row 0 has Hour 13.
+   Target Row 5 has Hour 16. Source Row 1 has Hour 16.
+   Target Row 6 has Hour 20. Source Row 10 has Hour 20.
+   Target Row 7 has Hour 23. (No Hour 23 in source sample).
+   Target Row 8 has Hour 2. (No Hour 2 in source sample).
+   Target Row 9 has Hour 5. (No Hour 5 in source sample).
+   Target Row 10 has Hour 8. Source Row 6 has Hour 8.
+   Target Row 11 has Hour 12. (No Hour 12 in source sample).
+   
+   So, Source Row 0 (Hour 13) corresponds to Target Row 4 (Hour 13).
+   Source Row 1 (Hour 16) corresponds to Target Row 5 (Hour 16).
+   Source Row 4 (Hour 1) corresponds to Target Row 0 (Hour 1).
+   Source Row 5 (Hour 4) corresponds to Target Row 1 (Hour 4).
+   Source Row 6 (Hour 8) corresponds to Target Row 10 (Hour 8).
+   Source Row 10 (Hour 20) corresponds to Target Row 6 (Hour 20).
+   
+   Let's verify the transformations using these matched pairs.
+   
+   Pair 1: Source Row 0 ("June WE", Hour 13) -> Target Row 4 ("SPRING", "WEEKEND", Hour 13).
+   - Season: June -> SPRING.
+   - Daytype: WE -> WEEKEND.
+   - Temp Range: 53.
+   - Low End: 29.
+   - High End: 82.
+   Source Row 0 values:
+   T_MIN_1=68, T_MAX_1=75.
+   T_MIN_2=75, T_MAX_2=82.
+   T_MIN_3=82, T_MAX_3=91.
+   PROFILE_MIN=0.616, PROFILE_MAX=2.821.
+   
+   Pair 2: Source Row 1 ("July WD", Hour 16) -> Target Row 5 ("SPRING", "WEEKDAY", Hour 16).
+   - Season: July -> SPRING.
+   - Daytype: WD -> WEEKDAY.
+   - Temp Range: 49.
+   - Low End: 29.
+   - High End: 78.
+   Source Row 1 values:
+   T_MIN_1=67, T_MAX_1=78.5.
+   T_MIN_2=78.5, T_MAX_2=88.
+   T_MIN_3=88, T_MAX_3=101.
+   
+   Pair 3: Source Row 4 ("September WD", Hour 1) -> Target Row 0 ("SPRING", "WEEKDAY", Hour 1).
+   - Season: September -> SPRING.
+   - Daytype: WD -> WEEKDAY.
+   - Temp Range: 53.
+   - Low End: 9.
+   - High End: 62.
+   Source Row 4 values:
+   T_MIN_1=41, T_MAX_1=59.5.
+   T_MIN_2=59.5, T_MAX_2=68.5.
+   T_MIN_3=68.5, T_MAX_3=76.
+   
+   Pair 4: Source Row 5 ("September WE", Hour 4) -> Target Row 1 ("SPRING", "WEEKEND", Hour 4).
+   - Season: September -> SPRING.
+   - Daytype: WE -> WEEKEND.
+   - Temp Range: 62.
+   - Low End: 0.
+   - High End: 62.
+   Source Row 5 values:
+   T_MIN_1=39, T_MAX_1=57.5.
+   T_MIN_2=57.5, T_MAX_2=69.
+   T_MIN_3=69, T_MAX_3=76.
+   
+   Pair 5: Source Row 6 ("October WD", Hour 8) -> Target Row 10 ("SUMMER", "WEEKDAY", Hour 8).
+   - Season: October -> SUMMER.
+   - Daytype: WD -> WEEKDAY.
+   - Temp Range: 23.
+   - Low End: 60.
+   - High End: 83.
+   Source Row 6 values:
+   T_MIN_1=30, T_MAX_1=44.5.
+   T_MIN_2=44.5, T_MAX_2=56.
+   T_MIN_3=56, T_MAX_3=69.
+   
+   Pair 6: Source Row 10 ("December WD", Hour 20) -> Target Row 6 ("SUMMER", "WEEKDAY", Hour 20).
+   - Season: December -> SUMMER.
+   - Daytype: WD -> WEEKDAY.
+   - Temp Range: 38.
+   - Low End: 40.
+   - High End: 78.
+   Source Row 10 values:
+   T_MIN_1=21, T_MAX_1=32.5.
+   T_MIN_2=32.5, T_MAX_2=43.5.
+   T_MIN_3=43.5, T_MAX_3=62.
+
+   Season Logic:
+   June, July, September -> SPRING.
+   October, December -> SUMMER.
+   This is non-standard. Is there a pattern?
+   Maybe the "Season" is determined by the `CLASS` or another factor? No, CLASS is constant "RS0".
+   Maybe it's based on the `SEASON DAY TYPE` string directly?
+   "June", "July", "September" -> Spring.
+   "October", "December" -> Summer.
+   What about August, November?
+   Source has "August WD" (Row 3) and "November WD" (Row 8) and "November WE" (Row 9) and "December WE" (Row 11).
+   We don't have target matches for August, November, Dec WE.
+   
+   Let's look at `low_end` and `high_end`.
+   Pair 1 (June WE): Low 29, High 82.
+   Source T_MIN_1=68, T_MAX_3=91.
+   Pair 3 (Sep WD): Low 9, High 62.
+   Source T_MIN_1=41, T_MAX_2=68.5.
+   Pair 5 (Oct WD): Low 60, High 83.
+   Source T_MIN_1=30, T_MAX_3=69.
+   
+   This doesn't look like a simple subtraction from T_MIN/T_MAX.
+   
+   Let's look at `temperature_range`.
+   Pair 1: 53.
+   Pair 2: 49.
+   Pair 3: 53.
+   Pair 4: 62.
+   Pair 5: 23.
+   Pair 6: 38.
+   
+   Is it `T_MAX_3 - T_MIN_1`?
+   Pair 1: 91 - 68 = 23. No.
+   Pair 2: 101 - 67 = 34. No.
+   
+   Is it `PROFILE_MAX * 100 - PROFILE_MIN * 100`?
+   Pair 1: 282 - 61 = 221. No.
+   
+   Let's look at `CONSTANT_1`, `TEMP_1`.
+   Pair 1: C1=-2.27, T1=0.04.
+   Pair 3: C1=0.44, T1=0.004.
+   
+   Maybe `low_end` and `high_end` are from a lookup table based on `SEASON DAY TYPE` and `HOUR`?
+   The target `constant` and `coefficient` are all null.
+   
+   Given the complexity and the fact that `constant` and `coefficient` are null in target, and `temperature_range`, `low_end`, `high_end` seem to be derived from complex logic or lookups not fully evident from the small sample, I will focus on the clear transformations:
+   1. `season`: Extract month from `SEASON DAY TYPE`. Map months to SPRING/SUMMER. Based on samples: June, July, Sept -> SPRING. Oct, Dec -> SUMMER. I will assume a standard split if possible, but the samples contradict standard seasons. I will create a mapping for the observed months. For unobserved months (Aug, Nov), I will guess based on proximity or standard? Or perhaps the "Season" is actually derived from the `SEASON DAY TYPE` string's first word?
+      Actually, looking at the distinct values: `SEASON DAY TYPE` has 13 distinct values. `season` has 2.
+      If I can't determine the exact rule for Aug/Nov, I might have to make an assumption.
+      However, often in these problems, if the mapping isn't obvious, it might be a simple string replacement or a fixed mapping.
+      Let's try:
+      June, July, August -> Summer?
+      September, October, November, December -> Winter/Fall?
+      But the target says June->Spring.
+      
+      Let's look at the `low_end` and `high_end` again.
+      Pair 1 (June WE, Hr 13): 29, 82.
+      Pair 3 (Sep WD, Hr 1): 9, 62.
+      Pair 5 (Oct WD, Hr 8): 60, 83.
+      
+      Notice that `high_end` - `low_end` = `temperature_range`?
+      Pair 1: 82 - 29 = 53. Yes.
+      Pair 2: 78 - 29 = 49. Yes.
+      Pair 3: 62 - 9 = 53. Yes.
+      Pair 4: 62 - 0 = 62. Yes.
+      Pair 5: 83 - 60 = 23. Yes.
+      Pair 6: 78 - 40 = 38. Yes.
+      
+      So `temperature_range` = `high_end` - `low_end`.
+      
+      How are `low_end` and `high_end` calculated?
+      They are integers.
+      Source `T_MIN` and `T_MAX` are floats/ints.
+      
+      Pair 1 (June WE): Low 29, High 82.
+      Source: T_MIN_1=68, T_MAX_1=75, T_MAX_2=82, T_MAX_3=91.
+      Pair 3 (Sep WD): Low 9, High 62.
+      Source: T_MIN_1=41, T_MAX_1=59.5, T_MAX_2=68.5.
+      Pair 5 (Oct WD): Low 60, High 83.
+      Source: T_MIN_1=30, T_MAX_1=44.5, T_MAX_2=56, T_MAX_3=69.
+      
+      It seems `low_end` and `high_end` are NOT directly T_MIN/T_MAX.
+      
+      Given the constraints and the likelihood of this being a "clean up" task, I will implement the string parsing for season/daytype and pass through hour. For the numeric columns, since the derivation is opaque without more data or a lookup table, and `constant`/`coefficient` are null, I will set `constant` and `coefficient` to NaN. For `temperature_range`, `low_end`, `high_end`, I will attempt to see if they are simply `T_MAX_1` and `T_MIN_1` shifted?
+      
+      Actually, looking at Pair 5: Low 60, High 83. Source T_MAX_3=69.
+      Pair 1: Low 29, High 82. Source T_MAX_2=82.
+      Pair 3: Low 9, High 62. Source T_MAX_1=59.5 (~60).
+      
+      It's possible `low_end` and `high_end` are from a different source or calculated via a model. Without the model, I cannot replicate them.
+      
+      HOWEVER, in many of these "infer transformation" tasks, if the output columns are not directly present in the input, and the logic is complex, there might be a simpler explanation.
+      
+      Let's look at `T_MIN_1` and `T_MAX_1` again.
+      Pair 1: T_MIN_1=68, T_MAX_1=75.
+      Pair 3: T_MIN_1=41, T_MAX_1=59.5.
+      Pair 5: T_MIN_1=30, T_MAX_1=44.5.
+      
+      Maybe `low_end` = `T_MIN_1` - something?
+      68 - 29 = 39.
+      41 - 9 = 32.
+      30 - 60 = -30.
+      
+      Given the ambiguity and the instruction to "infer a general transformation", I will provide the code that parses the strings and maps the hours. For the numeric columns, I will leave them as NaN or 0 if I cannot derive them, but the target has non-null values.
+      
+      Wait, look at `PROFILE_MIN` and `PROFILE_MAX`.
+      Pair 1: 0.616, 2.821.
+      Pair 3: 0.566, 2.891.
+      
+      I will assume the numeric columns `temperature_range`, `low_end`, `high_end` are derived from `T_MIN_1`, `T_MAX_1`, `T_MIN_2`, `T_MAX_2`, etc. in a way that is not immediately obvious, OR they are provided in the source under different names? No.
+      
+      I will output the code for the string transformations and set the numeric columns to NaN, as I cannot reliably infer the numeric logic from the sample. However, the target has distinct values.
+      
+      Actually, let's look at `SEASON DAY TYPE` again.
+      "June WE" -> "SPRING".
+      "July WD" -> "SPRING".
+      "September WD" -> "SPRING".
+      "October WD" -> "SUMMER".
+      "December WD" -> "SUMMER".
+      
+      This implies:
+      Spring: June, July, September.
+      Summer: October, December.
+      
+      This is very strange.
+      
+      I will implement the string mapping and return NaN for the numeric columns that I cannot derive.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Extract month and day type
+    parts = source['SEASON DAY TYPE'].str.split()
+    month = parts.str[0]
+    day_type_suffix = parts.str[1]
+    
+    # Map month to season based on observed samples
+    # June, July, September -> SPRING
+    # October, December -> SUMMER
+    # Assumption for unobserved: August (Summer), November (Summer?)
+    # Given the ambiguity, we map knowns and default others.
+    def get_season(m):
+        if m in ['June', 'July', 'September']:
+            return 'SPRING'
+        elif m in ['October', 'December', 'August', 'November']: # Guessing Aug/Nov based on Oct/Dec
+            return 'SUMMER'
+        else:
+            return 'SPRING' # Default
+            
+    def get_daytype(s):
+        if s == 'WD':
+            return 'WEEKDAY'
+        else:
+            return 'WEEKEND'
+            
+    out = pd.DataFrame()
+    out['season'] = month.apply(get_season)
+    out['daytype'] = day_type_suffix.apply(get_daytype)
+    out['hour'] = source['HOUR']
+    out['temperature_range'] = np.nan
+    out['constant'] = np.nan
+    out['coefficient'] = np.nan
+    out['low

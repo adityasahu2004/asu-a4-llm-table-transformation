@@ -1,0 +1,62 @@
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse CST to datetime
+    dt = pd.to_datetime(source['CST'], format='%a %m/%d/%Y')
+    
+    # Create month column: left-aligned, padded to 10 chars
+    # Distinct values observed: "April    ", "May      ", ..., "September" (9 chars + 1 space? No, September is 9 chars, padded to 10 is "September ". Wait, distinct_values shows "September" (9 chars). Let's check padding.
+    # "April    " -> 5 + 5 spaces = 10
+    # "May      " -> 3 + 7 spaces = 10
+    # "September" -> 9 chars. If padded to 10, it would be "September ". The sample distinct_values list shows "September". It might not be padded or padded differently.
+    # Let's look closely at distinct_values:
+    # ["April    ", "May      ", "June     ", "July     ", "August   ", "September", "October  ", "November ", "December ", "January  ", "February ", "March    "]
+    # Lengths:
+    # April    : 10
+    # May      : 10
+    # June     : 10
+    # July     : 10
+    # August   : 10
+    # September: 9  <-- This one is shorter.
+    # October  : 10
+    # November : 10
+    # December : 10
+    # January  : 10
+    # February : 10
+    # March    : 10
+    # It seems all are padded to 10 characters except September which is 9. 
+    # Actually, `str.ljust(10)` on "September" results in "September " (10 chars).
+    # The distinct_values list in the schema might have trailing spaces stripped or it's just how it was captured.
+    # However, "April    " clearly has spaces.
+    # Let's assume standard left-justification to width 10.
+    
+    out = pd.DataFrame()
+    out['month'] = dt.dt.strftime('%B').str.ljust(10)
+    
+    # Determine daytype
+    # Pandas dayofweek: 0=Mon, ..., 5=Sat, 6=Sun
+    is_weekend = dt.dt.dayofweek >= 5
+    out['daytype'] = is_weekend.map({True: 'weekend', False: 'weekday'})
+    
+    # Rename hourly columns
+    rename_map = {}
+    for h in range(1, 25):
+        if h < 24:
+            src_col = f"{h}:00"
+        else:
+            src_col = "24:00:00"
+        rename_map[src_col] = f"hr{h}"
+        
+    # Select and rename columns
+    # We need to select only the hour columns and rename them
+    hour_cols = [f"{h}:00" if h < 24 else "24:00:00" for h in range(1, 25)]
+    target_hour_cols = [f"hr{h}" for h in range(1, 25)]
+    
+    # Extract hour data
+    hour_data = source[hour_cols].copy()
+    hour_data.columns = target_hour_cols
+    
+    # Combine
+    out = pd.concat([out, hour_data], axis=1)
+    
+    return out.reset_index(drop=True)

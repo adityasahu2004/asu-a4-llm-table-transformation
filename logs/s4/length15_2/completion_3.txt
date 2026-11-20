@@ -1,0 +1,153 @@
+Operator plan:
+1. Parse the `local_15min` timestamp to extract the hour and the month.
+2. Derive the `season` from the month (Dec-Feb: Winter, Mar-May: Spring, Jun-Aug: Summer, Sep-Nov: Fall).
+3. Define mappings for source columns to target categories:
+   - `hvac`: air1, air2, air3, airwindowunit1, furnace1, furnace2, heater1, heater2, heater3, housefan1, jacuzzi1, pool1, poolpump1, sprinkler1, venthood1.
+   - `domestic_water_heating`: waterheater1, waterheater2.
+   - `major_appliances`: clotheswasher1, clotheswasher_dryg1, dishwasher1, disposal1, drye1, dryg1, microwave1, oven1, oven2, range1, refrigerator1, refrigerator2, washer/dryer related.
+   - `lighting`: lights_plugs1..6, diningroom1, diningroom2, kitchen1, kitchen2, livingroom1, livingroom2, office1, outsidelights_plugs1..2, bathroom1, bathroom2, bedroom1..5, garage1, garage2, shed1, utilityroom1, security1, poollight1.
+   - `miscellaneous_plugs`: aquarium1, battery1, car1, car2, circpump1, freezer1, icemaker1, kitchenapp1, kitchenapp2, pump1, sewer pump, sump pump, well pump, wine cooler, etc.
+   
+   *Correction on standard OpenEI/REDD categories often used in these datasets:*
+   Usually:
+   - HVAC: Air conditioners, Furnaces, Heaters, Pool pumps (sometimes), Vent hoods (sometimes).
+   - Water Heating: Water heaters.
+   - Major Appliances: Refrigerators, Freezers, Dishwashers, Washers, Dryers, Ovens, Ranges, Microwaves.
+   - Lighting: Lights, Plugs (general), maybe specific room lights.
+   - Miscellaneous Plug Loads: TVs, Computers, Chargers, etc. Often `lights_plugs` are split or combined. Given the target columns `lighting` and `miscellaneous_plug_loads`, and the source having `lights_plugs*`, `kitchenapp*`, `outsidelights_plugs*`, `bathroom*`, `bedroom*`, etc., we need a robust mapping.
+   
+   Let's look at standard mappings for this specific dataset (likely the "Household Energy Use" dataset).
+   Common mapping:
+   - **HVAC**: `air1_sum`, `air2_sum`, `air3_sum`, `airwindowunit1_sum`, `furnace1_sum`, `furnace2_sum`, `heater1_sum`, `heater2_sum`, `heater3_sum`, `housefan1_sum`, `jacuzzi1_sum`, `pool1_sum`, `poolpump1_sum`, `sprinkler1_sum`, `venthood1_sum`.
+   - **Domestic Water Heating**: `waterheater1_sum`, `waterheater2_sum`.
+   - **Major Appliances**: `clotheswasher1_sum`, `clotheswasher_dryg1_sum`, `dishwasher1_sum`, `disposal1_sum`, `drye1_sum`, `dryg1_sum`, `microwave1_sum`, `oven1_sum`, `oven2_sum`, `range1_sum`, `refrigerator1_sum`, `refrigerator2_sum`, `freezer1_sum`, `icemaker1_sum`.
+   - **Lighting**: `lights_plugs1_sum` through `lights_plugs6_sum`, `outsidelights_plugs1_sum`, `outsidelights_plugs2_sum`, `bathroom1_sum`, `bathroom2_sum`, `bedroom1_sum` through `bedroom5_sum`, `diningroom1_sum`, `diningroom2_sum`, `garage1_sum`, `garage2_sum`, `kitchen1_sum`, `kitchen2_sum`, `livingroom1_sum`, `livingroom2_sum`, `office1_sum`, `shed1_sum`, `utilityroom1_sum`, `security1_sum`, `poollight1_sum`.
+   - **Miscellaneous Plug Loads**: `aquarium1_sum`, `battery1_sum`, `car1_sum`, `car2_sum`, `circpump1_sum`, `kitchenapp1_sum`, `kitchenapp2_sum`, `pump1_sum`, `sewerpump1_sum`, `sumppump1_sum`, `wellpump1_sum`, `winecooler1_sum`, `pool2_sum` (if not hvac), `solar_sum` (usually netted, but here likely load or ignored? Solar is generation. The target `total` is likely sum of loads. Solar might be excluded from load categories or treated as negative load. However, `solar_sum` is distinct. Let's look at `grid_sum`. `grid` is meter. `solar` is generation. The categories usually sum to `total` load. `solar` is likely not in the categories or is negative. Let's assume standard load categories. `car1`, `car2` are EVs, often misc. `battery1` is misc.
+
+   Let's refine the lists based on typical "end-use" breakdowns:
+   
+   **HVAC**:
+   `air1_sum`, `air2_sum`, `air3_sum`, `airwindowunit1_sum`, `furnace1_sum`, `furnace2_sum`, `heater1_sum`, `heater2_sum`, `heater3_sum`, `housefan1_sum`, `jacuzzi1_sum`, `pool1_sum`, `poolpump1_sum`, `sprinkler1_sum`, `venthood1_sum`.
+
+   **Domestic Water Heating**:
+   `waterheater1_sum`, `waterheater2_sum`.
+
+   **Major Appliances**:
+   `clotheswasher1_sum`, `clotheswasher_dryg1_sum`, `dishwasher1_sum`, `disposal1_sum`, `drye1_sum`, `dryg1_sum`, `microwave1_sum`, `oven1_sum`, `oven2_sum`, `range1_sum`, `refrigerator1_sum`, `refrigerator2_sum`, `freezer1_sum`, `icemaker1_sum`.
+
+   **Lighting**:
+   `lights_plugs1_sum`, `lights_plugs2_sum`, `lights_plugs3_sum`, `lights_plugs4_sum`, `lights_plugs5_sum`, `lights_plugs6_sum`, `outsidelights_plugs1_sum`, `outsidelights_plugs2_sum`, `bathroom1_sum`, `bathroom2_sum`, `bedroom1_sum`, `bedroom2_sum`, `bedroom3_sum`, `bedroom4_sum`, `bedroom5_sum`, `diningroom1_sum`, `diningroom2_sum`, `garage1_sum`, `garage2_sum`, `kitchen1_sum`, `kitchen2_sum`, `livingroom1_sum`, `livingroom2_sum`, `office1_sum`, `shed1_sum`, `utilityroom1_sum`, `security1_sum`, `poollight1_sum`.
+
+   **Miscellaneous Plug Loads**:
+   `aquarium1_sum`, `battery1_sum`, `car1_sum`, `car2_sum`, `circpump1_sum`, `kitchenapp1_sum`, `kitchenapp2_sum`, `pump1_sum`, `sewerpump1_sum`, `sumppump1_sum`, `wellpump1_sum`, `winecooler1_sum`, `pool2_sum` (often misc or hvac, let's put in misc if not pump), `solar_sum` (Generation, usually excluded from load sum or subtracted. If `total` is sum of categories, solar is likely not included. If `total` is grid consumption, it's different. Given `total` in target is ~244k for Summer 19:00, and HVAC is 93k, it's likely a sum of loads. Solar is generation, so likely 0 or excluded. I will exclude solar from the sum of categories).
+
+   Note: `grid_sum` is the total metered load. `solar_sum` is generation. `grid` + `solar` = load? Or `grid` = load - solar? Usually `grid` is net. The categories sum to the gross load.
+   
+   I will sum the `_sum` columns for each category.
+   
+   Steps:
+   1. Parse `local_15min`.
+   2. Create `hour` and `season`.
+   3. Sum the specific columns for each category.
+   4. Group by `season` and `hour`.
+   5. Sum the values for each category and calculate `total` as the sum of the 4 categories.
+   6. Reset index and return.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse timestamp
+    dt = pd.to_datetime(source['local_15min'], format='%m/%d/%Y %H:%M')
+    source = source.copy()
+    source['hour'] = dt.dt.hour
+    source['month'] = dt.dt.month
+    
+    # Determine Season
+    # Winter: Dec(12), Jan(1), Feb(2)
+    # Spring: Mar(3), Apr(4), May(5)
+    # Summer: Jun(6), Jul(7), Aug(8)
+    # Fall: Sep(9), Oct(10), Nov(11)
+    def get_season(m):
+        if m in [12, 1, 2]:
+            return 'Winter'
+        elif m in [3, 4, 5]:
+            return 'Spring'
+        elif m in [6, 7, 8]:
+            return 'Summer'
+        else:
+            return 'Fall'
+            
+    source['season'] = source['month'].apply(get_season)
+    
+    # Define column mappings
+    hvac_cols = [
+        'air1_sum', 'air2_sum', 'air3_sum', 'airwindowunit1_sum',
+        'furnace1_sum', 'furnace2_sum', 'heater1_sum', 'heater2_sum', 'heater3_sum',
+        'housefan1_sum', 'jacuzzi1_sum', 'pool1_sum', 'poolpump1_sum',
+        'sprinkler1_sum', 'venthood1_sum'
+    ]
+    
+    dwh_cols = [
+        'waterheater1_sum', 'waterheater2_sum'
+    ]
+    
+    major_appl_cols = [
+        'clotheswasher1_sum', 'clotheswasher_dryg1_sum', 'dishwasher1_sum',
+        'disposal1_sum', 'drye1_sum', 'dryg1_sum', 'microwave1_sum',
+        'oven1_sum', 'oven2_sum', 'range1_sum', 'refrigerator1_sum',
+        'refrigerator2_sum', 'freezer1_sum', 'icemaker1_sum'
+    ]
+    
+    lighting_cols = [
+        'lights_plugs1_sum', 'lights_plugs2_sum', 'lights_plugs3_sum',
+        'lights_plugs4_sum', 'lights_plugs5_sum', 'lights_plugs6_sum',
+        'outsidelights_plugs1_sum', 'outsidelights_plugs2_sum',
+        'bathroom1_sum', 'bathroom2_sum', 'bedroom1_sum', 'bedroom2_sum',
+        'bedroom3_sum', 'bedroom4_sum', 'bedroom5_sum', 'diningroom1_sum',
+        'diningroom2_sum', 'garage1_sum', 'garage2_sum', 'kitchen1_sum',
+        'kitchen2_sum', 'livingroom1_sum', 'livingroom2_sum', 'office1_sum',
+        'shed1_sum', 'utilityroom1_sum', 'security1_sum', 'poollight1_sum'
+    ]
+    
+    misc_cols = [
+        'aquarium1_sum', 'battery1_sum', 'car1_sum', 'car2_sum',
+        'circpump1_sum', 'kitchenapp1_sum', 'kitchenapp2_sum',
+        'pump1_sum', 'sewerpump1_sum', 'sumppump1_sum', 'wellpump1_sum',
+        'winecooler1_sum', 'pool2_sum'
+    ]
+    
+    # Fill NaNs with 0 for summing purposes
+    # We only care about the sum columns, so we can drop others or just select
+    cols_to_keep = hvac_cols + dwh_cols + major_appl_cols + lighting_cols + misc_cols
+    # Ensure all cols exist
+    valid_cols = [c for c in cols_to_keep if c in source.columns]
+    
+    sub_df = source[['hour', 'season'] + valid_cols].copy()
+    sub_df[valid_cols] = sub_df[valid_cols].fillna(0)
+    
+    # Calculate category sums
+    sub_df['hvac'] = sub_df[hvac_cols].sum(axis=1)
+    sub_df['domestic_water_heating'] = sub_df[dwh_cols].sum(axis=1)
+    sub_df['major_appliances'] = sub_df[major_appl_cols].sum(axis=1)
+    sub_df['lighting'] = sub_df[lighting_cols].sum(axis=1)
+    sub_df['miscellaneous_plug_loads'] = sub_df[misc_cols].sum(axis=1)
+    
+    # Group by season and hour
+    grouped = sub_df.groupby(['season', 'hour']).sum(numeric_only=True).reset_index()
+    
+    # Calculate total
+    grouped['total'] = (grouped['hvac'] + grouped['domestic_water_heating'] + 
+                        grouped['major_appliances'] + grouped['lighting'] + 
+                        grouped['miscellaneous_plug_loads'])
+    
+    # Select final columns
+    result = grouped[['season', 'hour', 'hvac', 'domestic_water_heating', 
+                      'major_appliances', 'lighting', 'miscellaneous_plug_loads', 'total']]
+    
+    # Ensure hour is int
+    result['hour'] = result['hour'].astype(int)
+    
+    return result
+```

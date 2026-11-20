@@ -1,0 +1,131 @@
+{
+  "case": "length13_2",
+  "length": 13,
+  "strategy": "s5",
+  "model": "qwen36-27b",
+  "is_demo": false,
+  "parameters": {
+    "output": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment",
+    "model": "qwen36-27b",
+    "base_url": "https://openai.rc.asu.edu/v1",
+    "max_tokens": 6000,
+    "reasoning_effort": "none",
+    "k": 5,
+    "sample_rows": 12,
+    "timeout": 120,
+    "api_timeout": 3600,
+    "replay_only": false,
+    "strategy": "s5",
+    "python": "3.14.4 (main, Apr  7 2026, 13:13:20) [Clang 21.0.0 (clang-2100.0.123.102)]",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "pandas": "3.1.1",
+    "held_out": [
+      "length1_1",
+      "length1_2",
+      "length1_3",
+      "length2_1",
+      "length3_1"
+    ],
+    "benchmark": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split"
+  },
+  "prompt_path": "logs/s5/length13_2/prompt.json",
+  "completion_path": "logs/s5/length13_2/response.json",
+  "execution": {
+    "status": "ok",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:19: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+    "seconds": 10.614937917001953,
+    "shape": [
+      137707,
+      7
+    ],
+    "fingerprint": "cf8b1e47cb0a06c755f0272ff0836057c97339532105f10082fc809c05f1bc58"
+  },
+  "autopipeline": {
+    "accuracy": 0.0,
+    "is_correct": false,
+    "similarities": {},
+    "info": []
+  },
+  "hard_match": {
+    "accuracy": 0.4719720649121478,
+    "is_correct": false,
+    "similarities": [
+      1.0,
+      0.08739570246973646,
+      1.0,
+      0.09422178974198843,
+      0.09428714589672275,
+      0.027899816276587247,
+      1.0
+    ],
+    "info": [
+      "datetime",
+      "domestic_water_heating",
+      "total"
+    ]
+  },
+  "hard_match_provenance": "course-provided hard_match.py and utils.py",
+  "exact_schema": true,
+  "generation": {
+    "candidate_count": 6,
+    "selected_index": 0,
+    "baseline_index": 0,
+    "selection_reason": "SC winner retained: no strict constraint improvement",
+    "constraints": {
+      "columns": [
+        "datetime",
+        "hvac",
+        "domestic_water_heating",
+        "major_appliances",
+        "lighting",
+        "miscellaneous_plug_loads",
+        "total"
+      ],
+      "relations": []
+    },
+    "policy": {
+      "version": "schema-weekday-v1",
+      "pool": "five few-shot SC samples + one greedy few-shot sample",
+      "constraints": [
+        "exact target schema",
+        "uniquely identified date-to-weekday relation"
+      ],
+      "target_rows": "the same 12-row prompt sample as the baselines",
+      "output_rows": "up to 128 evenly spaced training-output rows",
+      "selection": "strictly lower lexicographic constraint loss; preserve SC winner on ties",
+      "forbidden_inputs": [
+        "test_0.csv",
+        "validator results",
+        "case-specific rules",
+        "target row counts"
+      ]
+    },
+    "usage": {
+      "prompt_tokens": 119850,
+      "completion_tokens": 17527,
+      "total_tokens": 137377
+    },
+    "api_attempts": 2,
+    "marginal_api_attempts": 0,
+    "latency_seconds": 421.5426974170041,
+    "inherited_api_seconds": 421.5426974170041,
+    "clusters": {
+      "1432c852637a91135e48a578fa37bbef2daec0bb6977bdeec3daa27c257e5aee": [
+        0
+      ],
+      "b8524e292ac4272a7a8f7e0d9c1eaab04ce12f180e58a43dfc003d8bc9d321d2": [
+        1
+      ],
+      "844850cf341965ba636578ace5520a58d25edae03b79a01fc5d34ea29e5aad3f": [
+        2
+      ],
+      "8c7be162225a0b57c0da464c78b0775ace81d23b3ce4a05a525722d398782508": [
+        4
+      ]
+    },
+    "cost_basis": "standalone logical pool cost; reused requests have zero marginal API cost"
+  },
+  "wall_seconds": 497.07791950000683
+}

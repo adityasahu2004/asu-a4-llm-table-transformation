@@ -1,0 +1,31 @@
+Operator plan:
+1. Parse the `date` column into datetime objects.
+2. Extract the full month name (e.g., "January") for the `month` column.
+3. Determine `daytype` as "weekend" if the day of the week is Saturday or Sunday, otherwise "weekday".
+4. Rename the hourly columns from `Hour 1`...`Hour 24` to `hr1`...`hr24`.
+5. Return the resulting DataFrame with the specified columns.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse dates
+    dates = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    
+    # Construct output dataframe
+    out = pd.DataFrame()
+    
+    # Month name
+    out['month'] = dates.dt.strftime('%B')
+    
+    # Day type: 5=Sat, 6=Sun in pandas dayofweek (Mon=0)
+    out['daytype'] = dates.dt.dayofweek.map(
+        lambda d: 'weekend' if d >= 5 else 'weekday'
+    )
+    
+    # Rename hourly columns
+    for h in range(1, 25):
+        out[f'hr{h}'] = source[f'Hour {h}']
+        
+    return out
+```

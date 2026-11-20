@@ -1,0 +1,44 @@
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    dt = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    
+    # Format the date as required
+    out = pd.DataFrame()
+    out['Date'] = dt.dt.strftime('%Y-%m-%d 00:00:00')
+    
+    # Define the mapping from source column names to target column names
+    # Source order is mixed AM/PM, we need chronological 1-24
+    mapping = {
+        '1:00 AM': 'Hr 1',
+        '2:00 AM': 'Hr 2',
+        '3:00 AM': 'Hr 3',
+        '4:00 AM': 'Hr 4',
+        '5:00 AM': 'Hr 5',
+        '6:00 AM': 'Hr 6',
+        '7:00 AM': 'Hr 7',
+        '8:00 AM': 'Hr 8',
+        '9:00 AM': 'Hr 9',
+        '10:00 AM': 'Hr 10',
+        '11:00 AM': 'Hr 11',
+        '12:00 PM': 'Hr 12',
+        '1:00 PM': 'Hr 13',
+        '2:00 PM': 'Hr 14',
+        '3:00 PM': 'Hr 15',
+        '4:00 PM': 'Hr 16',
+        '5:00 PM': 'Hr 17',
+        '6:00 PM': 'Hr 18',
+        '7:00 PM': 'Hr 19',
+        '8:00 PM': 'Hr 20',
+        '9:00 PM': 'Hr 21',
+        '10:00 PM': 'Hr 22',
+        '11:00 PM': 'Hr 23',
+        '12:00 AM': 'Hr 24'
+    }
+    
+    # Select and rename columns
+    for src_col, tgt_col in mapping.items():
+        out[tgt_col] = source[src_col]
+        
+    return out.reset_index(drop=True)

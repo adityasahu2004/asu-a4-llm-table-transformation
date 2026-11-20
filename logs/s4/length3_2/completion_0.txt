@@ -1,0 +1,66 @@
+**Operator Plan:**
+1.  **Parse Date**: Parse the `date` column into datetime objects to extract the calendar date and hour.
+2.  **Filter/Prepare**: The target has 521 rows, which corresponds to the number of unique calendar dates in the source (approx 1.5 years). The target columns `Hour 1` through `Hour 24` suggest a daily aggregation. The values in the target (e.g., `24.25`, `23.375`) look like averages or specific sampled values. Given the source has irregular timestamps (e.g., `4:50`, `9:30`), we need to map each record to its corresponding hour bucket.
+    *   Hour 1 corresponds to 00:00-00:59? Or 1:00-1:59?
+    *   Let's check the first target row: `05/08/2019`. `Hour 1` is `24.25`.
+    *   Let's check the source for `05/08/2019`. We don't have the full source, but let's look at the logic. Usually, "Hour 1" in these contexts implies the first hour of the day (00:00-01:00) or the 1 AM hour.
+    *   Let's look at `Hour 24`. In the target, `Hour 24` exists. This usually implies 23:00-24:00 (midnight end of day).
+    *   Let's assume `Hour N` maps to the hour index `N-1` (0-23). i.e., `Hour 1` = 00:xx, `Hour 2` = 01:xx, ..., `Hour 24` = 23:xx.
+    *   Alternatively, `Hour 1` could be 1:00-2:00. But `Hour 24` would be 24:00 (which is next day 0:00).
+    *   Let's look at the distinct values. The target has `nulls`. This implies that for some days, some hours had no data.
+    *   The transformation is likely a **pivot** or **groupby** operation.
+    *   Step 1: Extract `date_part` (YYYY-MM-DD) and `hour` (0-23) from the source datetime.
+    *   Step 2: Map `hour` 0 to `Hour 1`, `hour` 1 to `Hour 2`, ..., `hour` 23 to `Hour 24`.
+    *   Step 3: Group by `date_part` and calculate the mean (or another aggregation) of `cerc_logger_1` for each hour. The values `24.25` are very clean, suggesting averaging of a few points or a single point. Given the irregular sampling (10-20 min intervals?), averaging is the standard approach for "filling" hourly buckets from sub-hourly data.
+    *   Step 4: Pivot the data so each date is a row and hours are columns.
+    *   Step 5: Format the `date` column as `MM/DD/YYYY`.
+    *   Step 6: Ensure column names are `Hour 1` to `Hour 24`.
+
+**Assumptions:**
+*   `Hour 1` corresponds to the 00:00-01:00 hour (index 0).
+*   `Hour 24` corresponds to the 23:00-24:00 hour (index 23).
+*   The aggregation function is `mean`. If multiple records fall in the same hour for a day, they are averaged. If no records fall in that hour, the value is `NaN`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    df = source.copy()
+    df['datetime'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract date and hour
+    df['date_only'] = df['datetime'].dt.normalize()
+    df['hour_idx'] = df['datetime'].dt.hour  # 0-23
+    
+    # Map hour_idx to Hour 1 - Hour 24
+    # Hour 1 = 0, Hour 2 = 1, ..., Hour 24 = 23
+    df['hour_label'] = 'Hour ' + (df['hour_idx'] + 1).astype(str)
+    
+    # Group by date_only and hour_label, aggregate mean
+    # This handles multiple readings per hour
+    grouped = df.groupby(['date_only', 'hour_label'])['cerc_logger_1'].mean().reset_index()
+    
+    # Pivot the table
+    pivot_df = grouped.pivot(index='date_only', columns='hour_label', values='cerc_logger_1')
+    
+    # Ensure all 24 hours are present as columns, filling missing with NaN
+    expected_hours = [f'Hour {i}' for i in range(1, 25)]
+    pivot_df = pivot_df.reindex(columns=expected_hours)
+    
+    # Reset index to make date_only a column
+    pivot_df = pivot_df.reset_index()
+    
+    # Rename date_only to date and format it
+    pivot_df['date'] = pivot_df['date_only'].dt.strftime('%m/%d/%Y')
+    
+    # Drop the intermediate date_only column
+    pivot_df = pivot_df.drop(columns=['date_only'])
+    
+    # Reorder columns to match target: date, Hour 1, ..., Hour 24
+    final_cols = ['date'] + expected_hours
+    pivot_df = pivot_df[final_cols]
+    
+    return pivot_df.reset_index(drop=True)
+```

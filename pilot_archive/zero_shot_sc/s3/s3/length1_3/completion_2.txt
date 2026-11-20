@@ -1,0 +1,245 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `date` column from string format (`M/D/YYYY`) to datetime objects.
+2.  **Shift Dates**: The target dates appear to be shifted by 6 months relative to the source (e.g., Source `7/3/2014` -> Target `1/3/2015` is not quite right, let's look closer).
+    *   Source: `7/3/2014` (July 3). Target starts with `Wed 01/01/2014`.
+    *   Let's check the mapping more carefully.
+    *   Source `7/3/2014` is a Thursday. Target `Wed 01/01/2014` is a Wednesday.
+    *   Source `12/31/2014` is a Wednesday. Target `Wed 07/02/2014` is a Wednesday.
+    *   There is a 6-month shift. `7/3/2014` - 6 months = `1/3/2014`. But the first target row is `01/01/2014`.
+    *   Let's look at the row counts. Source has 182 rows. Target has 183 rows.
+    *   The target dates range from `01/01/2014` to `07/02/2014`.
+    *   The source dates range from `7/3/2014` to `12/31/2014`.
+    *   It seems the target is constructed by taking the source data, shifting the date back by 6 months, and adding a row for `1/1/2014`? Or perhaps the source `7/3/2014` corresponds to target `1/3/2014`?
+    *   Let's check the values.
+        *   Source Row 0 (`7/3/2014`): `1:00 AM` = 1.035932.
+        *   Target Row 0 (`Wed 01/01/2014`): `1:00` = 0.401886. This doesn't match.
+        *   Target Row 1 (`Fri 01/17/2014`): `1:00` = 0.646067.
+        *   Target Row 2 (`Mon 02/03/2014`): `1:00` = 0.916091.
+        *   Target Row 3 (`Wed 02/19/2014`): `1:00` = 0.138349.
+        *   Target Row 4 (`Sat 03/08/2014`): `1:00` = 0.600338.
+        *   Target Row 5 (`Mon 03/24/2014`): `1:00` = 0.803433.
+        *   Target Row 6 (`Thu 04/10/2014`): `1:00` = 0.875315.
+        *   Target Row 7 (`Sat 04/26/2014`): `1:00` = 1.171749.
+        *   Target Row 8 (`Tue 05/13/2014`): `1:00` = 1.128576.
+        *   Target Row 9 (`Thu 05/29/2014`): `1:00` = 0.494112.
+        *   Target Row 10 (`Sun 06/15/2014`): `1:00` = 1.172904.
+        *   Target Row 11 (`Wed 07/02/2014`): `1:00` = 0.816822.
+
+    *   Now let's look at Source values again.
+        *   Source `7/3/2014`: 1.035932
+        *   Source `7/19/2014`: 1.07502
+        *   Source `8/4/2014`: 0.536586
+        *   Source `8/21/2014`: 0.307012
+        *   Source `9/6/2014`: 0.370688
+        *   Source `9/23/2014`: 0.380244
+        *   Source `10/9/2014`: 0.413312
+        *   Source `10/26/2014`: 0.577044
+        *   Source `11/11/2014`: 0.251101
+        *   Source `11/28/2014`: 0.432581
+        *   Source `12/14/2014`: 0.375951
+        *   Source `12/31/2014`: 0.133762
+
+    *   There is no obvious direct value match between the sample source rows and target rows. This suggests the target is not a simple row-for-row mapping of the provided sample, or the sample is just a subset and the alignment is different.
+    *   However, looking at the column structure:
+        *   Source has `1:00 AM` ... `12:00 PM` ... `11:00 PM`.
+        *   Target has `1:00` ... `24:00`.
+        *   The target columns `1:00` to `24:00` likely correspond to hours 1-24.
+        *   Source `1:00 AM` -> Target `1:00`
+        *   Source `2:00 AM` -> Target `2:00`
+        *   ...
+        *   Source `11:00 AM` -> Target `11:00`
+        *   Source `12:00 AM` (Midnight) -> Target `24:00`? Or `12:00`?
+            *   Standard 12-hour clock: 12:00 AM is midnight (start of day). 12:00 PM is noon.
+            *   Source `12:00 PM` -> Target `12:00`
+            *   Source `1:00 PM` -> Target `13:00`
+            *   ...
+            *   Source `11:00 PM` -> Target `23:00`
+            *   Source `12:00 AM` -> Target `24:00` (or possibly `0:00` but target has 1-24). Given the sequence 1..24, 12:00 AM (midnight at end of day) usually maps to 24:00 in hourly aggregates, or 0:00. Let's assume 12:00 AM -> 24:00 based on the column name `24:00` existing and 12:00 AM being the last hour before the next day in some conventions, or simply the 24th hour.
+
+    *   Let's re-examine the date shift.
+        *   Target `01/01/2014` is extra?
+        *   Target `01/17/2014` vs Source `7/17/2014`? Source has `7/19/2014`.
+        *   Target `02/03/2014` vs Source `8/03/2014`? Source has `8/4/2014`.
+        *   Target `03/08/2014` vs Source `9/08/2014`? Source has `9/6/2014`.
+        *   Target `04/10/2014` vs Source `10/10/2014`? Source has `10/9/2014`.
+        *   Target `05/13/2014` vs Source `11/13/2014`? Source has `11/11/2014`.
+        *   Target `06/15/2014` vs Source `12/15/2014`? Source has `12/14/2014`.
+        *   Target `07/02/2014` vs Source `1/02/2015`? No.
+
+    *   Hypothesis: The target dates are exactly 6 months *before* the source dates.
+        *   Source `7/3/2014` - 6 months = `1/3/2014`.
+        *   Source `7/19/2014` - 6 months = `1/19/2014`.
+        *   Source `8/4/2014` - 6 months = `2/4/2014`.
+        *   Source `8/21/2014` - 6 months = `2/21/2014`.
+        *   Source `9/6/2014` - 6 months = `3/6/2014`.
+        *   Source `9/23/2014` - 6 months = `3/23/2014`.
+        *   Source `10/9/2014` - 6 months = `4/9/2014`.
+        *   Source `10/26/2014` - 6 months = `4/26/2014`.
+        *   Source `11/11/2014` - 6 months = `5/11/2014`.
+        *   Source `11/28/2014` - 6 months = `5/28/2014`.
+        *   Source `12/14/2014` - 6 months = `6/14/2014`.
+        *   Source `12/31/2014` - 6 months = `6/30/2014`.
+
+    *   Let's check the target sample dates again:
+        *   `Wed 01/01/2014` (Extra?)
+        *   `Fri 01/17/2014` (Close to 1/19?)
+        *   `Mon 02/03/2014` (Close to 2/4?)
+        *   `Wed 02/19/2014` (Close to 2/21?)
+        *   `Sat 03/08/2014` (Close to 3/6?)
+        *   `Mon 03/24/2014` (Close to 3/23?)
+        *   `Thu 04/10/2014` (Close to 4/9?)
+        *   `Sat 04/26/2014` (Matches 4/26!)
+        *   `Tue 05/13/2014` (Close to 5/11?)
+        *   `Thu 05/29/2014` (Close to 5/28?)
+        *   `Sun 06/15/2014` (Close to 6/14?)
+        *   `Wed 07/02/2014` (Close to 6/30?)
+
+    *   It seems the target dates are roughly 2 days *before* the date-shifted source dates? Or maybe the source dates are just sampled differently?
+    *   Wait, look at `Sat 04/26/2014` in Target. Source `10/26/2014` - 6 months = `4/26/2014`. This is an exact match.
+    *   Look at `Thu 04/10/2014` in Target. Source `10/9/2014` - 6 months = `4/9/2014`. Off by 1 day.
+    *   Look at `Sat 03/08/2014` in Target. Source `9/6/2014` - 6 months = `3/6/2014`. Off by 2 days.
+    *   Look at `Mon 02/03/2014` in Target. Source `8/4/2014` - 6 months = `2/4/2014`. Off by 1 day.
+    *   Look at `Fri 01/17/2014` in Target. Source `7/19/2014` - 6 months = `1/19/2014`. Off by 2 days.
+
+    *   There is a discrepancy in dates. However, the problem asks to infer the transformation. The most robust transformation is:
+        1.  Rename columns from 12-hour AM/PM format to 24-hour integer format (1-24).
+        2.  Shift the date column back by 6 months.
+        3.  Format the date as "DayOfWeek MM/DD/YYYY".
+        4.  Handle the extra row? The target has 183 rows, source 182. The first target row is `01/01/2014`. The first source row is `7/3/2014` -> `1/3/2014`.
+        5.  It is likely that the target includes `1/1/2014` which might be derived from a source row `7/1/2014` that is not in the sample? Or `1/1/2014` is a special case.
+        6.  Given the instruction "Compute the result only from the source DataFrame", and "never copy target rows", I must assume the source contains all necessary info. If the source has 182 rows and target 183, and the dates don't align perfectly in the sample, there might be a misunderstanding of the date logic or the sample is just illustrative of the *format*.
+        7.  However, `10/26/2014` -> `4/26/2014` is exact. `12/31/2014` -> `6/30/2014`? Target ends at `07/02/2014`.
+        
+    *   Let's look at the very first target row: `Wed 01/01/2014`.
+    *   If the rule is `Date - 6 months`, then `01/01/2014` comes from `07/01/2014`.
+    *   The source starts at `7/3/2014`. It does not have `7/1/2014`.
+    *   Perhaps the source data is *missing* the first two days of July in the sample, but the transformation logic is simply `Date - 6 months`.
+    *   Or, is it `Date - 6 months + 1 day`?
+        *   `7/3/2014` - 6m + 1d = `1/4/2014`. Target has `1/1`, `1/17`. No.
+    *   Let's assume the standard transformation:
+        1.  Parse `date`.
+        2.  Subtract 6 months.
+        3.  Format as `%a %m/%d/%Y`.
+        4.  Rename columns.
+    
+    *   Column Renaming Logic:
+        *   `1:00 AM` -> `1:00`
+        *   `2:00 AM` -> `2:00`
+        *   ...
+        *   `11:00 AM` -> `11:00`
+        *   `12:00 PM` -> `12:00`
+        *   `1:00 PM` -> `13:00`
+        *   ...
+        *   `11:00 PM` -> `23:00`
+        *   `12:00 AM` -> `24:00`
+
+    *   I will implement this column mapping and date shift. The row count difference (182 vs 183) and slight date offsets in the sample might be due to the sample being a non-contiguous subset or the "training sample" note implying the evaluation data will be consistent with the logic derived from the schema. The most logical schema-based transformation is the 6-month shift and column reformatting.
+
+3.  **Column Mapping**:
+    *   Create a dictionary to map source column names to target column names.
+    *   `12:00 AM` is tricky. In 24-hour time, midnight is 00:00 or 24:00. The target has `24:00`.
+    *   `12:00 PM` is 12:00.
+    *   `1:00 PM` is 13:00.
+    *   `11:00 PM` is 23:00.
+
+4.  **Date Formatting**:
+    *   Use `pd.to_datetime`.
+    *   Subtract `pd.DateOffset(months=6)`.
+    *   Format using `.dt.strftime('%a %m/%d/%Y')`.
+
+5.  **Final Output**:
+    *   Select and rename columns.
+    *   Sort by date? The target seems sorted. The source seems sorted. Subtracting 6 months preserves order.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    """
+    Transforms the source DataFrame by:
+    1. Parsing the 'date' column and shifting it back by 6 months.
+    2. Formatting the date as 'DayOfWeek MM/DD/YYYY'.
+    3. Renaming the hourly columns from 12-hour AM/PM format to 24-hour format (1:00 to 24:00).
+    """
+    
+    # Create a copy to avoid modifying the original
+    df = source.copy()
+    
+    # 1. Parse and Shift Date
+    # Parse the date string (M/D/YYYY format)
+    df['date'] = pd.to_datetime(df['date'], format='%m/%d/%Y')
+    
+    # Shift date back by 6 months
+    df['date'] = df['date'] - pd.DateOffset(months=6)
+    
+    # Format date as "DayOfWeek MM/DD/YYYY" (e.g., "Wed 01/01/2014")
+    # %a gives abbreviated weekday name (Wed)
+    df['cst'] = df['date'].dt.strftime('%a %m/%d/%Y')
+    
+    # 2. Rename Columns
+    # Map source column names to target column names
+    # Source: "1:00 AM", "2:00 AM", ..., "11:00 AM", "12:00 PM", "1:00 PM", ..., "11:00 PM", "12:00 AM"
+    # Target: "1:00", "2:00", ..., "11:00", "12:00", "13:00", ..., "23:00", "24:00"
+    
+    col_mapping = {}
+    
+    # Handle AM columns (1:00 AM to 11:00 AM)
+    for h in range(1, 12):
+        src_col = f"{h}:00 AM"
+        tgt_col = f"{h}:00"
+        if src_col in df.columns:
+            col_mapping[src_col] = tgt_col
+            
+    # Handle PM columns (12:00 PM to 11:00 PM)
+    # 12:00 PM -> 12:00
+    # 1:00 PM -> 13:00
+    # ...
+    # 11:00 PM -> 23:00
+    for h in range(12, 24):
+        # Source hour in 12-hour format
+        if h == 12:
+            src_h = 12
+            period = "PM"
+        else:
+            src_h = h - 12
+            period = "PM"
+        
+        src_col = f"{src_h}:00 {period}"
+        tgt_col = f"{h}:00"
+        if src_col in df.columns:
+            col_mapping[src_col] = tgt_col
+            
+    # Handle 12:00 AM -> 24:00
+    src_col = "12:00 AM"
+    tgt_col = "24:00"
+    if src_col in df.columns:
+        col_mapping[src_col] = tgt_col
+        
+    # Rename columns
+    df = df.rename(columns=col_mapping)
+    
+    # 3. Select and Order Columns
+    # Target columns: 'cst', '1:00', ..., '24:00'
+    target_cols = ['cst'] + [f"{h}:00" for h in range(1, 25)]
+    
+    # Ensure all target columns exist in the dataframe (they should based on schema)
+    # Filter to only include target columns
+    result = df[target_cols].copy()
+    
+    # Drop the original date column if it's still there (it is, but not in target_cols)
+    # The selection above handles this.
+    
+    # Sort by date to ensure consistent order (though input is likely sorted)
+    # We need to sort by the actual date, not the string. 
+    # We can use the original datetime column for sorting if we kept it, 
+    # but we overwrote it. Let's parse the string back or just assume order is preserved.
+    # To be safe, let's parse the 'cst' column back to datetime for sorting.
+    # Format is "%a %m/%d/%Y"
+    result['_sort_date'] = pd.to_datetime(result['cst'], format='%a %m/%d/%Y')
+    result = result.sort_values('_sort_date')
+    result = result.drop(columns=['_sort_date'])
+    
+    return result
+```

@@ -1,0 +1,26 @@
+import pandas as pd
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    dates = pd.to_datetime(source['CST'], format='%a %m/%d/%Y')
+    out = pd.DataFrame(index=source.index)
+    out['date'] = dates.dt.strftime('%m/%d/%Y')
+    
+    # Mapping from source column names to target column names
+    # Source: 1:00, 2:00, ..., 11:00, 12:00, 13:00, ..., 23:00, 24:00:00
+    # Target: 1:00 AM, ..., 11:00 AM, 12:00 AM, 1:00 PM, ..., 11:00 PM, 12:00 PM
+    
+    # Hours 1-11 AM
+    for h in range(1, 12):
+        out[f'{h}:00 AM'] = source[f'{h}:00']
+        
+    # Hour 12 AM (Source 12:00)
+    out['12:00 AM'] = source['12:00']
+    
+    # Hours 1-11 PM (Source 13:00 to 23:00)
+    for h in range(1, 12):
+        src_h = h + 12
+        out[f'{h}:00 PM'] = source[f'{src_h}:00']
+        
+    # Hour 12 PM (Source 24:00:00)
+    out['12:00 PM'] = source['24:00:00']
+    
+    return out.reset_index(drop=True)

@@ -1,0 +1,51 @@
+**Operator plan:**
+1.  **Parse Datetime**: Convert the `date` column to a datetime object using the format `%m/%d/%Y %H:%M`.
+2.  **Extract Features**:
+    *   Extract the full month name using `.dt.strftime('%B')`. Pad it to 10 characters with spaces on the right to match the target schema (`"August   "`, etc.).
+    *   Determine `daytype` by checking if the day of the week is Saturday (5) or Sunday (6). If so, label "weekend"; otherwise "weekday".
+    *   Extract the hour of the day. Since the target columns are `hr1` to `hr24`, we map the 0-23 hour index to 1-24 (i.e., `hour + 1`).
+3.  **Reshape/Pivot**: Use `pivot_table` to aggregate the `cerc_logger_1` values. The index will be the derived `month` and `daytype`, the columns will be the derived hour (1-24), and the values will be the mean of the sensor readings.
+4.  **Format Output**:
+    *   Rename the pivot columns to `hr1`...`hr24`.
+    *   Reset the index to make `month` and `daytype` standard columns.
+    *   Sort or ensure the order matches the expected output (though typically pivot table column order is numeric, so `hr1`..`hr24` will be correct).
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    df = source.copy()
+    df['dt'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # Derive grouping and key columns
+    # Month name padded to 10 chars with spaces on the right
+    df['month'] = df['dt'].dt.strftime('%B').str.ljust(10)
+    
+    # Day type: weekday vs weekend
+    # dayofweek: Monday=0 ... Sunday=6
+    df['daytype'] = df['dt'].dt.dayofweek.apply(lambda x: 'weekend' if x >= 5 else 'weekday')
+    
+    # Hour 1-24 mapping from 0-23
+    df['hour_key'] = df['dt'].dt.hour + 1
+    
+    # Pivot to get mean values for each hour, grouped by month and daytype
+    pivot_df = df.pivot_table(
+        index=['month', 'daytype'],
+        columns='hour_key',
+        values='cerc_logger_1',
+        aggfunc='mean'
+    )
+    
+    # Rename columns to hr1, hr2, ... hr24
+    pivot_df.columns = [f'hr{int(c)}' for c in pivot_df.columns]
+    
+    # Reset index to bring grouping keys back to columns
+    result = pivot_df.reset_index()
+    
+    # Ensure column order: month, daytype, hr1...hr24
+    # The reset_index puts month, daytype first, then the sorted hour columns.
+    # Since hour_key was numeric 1-24, they should be sorted correctly.
+    
+    return result
+```

@@ -1,0 +1,58 @@
+Operator plan:
+1. Parse the `Date` column into datetime objects.
+2. Extract the month number from the parsed dates.
+3. Melt the DataFrame from wide to long format, keeping `Date` (and its derived month) and the 24 hourly columns. The hourly columns are named "1:00" through "24:00:00".
+4. Extract the hour integer from the melted variable names (e.g., "1:00" -> 1, "24:00:00" -> 24).
+5. Group by `hour` and `month`.
+6. Calculate the mean of the values for each group.
+7. Pivot the result so that `hour` is the index and `month` numbers (1-12) are columns.
+8. Rename the month columns to their full lowercase names (january, february, etc.).
+9. Reset the index to make `hour` a column and sort by `hour`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse dates
+    source = source.copy()
+    source['dt'] = pd.to_datetime(source['Date'], format='%a %m/%d/%Y')
+    source['month'] = source['dt'].dt.month
+    
+    # Identify hourly columns
+    hour_cols = [c for c in source.columns if c not in ['Segment', 'Date', 'dt', 'month']]
+    
+    # Melt to long format
+    long_df = source.melt(
+        id_vars=['month'], 
+        value_vars=hour_cols, 
+        var_name='hour_str', 
+        value_name='value'
+    )
+    
+    # Extract hour integer from hour_str
+    # Examples: "1:00", "10:00", "24:00:00"
+    long_df['hour'] = long_df['hour_str'].apply(lambda x: int(x.split(':')[0]))
+    
+    # Group by hour and month, calculate mean
+    grouped = long_df.groupby(['hour', 'month'])['value'].mean().reset_index()
+    
+    # Pivot to wide format
+    pivoted = grouped.pivot(index='hour', columns='month', values='value')
+    
+    # Rename columns to month names
+    month_names = {
+        1: 'january', 2: 'february', 3: 'march', 4: 'april', 5: 'may', 6: 'june',
+        7: 'july', 8: 'august', 9: 'september', 10: 'october', 11: 'november', 12: 'december'
+    }
+    pivoted.columns = [month_names[m] for m in pivoted.columns]
+    
+    # Reset index and rename index column to 'hour'
+    result = pivoted.reset_index()
+    result = result.rename(columns={'index': 'hour'})
+    
+    # Sort by hour
+    result = result.sort_values('hour').reset_index(drop=True)
+    
+    return result
+```

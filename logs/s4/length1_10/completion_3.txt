@@ -1,0 +1,58 @@
+Operator plan:
+1. Parse the `date` column into a datetime object.
+2. Filter rows to keep only those where `zone_016_cooling_sp` is 84.0 (indicating cooling season/activity). Rows with 73.0 or NaN are excluded.
+3. Group by the date part of the datetime (flooring to day).
+4. For each day, determine if cooling was active during each of the 24 hours (1:00 to 24:00).
+   - Hour 1 corresponds to 00:00-00:59.
+   - Hour 2 corresponds to 01:00-01:59.
+   - ...
+   - Hour 24 corresponds to 23:00-23:59.
+5. If any record exists for a specific hour in that day, set the value to 876.0. Otherwise, set it to 0.0.
+6. Format the date as "DayOfWeek MM/DD/YYYY" for the `cst` column.
+7. Construct the final DataFrame with columns `cst` and `1:00` through `24:00`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse dates
+    source = source.copy()
+    source['dt'] = pd.to_datetime(source['date'], format='%m/%d/%Y %H:%M')
+    
+    # Filter for cooling season (84.0)
+    # Rows with 73.0 or NaN are ignored
+    cooling_active = source[source['zone_016_cooling_sp'] == 84.0]
+    
+    if cooling_active.empty:
+        # Return empty dataframe with correct schema if no cooling data
+        return pd.DataFrame(columns=['cst'] + [f'{h}:00' for h in range(1, 25)])
+
+    # Extract date and hour
+    cooling_active['date_only'] = cooling_active['dt'].dt.normalize()
+    cooling_active['hour'] = cooling_active['dt'].dt.hour + 1 # 0-23 -> 1-24
+    
+    # Get unique dates
+    unique_dates = sorted(cooling_active['date_only'].unique())
+    
+    records = []
+    for date in unique_dates:
+        day_data = cooling_active[cooling_active['date_only'] == date]
+        active_hours = day_data['hour'].unique()
+        
+        row = {'cst': date.strftime('%a %m/%d/%Y')}
+        for h in range(1, 25):
+            if h in active_hours:
+                row[f'{h}:00'] = 876.0
+            else:
+                row[f'{h}:00'] = 0.0
+        records.append(row)
+        
+    result = pd.DataFrame(records)
+    
+    # Ensure column order
+    cols = ['cst'] + [f'{h}:00' for h in range(1, 25)]
+    result = result[cols]
+    
+    return result.reset_index(drop=True)
+```

@@ -1,0 +1,31 @@
+**Operator Plan:**
+1.  **Parse Date:** Convert the `date` column from `MM/DD/YYYY` string format to a pandas datetime object.
+2.  **Format Date:** Convert the datetime object to the target string format `YYYY-MM-DD 00:00:00` and assign to the new column `Date`.
+3.  **Rename Columns:** Rename the hourly columns from `Hour 1`...`Hour 24` to `Hr 1`...`Hr 24`.
+4.  **Return:** Return the transformed DataFrame with the specified columns. Note: The target row count (183) differs from the source sample row count (182), likely due to the full evaluation set containing a complete year or similar period. The transformation logic applies row-wise and does not depend on row counts.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Create a copy to avoid modifying the source
+    df = source.copy()
+    
+    # Parse the date string 'MM/DD/YYYY' to datetime
+    df['parsed_date'] = pd.to_datetime(df['date'], format='%m/%d/%Y')
+    
+    # Format to 'YYYY-MM-DD 00:00:00'
+    df['Date'] = df['parsed_date'].dt.strftime('%Y-%m-%d 00:00:00')
+    
+    # Rename hourly columns from "Hour X" to "Hr X"
+    rename_map = {}
+    for h in range(1, 25):
+        rename_map[f'Hour {h}'] = f'Hr {h}'
+    
+    df.rename(columns=rename_map, inplace=True)
+    
+    # Select and order the columns to match the target schema
+    target_cols = ['Date'] + [f'Hr {h}' for h in range(1, 25)]
+    
+    return df[target_cols].reset_index(drop=True)
+```

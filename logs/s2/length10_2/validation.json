@@ -1,0 +1,107 @@
+{
+  "case": "length10_2",
+  "length": 10,
+  "strategy": "s2",
+  "model": "qwen36-27b",
+  "is_demo": false,
+  "parameters": {
+    "output": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment",
+    "model": "qwen36-27b",
+    "base_url": "https://openai.rc.asu.edu/v1",
+    "max_tokens": 6000,
+    "reasoning_effort": "none",
+    "k": 5,
+    "sample_rows": 12,
+    "timeout": 120,
+    "replay_only": true,
+    "strategy": "s2",
+    "python": "3.14.4 (main, Apr  7 2026, 13:13:20) [Clang 21.0.0 (clang-2100.0.123.102)]",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "pandas": "3.1.1",
+    "held_out": [
+      "length1_1",
+      "length1_2",
+      "length1_3",
+      "length2_1",
+      "length3_1"
+    ],
+    "benchmark": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split"
+  },
+  "prompt_path": "logs/s2/length10_2/prompt.json",
+  "completion_path": "logs/s2/length10_2/response.json",
+  "execution": {
+    "status": "ok",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+    "seconds": 9.779494042002625,
+    "shape": [
+      137707,
+      14
+    ],
+    "fingerprint": "bc094735f78e6c10bf705e79f8035178debaf917973ef2f1d548533005319749"
+  },
+  "autopipeline": {
+    "accuracy": 0.0,
+    "is_correct": false,
+    "similarities": {},
+    "info": []
+  },
+  "hard_match": {
+    "accuracy": 0.3011056601542198,
+    "is_correct": false,
+    "similarities": [
+      1.0,
+      0.0,
+      0.14623076532057194,
+      0.0558722505028793,
+      1.0,
+      0.001924375667177413,
+      1.0,
+      0.0,
+      0.010515079117256203,
+      0.0,
+      0.0009367715511920236,
+      0.0,
+      0.0,
+      1.0
+    ],
+    "info": [
+      "datetime",
+      "clothes_washer",
+      "dishwasher",
+      "pool_spa_heater"
+    ]
+  },
+  "hard_match_provenance": "course-provided hard_match.py and utils.py",
+  "exact_schema": true,
+  "generation": {
+    "request_hash": "64dcceb0808d8de317450c6556ac76ec46a344b5d0f5448ee238b216860cbc56",
+    "usage": {
+      "completion_tokens": 1721,
+      "prompt_tokens": 60932,
+      "total_tokens": 62653,
+      "completion_tokens_details": null,
+      "prompt_tokens_details": {
+        "audio_tokens": null,
+        "cache_write_tokens": null,
+        "cached_tokens": 36736,
+        "image_tokens": null,
+        "text_tokens": null,
+        "created_cache_tokens": 24192,
+        "multimodal_tokens": null
+      },
+      "co2_g": 1.967531,
+      "energy_wh": 5.83837
+    },
+    "latency_seconds": 62.29526433299907,
+    "api_attempts": 1,
+    "cached": true,
+    "candidate_count": 1,
+    "reasoning_effort_header": "none",
+    "selected_index": 0,
+    "clusters": {}
+  },
+  "wall_seconds": 76.4626212080002,
+  "replay_wall_seconds": 13.036599125000066
+}

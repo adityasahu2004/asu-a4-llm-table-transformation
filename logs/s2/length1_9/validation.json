@@ -1,0 +1,73 @@
+{
+  "case": "length1_9",
+  "length": 1,
+  "strategy": "s2",
+  "model": "qwen36-27b",
+  "is_demo": false,
+  "parameters": {
+    "output": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment",
+    "model": "qwen36-27b",
+    "base_url": "https://openai.rc.asu.edu/v1",
+    "max_tokens": 6000,
+    "reasoning_effort": "none",
+    "k": 5,
+    "sample_rows": 12,
+    "timeout": 120,
+    "replay_only": true,
+    "strategy": "s2",
+    "python": "3.14.4 (main, Apr  7 2026, 13:13:20) [Clang 21.0.0 (clang-2100.0.123.102)]",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "pandas": "3.1.1",
+    "held_out": [
+      "length1_1",
+      "length1_2",
+      "length1_3",
+      "length2_1",
+      "length3_1"
+    ],
+    "benchmark": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split"
+  },
+  "prompt_path": "logs/s2/length1_9/prompt.json",
+  "completion_path": "logs/s2/length1_9/response.json",
+  "error": "RuntimeError: unexpected indent (<generated>, line 3)",
+  "execution": {
+    "status": "generation_error"
+  },
+  "generation": {
+    "request_hash": "ef990323bd3b9ffd9e5341841b473debb8b7313c6519260b20e353dd076d5239",
+    "usage": {
+      "completion_tokens": 6000,
+      "prompt_tokens": 39943,
+      "total_tokens": 45943,
+      "completion_tokens_details": null,
+      "prompt_tokens_details": {
+        "audio_tokens": null,
+        "cache_write_tokens": null,
+        "cached_tokens": 36736,
+        "image_tokens": null,
+        "text_tokens": null,
+        "created_cache_tokens": 2688,
+        "multimodal_tokens": null
+      },
+      "co2_g": 5.228945,
+      "energy_wh": 15.516158
+    },
+    "latency_seconds": 187.78444054200008,
+    "api_attempts": 1,
+    "cached": true,
+    "candidate_count": 1,
+    "reasoning_effort_header": "none"
+  },
+  "autopipeline": {
+    "accuracy": 0.0,
+    "is_correct": false,
+    "similarities": {}
+  },
+  "hard_match": {
+    "accuracy": 0.0,
+    "is_correct": false,
+    "similarities": {}
+  },
+  "wall_seconds": 187.79930158299976,
+  "replay_wall_seconds": 0.00376437499653548
+}

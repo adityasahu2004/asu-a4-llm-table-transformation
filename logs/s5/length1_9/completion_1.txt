@@ -1,0 +1,112 @@
+Operator plan:
+1. Parse the `date` column into a datetime object.
+2. Extract the date part to group rows by day.
+3. Extract the hour part to assign values to the correct hourly column (1-24). Note: Hour 0 in datetime corresponds to the start of the day, which maps to column "24:00" based on the target schema where "24:00" seems to capture the midnight/end-of-day readings or potentially the 24th hour slot. Looking at the sample:
+   - Source "1/2/2018 0:11" has value 67.9.
+   - Target "Tue 01/02/2018" has 746.9 in "24:00" and 0.0 elsewhere. Wait, 67.9 vs 746.9?
+   - Let's look at the first row of target: "Mon 01/01/2018". Values are ~4000.
+   - Let's look at source again. The source sample provided is very small and might not contain the data for Mon 01/01/2018. It only shows Jan 2nd and Jan 3rd.
+   - The target shows "Mon 01/01/2018" and "Tue 01/02/2018".
+   - The source sample has "1/2/2018" (Tue) and "1/3/2018" (Wed).
+   - The target row for "Tue 01/02/2018" has mostly 0.0 but "24:00" is 746.9.
+   - The source row "1/2/2018 0:11" is 67.9.
+   - There is a discrepancy in values (67.9 vs 746.9). This suggests either:
+     a) The sample data in the prompt is illustrative and not fully consistent with the target values (common in these tasks).
+     b) There is a transformation I'm missing.
+     c) The "zone_016" column is not the only source, but the schema only lists `date` and `zone_016`.
+   
+   Let's re-read carefully. "Source row count describes a training sample only". The target values for Mon 01/01 are ~4000. The source values are ~67. This is a huge difference.
+   
+   However, usually these tasks are about reshaping.
+   Let's look at the structure.
+   Source: Long format (date, value).
+   Target: Wide format (date, hour1..hour24).
+   
+   The key mapping is:
+   - Group by Date.
+   - Pivot by Hour.
+   - Format Date as "Ddd MM/DD/YYYY".
+   
+   How to map hours?
+   Standard 24-hour clock: 0-23.
+   Target columns: 1:00 to 24:00.
+   Usually:
+   Hour 0 -> 24:00 (or 12 AM)
+   Hour 1 -> 1:00
+   ...
+   Hour 23 -> 23:00
+   
+   Let's check the source sample "1/2/2018 0:11". Hour is 0.
+   If Hour 0 maps to "24:00", then the value 67.9 should appear in "24:00" for Tue 01/02/2018.
+   The target shows 746.9 in "24:00" for Tue 01/02/2018.
+   The values don't match. 67.9 vs 746.9.
+   
+   Is it possible the source data in the sample is just a subset and the target data comes from a different part of the dataset or has been aggregated/transformed?
+   Or is `zone_016` multiplied by something? 746.9 / 67.9 ≈ 11.
+   Or maybe the sample data in the prompt's `source.sample` is not the same data that produced `target.sample`? The note says "Source row count describes a training sample only". It doesn't explicitly say the sample rows match the target rows.
+   
+   Given the constraints "Compute the result only from the source DataFrame", I must assume the transformation is structural.
+   
+   Structure:
+   1. Parse `date` to datetime.
+   2. Create a grouping key: the date string formatted as `%a %m/%d/%Y`.
+   3. Create a column key: the hour.
+      - If hour == 0, label is "24:00".
+      - Else label is f"{hour}:00".
+   4. Pivot the dataframe:
+      - Index: Date Group
+      - Columns: Hour Label
+      - Values: zone_016
+   5. Fill NaNs with 0.0 (as seen in target, missing hours are 0.0).
+   6. Ensure column order 1:00 to 24:00.
+   7. Reset index.
+
+   Let's verify the hour mapping assumption.
+   If I have a row at 1:00 AM, it goes to "1:00".
+   If I have a row at 12:00 AM (0:00), it goes to "24:00".
+   
+   This is a standard pivot operation.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    df = source.copy()
+    df['datetime'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract date and hour
+    df['date_only'] = df['datetime'].dt.date
+    df['hour'] = df['datetime'].dt.hour
+    
+    # Map hour 0 to '24:00', others to 'H:00'
+    df['hour_label'] = df['hour'].apply(lambda h: '24:00' if h == 0 else f'{h}:00')
+    
+    # Format the date for the index/column name
+    df['date_str'] = df['datetime'].dt.strftime('%a %m/%d/%Y')
+    
+    # Pivot the table
+    # We use date_str as index, hour_label as columns, zone_016 as values
+    pivot_df = df.pivot_table(index='date_str', columns='hour_label', values='zone_016', aggfunc='first')
+    
+    # Fill NaN with 0.0
+    pivot_df = pivot_df.fillna(0.0)
+    
+    # Define the desired column order
+    desired_cols = [f'{h}:00' for h in range(1, 25)]
+    
+    # Reindex columns to match desired order, adding any missing columns as 0.0 if necessary
+    # Although pivot_table might only have columns present in data, we want all 24.
+    for col in desired_cols:
+        if col not in pivot_df.columns:
+            pivot_df[col] = 0.0
+            
+    pivot_df = pivot_df[desired_cols]
+    
+    # Reset index to make 'cst' a column
+    pivot_df = pivot_df.reset_index()
+    pivot_df = pivot_df.rename(columns={'date_str': 'cst'})
+    
+    return pivot_df
+```

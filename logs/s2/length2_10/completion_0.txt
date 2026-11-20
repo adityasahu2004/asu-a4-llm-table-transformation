@@ -1,0 +1,117 @@
+**Operator Plan:**
+
+1.  **Parse Date**: Convert the `date` column (format `m/d/yyyy H:MM`) to a pandas datetime object.
+2.  **Extract Date Component**: Extract the date part (ignoring time) to group by day.
+3.  **Group By Day**: Group the data by the extracted date.
+4.  **Aggregate**: For each day, count the number of records. The target schema shows `pct_hourly_0100` through `pct_hourly_2400` containing values like `876` or `0`. Given the source has ~15k rows and target has 53 rows, and the values are integers, this looks like a count of records per day, or potentially a sum if the values were binary. However, looking at the distinct values in the target (`876`, `0`, `657`), and the source having 15117 rows over ~53 days, $15117 / 53 \approx 285$. This doesn't match 876 directly.
+    *   Let's re-examine. The target columns are named `pct_hourly_XXXX`. The values are integers.
+    *   Source `zone_016_cooling_sp` has values 73.0 and 84.0.
+    *   Target `pct_hourly_0100` etc. have values 876, 0, 657.
+    *   Wait, the target has 53 rows. The source has 15117 rows.
+    *   The target columns `pct_hourly_0100` to `pct_hourly_2400` all have the *same* value for a given row in the sample (e.g., 876 for all hours in the first row). This suggests the aggregation is not per-hour binning of the source data, but rather a single metric calculated per day, replicated across the 24 hour columns.
+    *   What is 876? It's close to 8760 (hours in a year) / 10? No.
+    *   Let's look at the distinct values in source `zone_016_cooling_sp`: 73.0, 84.0.
+    *   Let's look at the target `dow`: 0-6.
+    *   Let's look at the target `dt_strata`: "10/25/18".
+    *   The values 876, 657, 0 are integers.
+    *   Is it possible the source data represents minutes? 15117 rows.
+    *   Let's check the number of rows per day in the source sample.
+        *   11/6/2018: 1 row
+        *   11/11/2018: 1 row
+        *   ...
+        *   The sample shows 1 row per day. But the source has 15117 rows.
+        *   If there are 53 days in the target, and 15117 rows in source, that's ~285 rows per day.
+        *   285 * 3 = 855. Close to 876.
+        *   285 * 3.07 = 876.
+    *   Let's look at the values again. 876 is a very specific number.
+    *   Maybe it's a sum of something?
+    *   Or maybe it's a count of *minutes*? 285 rows * 3 minutes? No.
+    *   Let's look at the target column names: `pct_hourly_0100`. This usually implies a percentage or a value for that hour.
+    *   However, all hours have the same value. This implies the value is a daily aggregate.
+    *   What if the source `zone_016_cooling_sp` is being summed? 73 * 285 = 20805. No.
+    *   What if it's a count of non-null values?
+    *   Let's look at the distinct values in the target `pct_hourly_0100`: 876, 0.
+    *   And `pct_hourly_2100`: 876, 657.
+    *   This variation (657 vs 876) suggests it's not a simple constant.
+    *   Let's reconsider the source. `date` has time. `zone_016_cooling_sp` is a float.
+    *   Is it possible the target is derived from a *different* aggregation?
+    *   Let's look at the number 876. $876 = 12 \times 73$.
+    *   Let's look at 657. $657 = 9 \times 73$.
+    *   Ah! $73$ is one of the distinct values in `zone_016_cooling_sp`.
+    *   $876 / 73 = 12$.
+    *   $657 / 73 = 9$.
+    *   So the value is `count * 73`? Or `sum` if all values are 73?
+    *   If the value is 84, $876 / 84 = 10.42$. Not an integer.
+    *   So it's likely a count of records, multiplied by a base value? Or just a count?
+    *   If it's a count, why 876?
+    *   Maybe the source data has 12 records for that day?
+    *   If there are 12 records, and the value is 73, sum is 876.
+    *   If there are 9 records, and the value is 73, sum is 657.
+    *   This fits perfectly. The transformation is: **Sum** the `zone_016_cooling_sp` values for each day.
+    *   Let's verify.
+        *   Target row 1: 876. If 12 records of 73, sum = 876.
+        *   Target row 23 (pct_hourly_2100 has 657): If 9 records of 73, sum = 657.
+        *   Target row with 0: 0 records or sum is 0.
+    *   So the operation is: Group by Date, Sum `zone_016_cooling_sp`.
+    *   Then, replicate this sum across all 24 hourly columns.
+    *   Also, generate `dt_strata` (MM/DD/YY) and `dow` (0-6, where 0 is Monday? Or 0 is Sunday? Python `dayofweek` is Mon=0. Target distinct values are 0-6. Sample: "10/25/18" is a Thursday. Python `dayofweek` for Thu is 3. Target `dow` is 4. So it's 1-based? Or Sunday=0?
+        *   Oct 25, 2018 was a Thursday.
+        *   If Mon=1, Thu=4. This matches.
+        *   Oct 23, 2018 was a Tuesday. Target `dow` is 2. Matches.
+        *   Oct 28, 2018 was a Sunday. Target `dow` is 0.
+        *   So `dow` is: Sunday=0, Monday=1, ..., Saturday=6. This is `dt.weekday()` in Python if we map Sun to 0? No, Python `weekday()` is Mon=0. `isoweekday()` is Mon=1.
+        *   Standard `datetime.weekday()`: Mon=0, Sun=6.
+        *   Target: Sun=0, Mon=1, ..., Sat=6.
+        *   This is `(dt.weekday() + 1) % 7`.
+            *   Mon (0) -> 1.
+            *   Sun (6) -> 0.
+            *   Thu (3) -> 4.
+            *   Yes.
+
+5.  **Construct Output**:
+    *   `dt_strata`: Format date as `%m/%d/%y`.
+    *   `dow`: Calculate as `(dt.weekday() + 1) % 7`.
+    *   `pct_hourly_0100` to `pct_hourly_2400`: All equal to the daily sum of `zone_016_cooling_sp`.
+    *   `pct_hourly_2500`: Always 0.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    source = source.copy()
+    source['dt'] = pd.to_datetime(source['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract date for grouping
+    source['date_only'] = source['dt'].dt.date
+    
+    # Group by date and sum the cooling setpoint
+    # The target values (876, 657) correspond to sums of 73.0 (12*73=876, 9*73=657)
+    daily_sum = source.groupby('date_only')['zone_016_cooling_sp'].sum().reset_index()
+    daily_sum.columns = ['date_only', 'daily_total']
+    
+    # Create the output dataframe
+    out = pd.DataFrame()
+    out['dt_strata'] = pd.to_datetime(daily_sum['date_only']).dt.strftime('%m/%d/%y')
+    
+    # Calculate dow: Sunday=0, Monday=1, ..., Saturday=6
+    # Python weekday: Mon=0, ..., Sun=6
+    # Formula: (weekday + 1) % 7
+    dt_series = pd.to_datetime(daily_sum['date_only'])
+    out['dow'] = (dt_series.dt.weekday + 1) % 7
+    
+    # Create hourly columns 0100 to 2400 with the daily total
+    for h in range(1, 25):
+        out[f'pct_hourly_{h:02d}00'] = daily_sum['daily_total']
+        
+    # Add the 2500 column with 0
+    out['pct_hourly_2500'] = 0
+    
+    # Ensure integer types for the hourly columns as per target schema
+    for col in out.columns:
+        if col.startswith('pct_hourly'):
+            out[col] = out[col].astype('int64')
+            
+    return out
+```

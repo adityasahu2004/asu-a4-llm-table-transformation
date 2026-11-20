@@ -1,0 +1,186 @@
+### Operator Plan
+
+1.  **Parse Dates**: The source column `CST` contains dates in the format `"Day MM/DD/YYYY"` (e.g., `"Sat 12/01/2012"`). We need to extract the date part (`MM/DD/YYYY`) and parse it into a datetime object to handle sorting and potential date arithmetic if needed, although the primary goal is reshaping. The target date format is `MM/DD/YYYY`.
+2.  **Melt/Unpivot**: The source data is in a wide format with 24 columns representing hours (`1:00` to `24:00:00`). The target data is also in a wide format but with columns `value1` to `value24`. This suggests a direct mapping or a melt-and-pivot operation. However, looking at the row counts:
+    *   Source: 1339 rows.
+    *   Target: 1340 rows.
+    *   The difference is 1 row. Let's look at the date ranges.
+    *   Source first/last: `Sat 12/01/2012` to `Sun 07/31/2016`.
+    *   Target first/last: `04/01/2009` to `11/30/2012`.
+    *   Wait, the target dates are *earlier* than the source dates?
+        *   Source sample starts `Sat 12/01/2012`.
+        *   Target sample starts `04/01/2009`.
+        *   This implies the source and target samples provided in the prompt might be from different parts of the dataset or the "source" description in the prompt is just a schema sample and the actual transformation logic needs to be inferred from the structure.
+        *   Let's re-read carefully. "Source row count describes a training sample only".
+        *   The target has 1340 rows. The source has 1339 rows.
+        *   The target columns are `value1`...`value24`. The source columns are `1:00`...`24:00:00`.
+        *   The mapping is likely: `1:00` -> `value1`, `2:00` -> `value2`, ..., `24:00:00` -> `value24`.
+        *   The date column `CST` needs to be transformed to `date` in format `MM/DD/YYYY`.
+        *   Why is there a row count difference? 1339 vs 1340.
+        *   Let's look at the distinct counts. Source `CST` has 1339 distinct values. Target `date` has 1340 distinct values.
+        *   Is it possible that the source data is missing a row or the target includes an extra row? Or perhaps the source data provided in the schema is just a subset?
+        *   Actually, usually in these problems, the transformation is structural.
+        *   Let's assume the standard operation:
+            1.  Parse `CST` to datetime.
+            2.  Format datetime to `MM/DD/YYYY` string for the `date` column.
+            3.  Rename columns `1:00`...`24:00:00` to `value1`...`value24`.
+            4.  Sort by date? The target sample is sorted by date ascending. The source sample is sorted by date ascending.
+        *   Let's check the column renaming logic.
+            *   Source: `1:00`, `2:00`, ..., `9:00`, `10:00`, ..., `24:00:00`.
+            *   Target: `value1`, `value2`, ..., `value9`, `value10`, ..., `value24`.
+            *   This is a straightforward rename.
+        *   What about the row count discrepancy?
+            *   If the source has 1339 rows and target has 1340, and the dates are distinct, maybe there's a date generation step?
+            *   However, the prompt says "Compute the result only from the source DataFrame". We cannot generate new rows that don't exist in the source unless we are filling gaps.
+            *   Let's look at the dates again.
+            *   Source: `Sat 12/01/2012` ... `Sun 07/31/2016`.
+            *   Target: `04/01/2009` ... `11/30/2012`.
+            *   These ranges do not overlap significantly. This suggests the "sample" data in the prompt is just illustrative of the *format*, not the actual content mapping. The transformation must be generic.
+            *   The generic transformation is:
+                1.  Extract date from `CST`.
+                2.  Rename hour columns to `valueN`.
+                3.  Ensure the output has columns `date`, `value1`...`value24`.
+            *   The row count difference (1339 vs 1340) might be due to the specific evaluation set having one more row, or a specific date being added/removed. But since we must compute *only* from the source, we simply transform the existing rows. If the evaluation source has 1340 rows, the output will have 1340 rows. The schema stats are just stats.
+            *   Wait, is it possible `CST` needs to be parsed and then we need to handle the `24:00:00` column specifically?
+            *   `24:00:00` maps to `value24`.
+            *   `1:00` maps to `value1`.
+            *   The logic seems to be:
+                1.  Parse `CST` string to datetime. The format is `%a %m/%d/%Y`.
+                2.  Create `date` column formatted as `%m/%d/%Y`.
+                3.  Rename the remaining columns.
+                4.  Sort by `date`? The target sample is sorted. It is good practice to sort by date if the order isn't guaranteed, but pandas usually preserves index order. The source sample is sorted. I will sort by date to be safe, as "date" is the primary key.
+
+3.  **Refining the Date Parsing**:
+    *   Source: `"Sat 12/01/2012"`
+    *   `pd.to_datetime(source['CST'], format='%a %m/%d/%Y')`
+    *   Format to string: `.dt.strftime('%m/%d/%Y')`
+
+4.  **Refining the Column Renaming**:
+    *   Create a mapping dictionary.
+    *   Keys: `['1:00', '2:00', ..., '24:00:00']`
+    *   Values: `['value1', 'value2', ..., 'value24']`
+    *   Apply `df.rename(columns=...)`.
+
+5.  **Final Output Construction**:
+    *   Select columns in order: `['date', 'value1', ..., 'value24']`.
+    *   Sort by `date` (string sort works for MM/DD/YYYY if consistent, but datetime sort is safer. Since we convert to string at the end, we should sort by the datetime object before converting, or sort by the string if we know it's consistent. MM/DD/YYYY is not lexicographically sortable for years, but within a year it is. However, `pd.to_datetime` allows proper sorting. I will sort by the parsed datetime, then drop the helper column or just sort the final dataframe by the string date if I convert early. Better: Parse, Sort, Format, Rename, Select).
+
+Let's double check the `24:00:00` column name. It is `24:00:00`. The others are `H:00`.
+The target is `value24`.
+
+Step-by-step code plan:
+1.  Parse `CST` to datetime `dt`.
+2.  Sort the dataframe by `dt`.
+3.  Create `date` column from `dt` formatted as `MM/DD/YYYY`.
+4.  Drop `CST` and `dt` (if kept as column).
+5.  Rename columns `1:00` -> `value1`, ..., `24:00:00` -> `value24`.
+6.  Reorder columns to start with `date`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse the CST column to datetime
+    # Format is "Day MM/DD/YYYY" e.g., "Sat 12/01/2012"
+    # We use format='%a %m/%d/%Y'
+    df = source.copy()
+    df['parsed_date'] = pd.to_datetime(df['CST'], format='%a %m/%d/%Y')
+    
+    # 2. Sort by the parsed date to ensure chronological order
+    df = df.sort_values('parsed_date').reset_index(drop=True)
+    
+    # 3. Create the 'date' column in MM/DD/YYYY format
+    df['date'] = df['parsed_date'].dt.strftime('%m/%d/%Y')
+    
+    # 4. Define the column mapping for the hour columns
+    # Source columns: '1:00', '2:00', ..., '24:00:00'
+    # Target columns: 'value1', 'value2', ..., 'value24'
+    col_mapping = {}
+    for i in range(1, 25):
+        if i < 24:
+            src_col = f"{i}:00"
+        else:
+            src_col = "24:00:00"
+        tgt_col = f"value{i}"
+        col_mapping[src_col] = tgt_col
+        
+    # 5. Rename the columns
+    df = df.rename(columns=col_mapping)
+    
+    # 6. Select and order the final columns
+    # We want 'date' first, then value1 to value24
+    value_cols = [f"value{i}" for i in range(1, 25)]
+    final_cols = ['date'] + value_cols
+    
+    # Drop the helper columns
+    df = df.drop(columns=['CST', 'parsed_date'])
+    
+    # Ensure column order
+    df = df[final_cols]
+    
+    return df
+```
+
+Wait, looking at the source schema, the column `24:00:00` is explicitly named `24:00:00`. The others are `1:00` to `23:00`.
+My loop handles `i=24` as `24:00:00`.
+For `i=1` to `23`, it uses `f"{i}:00"`.
+This matches the source schema.
+
+One detail: `pd.to_datetime` might fail if there are unexpected formats, but the schema says `dtype: str` and gives examples. The format `%a %m/%d/%Y` is robust for the given examples.
+
+The row count difference in the schema description (1339 vs 1340) is likely due to the evaluation set having a different number of rows than the training sample described in the JSON. The transformation logic remains the same: process all rows in the source.
+
+Final check on imports: `pandas` and `numpy` are allowed. `pd` is standard.
+
+One edge case: What if `CST` has NaNs? The schema says `nulls: 0`. So we don't need to handle NaNs in `CST`.
+What if the source has extra columns? The schema lists specific columns. We should probably only select the ones we need or rename the specific ones. The `rename` operation only affects existing keys. The `final_cols` selection ensures we only output the required columns.
+
+The solution looks solid.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    """
+    Transforms the source DataFrame by:
+    1. Parsing the 'CST' date column.
+    2. Sorting by date.
+    3. Formatting the date as 'MM/DD/YYYY'.
+    4. Renaming hour-based columns to 'value1'...'value24'.
+    5. Returning the DataFrame with columns ['date', 'value1', ..., 'value24'].
+    """
+    df = source.copy()
+    
+    # Parse CST column: "Day MM/DD/YYYY"
+    # Example: "Sat 12/01/2012"
+    df['parsed_date'] = pd.to_datetime(df['CST'], format='%a %m/%d/%Y')
+    
+    # Sort by date
+    df = df.sort_values('parsed_date').reset_index(drop=True)
+    
+    # Format date column
+    df['date'] = df['parsed_date'].dt.strftime('%m/%d/%Y')
+    
+    # Create mapping for value columns
+    # Source: '1:00'...'23:00', '24:00:00'
+    # Target: 'value1'...'value24'
+    col_map = {}
+    for i in range(1, 24):
+        col_map[f"{i}:00"] = f"value{i}"
+    col_map["24:00:00"] = "value24"
+    
+    # Rename columns
+    df = df.rename(columns=col_map)
+    
+    # Define final column order
+    value_cols = [f"value{i}" for i in range(1, 25)]
+    final_cols = ['date'] + value_cols
+    
+    # Drop helper columns and select final columns
+    df = df.drop(columns=['CST', 'parsed_date'])
+    df = df[final_cols]
+    
+    return df
+```

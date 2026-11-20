@@ -1,0 +1,63 @@
+**Operator Plan:**
+
+1.  **Parse Date**: Parse the `Date` column (format `%m/%d/%Y`) into a datetime object.
+2.  **Generate Target Rows**: The target contains a continuous range of dates from `2013-01-01` to `2013-07-02` (inclusive), resulting in 183 rows. The source only contains a subset of these dates (bi-weekly samples). We must generate the full date range.
+3.  **Interpolate/Map Values**: Since the source provides specific measurements for specific dates and the target requires values for *every* day in that range, and the distinct values in the target columns match the source columns exactly (just reordered/different subset), we need to check if the target is simply a reformatting of the source or an interpolation.
+    *   Looking closely at the distinct counts: Source `1` has 45 distinct values. Target `1:00` has 57 distinct values. This implies the target is *not* just a subset of the source rows.
+    *   However, usually in these "schema inference" tasks without explicit interpolation instructions, if the row counts differ significantly (182 vs 183) and the date range is continuous, it often implies generating a time series. But wait, the prompt says "Compute the result only from the source DataFrame". We cannot invent data.
+    *   Let's re-read the distinct values. Source `Date` has 182 distinct values. Target `cst` has 183 distinct values.
+    *   Let's look at the sample data.
+        *   Source Sample Start: `7/3/2013`
+        *   Target Sample Start: `Tue 01/01/2013`
+    *   The target covers a wider date range (`01/01/2013` to `07/02/2013`) than the source (`7/3/2013` to `12/31/2013`).
+    *   Actually, looking at the target sample, the dates are `01/01/2013`, `01/17/2013`, `02/03/2013`... these are bi-weekly dates.
+    *   The source sample dates are `7/3/2013`, `7/19/2013`... also bi-weekly.
+    *   The target has 183 rows. The source has 182 rows.
+    *   The target date range is Jan 1, 2013 to July 2, 2013.
+    *   The source date range is July 3, 2013 to Dec 31, 2013.
+    *   These are disjoint sets of dates (mostly).
+    *   Wait, the problem states "Infer a general transformation... Compute the result only from the source DataFrame."
+    *   If the target data is completely different from the source data (different dates, different values), this is impossible unless there is a mapping or the "source" provided in the prompt is just a schema example and the *actual* evaluation source will contain the data corresponding to the target.
+    *   However, the prompt says "The evaluation source contains different rows; never copy target rows...".
+    *   Let's look at the structure.
+        *   Source: `Date`, `Class`, `1`...`24`
+        *   Target: `cst`, `1:00`...`24:00`
+    *   The values in the target sample (e.g., `0.89` for `1:00` on `01/01/2013`) do not appear in the source sample.
+    *   This implies the transformation is purely structural: renaming columns and formatting dates. The *values* in the target sample are just examples of what the output *would* look like if the input contained those dates.
+    *   BUT, the row count changes from 182 to 183. And the dates change.
+    *   If I strictly compute from source, I can only output 182 rows. The target has 183.
+    *   Is it possible the source *does* contain the data for the target dates in the evaluation set? Yes. The prompt says "The evaluation source contains different rows".
+    *   Therefore, the transformation logic should be:
+        1.  Take the `Date` column.
+        2.  Format it as `%a %m/%d/%Y` (e.g., `Tue 01/01/2013`). Name it `cst`.
+        3.  Rename columns `1`...`24` to `1:00`...`24:00`.
+        4.  Drop `Class`.
+        5.  Return the DataFrame.
+
+    *   Why the row count difference in the sample? The sample source is a specific slice (July-Dec). The sample target is a different slice (Jan-July). The transformation itself doesn't add/remove rows; it just transforms the ones present. The "183 vs 182" is an artifact of the specific sample slices chosen for the prompt, not the transformation logic. The transformation must be row-preserving.
+
+**Assumptions:**
+1.  The transformation is a row-wise mapping.
+2.  `Date` is parsed and reformatted.
+3.  Numeric columns `1`-`24` are renamed to `1:00`-`24:00`.
+4.  `Class` is discarded.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column to ensure correct formatting
+    # The source format is %m/%d/%Y (e.g., "7/3/2013")
+    # The target format is %a %m/%d/%Y (e.g., "Tue 01/01/2013")
+    dates = pd.to_datetime(source['Date'], format='%m/%d/%Y')
+    
+    # Create the new dataframe with the formatted date column
+    out = pd.DataFrame()
+    out['cst'] = dates.dt.strftime('%a %m/%d/%Y')
+    
+    # Rename the hourly columns from "1", "2", ... "24" to "1:00", "2:00", ... "24:00"
+    for h in range(1, 25):
+        out[f'{h}:00'] = source[str(h)]
+        
+    return out.reset_index(drop=True)
+```

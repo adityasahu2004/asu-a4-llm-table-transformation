@@ -1,0 +1,77 @@
+[
+  {
+    "index": 0,
+    "finish_reason": "stop",
+    "path": "generated/s4/length12_2/candidates/0.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+      "seconds": 8.738540667000052,
+      "shape": [
+        96,
+        15
+      ],
+      "fingerprint": "e729a03a783ed9c3011fc6e6e6201f3f1376277c9af37707e6cd677d65af033c"
+    }
+  },
+  {
+    "index": 1,
+    "finish_reason": "stop",
+    "path": "generated/s4/length12_2/candidates/1.py",
+    "execution": {
+      "status": "execution_error",
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\nTraceback (most recent call last):\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py\", line 21, in <module>\n    output = namespace['transform'](source)\n  File \"transform.py\", line 77, in transform\n    grouped = source.groupby(['season', 'hour']).agg(agg_dict).reset_index()\n              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/groupby/generic.py\", line 2275, in aggregate\n    result = op.agg()\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/apply.py\", line 350, in agg\n    return self.agg_dict_like()\n           ~~~~~~~~~~~~~~~~~~^^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/apply.py\", line 582, in agg_dict_like\n    return self.agg_or_apply_dict_like(op_name=\"agg\")\n           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/apply.py\", line 1906, in agg_or_apply_dict_like\n    result_index, result_data = self.compute_dict_like(\n                                ~~~~~~~~~~~~~~~~~~~~~~^\n        op_name, selected_obj, selection, kwargs\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/apply.py\", line 621, in compute_dict_like\n    func = self.normalize_dictlike_arg(op_name, selected_obj, func)\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/apply.py\", line 848, in normalize_dictlike_arg\n    raise KeyError(f\"Label(s) {list(cols)} do not exist\")\nKeyError: \"Label(s) ['cd_drye1_sum', 'cd_dryg1_sum', 'cr_microwave1_sum', 'cr_oven1_sum', 'cr_oven2_sum', 'cr_range1_sum', 'cw_clotheswasher1_sum', 'cw_clotheswasher_dryg1_sum', 'dw_dishwasher1_sum', 'dw_disposal1_sum', 'el_outsidelights_plugs1_sum', 'el_outsidelights_plugs2_sum', 'el_poollight1_sum', 'hvac_air1_sum', 'hvac_air2_sum', 'hvac_air3_sum', 'hvac_airwindowunit1_sum', 'hvac_circpump1_sum', 'hvac_furnace1_sum', 'hvac_furnace2_sum', 'hvac_heater1_sum', 'hvac_heater2_sum', 'hvac_heater3_sum', 'hvac_housefan1_sum', 'hvac_venthood1_sum', 'il_lights_plugs1_sum', 'il_lights_plugs2_sum', 'il_lights_plugs3_sum', 'il_lights_plugs4_sum', 'il_lights_plugs5_sum', 'il_lights_plugs6_sum', 'plug_aquarium1_sum', 'plug_bathroom1_sum', 'plug_bathroom2_sum', 'plug_battery1_sum', 'plug_bedroom1_sum', 'plug_bedroom2_sum', 'plug_bedroom3_sum', 'plug_bedroom4_sum', 'plug_bedroom5_sum', 'plug_car1_sum', 'plug_car2_sum', 'plug_diningroom1_sum', 'plug_diningroom2_sum', 'plug_garage1_sum', 'plug_garage2_sum', 'plug_kitchenapp1_sum', 'plug_kitchenapp2_sum', 'plug_livingroom1_sum', 'plug_livingroom2_sum', 'plug_office1_sum', 'plug_security1_sum', 'plug_shed1_sum', 'plug_utilityroom1_sum', 'pshe_jacuzzi1_sum', 'pshe_pool1_sum', 'psp_pool2_sum', 'psp_poolpump1_sum', 'psp_pump1_sum', 'ref_icemaker1_sum', 'ref_refrigerator1_sum', 'ref_refrigerator2_sum', 'ref_winecooler1_sum', 'wh_waterheater1_sum', 'wh_waterheater2_sum'] do not exist\"\n",
+      "seconds": 8.771388792003563
+    }
+  },
+  {
+    "index": 2,
+    "finish_reason": "stop",
+    "path": "generated/s4/length12_2/candidates/2.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+      "seconds": 8.758576332998928,
+      "shape": [
+        96,
+        15
+      ],
+      "fingerprint": "5bb79badebb88ea970c550016f0c91207800a09239886c4ee0046b39832778fb"
+    }
+  },
+  {
+    "index": 3,
+    "finish_reason": "stop",
+    "path": "generated/s4/length12_2/candidates/3.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+      "seconds": 8.508132041999488,
+      "shape": [
+        96,
+        15
+      ],
+      "fingerprint": "1e1ba5004a50904acf09da441048ef3c6d6748b16ba7152e0104ecbed3e11bac"
+    }
+  },
+  {
+    "index": 4,
+    "finish_reason": "stop",
+    "path": "generated/s4/length12_2/candidates/4.py",
+    "execution": {
+      "status": "execution_error",
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\nTraceback (most recent call last):\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py\", line 21, in <module>\n    output = namespace['transform'](source)\n  File \"transform.py\", line 100, in transform\n    }).reset_index()\n       ~~~~~~~~~~~^^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/frame.py\", line 8253, in reset_index\n    new_obj.insert(\n    ~~~~~~~~~~~~~~^\n        0,\n        ^^\n    ...<2 lines>...\n        allow_duplicates=allow_duplicates,\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/frame.py\", line 6247, in insert\n    raise ValueError(f\"cannot insert {column}, already exists\")\nValueError: cannot insert local_15min, already exists\n",
+      "seconds": 8.652725792002457
+    }
+  }
+]

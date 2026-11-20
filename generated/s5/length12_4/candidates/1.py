@@ -1,0 +1,81 @@
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Map months to seasons
+    month_to_season = {
+        'January': 'Winter', 'February': 'Winter', 'March': 'Spring',
+        'April': 'Spring', 'May': 'Spring', 'June': 'Summer',
+        'July': 'Summer', 'August': 'Summer', 'September': 'Fall',
+        'October': 'Fall', 'November': 'Fall', 'December': 'Winter'
+    }
+    
+    # Create season column
+    source = source.copy()
+    source['season'] = source['Time Period'].map(month_to_season)
+    
+    # Filter out nulls in the value column
+    val_col = 'Average Demand Per Home With This End Use [kW]'
+    df_valid = source.dropna(subset=[val_col])
+    
+    # Map End Use to target columns
+    end_use_mapping = {
+        'HVAC': 'hvac',
+        'Water Heating': 'water_heating',
+        'Refrigerator': 'refrigerator',
+        'Dishwasher': 'dishwasher'
+    }
+    
+    # Create a dataframe with season, hour, and mapped values
+    # We only keep rows that map to specific float columns
+    df_mapped = df_valid[df_valid['End Use'].isin(end_use_mapping.keys())].copy()
+    df_mapped['target_col'] = df_mapped['End Use'].map(end_use_mapping)
+    df_mapped['value'] = df_mapped[val_col]
+    df_mapped['hour'] = df_mapped['Hour Ending']
+    
+    # Pivot/Aggregate
+    # Group by season and hour, sum the values for each target_col
+    agg_df = df_mapped.groupby(['season', 'hour', 'target_col'])['value'].sum().reset_index()
+    
+    # Pivot to wide format
+    pivot_df = agg_df.pivot_table(index=['season', 'hour'], columns='target_col', values='value', fill_value=0.0).reset_index()
+    
+    # Ensure all expected float columns exist
+    expected_float_cols = ['hvac', 'water_heating', 'refrigerator', 'dishwasher']
+    for col in expected_float_cols:
+        if col not in pivot_df.columns:
+            pivot_df[col] = 0.0
+            
+    # Select and reorder float columns
+    result = pivot_df[['season', 'hour'] + expected_float_cols]
+    
+    # Add integer zero columns as per target schema
+    int_zero_cols = [
+        'clothes_washer', 'clothes_dryer', 'cooking_range', 
+        'pool_spa_pumps', 'interior_lighting', 'exterior_lighting', 
+        'lighting', 'plug', 'pool_spa_heater'
+    ]
+    for col in int_zero_cols:
+        result[col] = 0
+        
+    # Ensure hour is int64
+    result['hour'] = result['hour'].astype('int64')
+    
+    # The target has 96 rows (4 seasons * 24 hours).
+    # We should ensure all combinations exist.
+    seasons = ['Winter', 'Spring', 'Summer', 'Fall']
+    hours = range(1, 25)
+    
+    # Create a complete grid
+    grid = pd.MultiIndex.from_product([seasons, hours], names=['season', 'hour'])
+    result = result.set_index(['season', 'hour']).reindex(grid, fill_value=0).reset_index()
+    
+    # Ensure dtypes for the zero columns are int64
+    for col in int_zero_cols:
+        result[col] = result[col].astype('int64')
+        
+    # Ensure float columns are float64
+    for col in expected_float_cols:
+        result[col] = result[col].astype('float64')
+
+    return result

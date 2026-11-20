@@ -1,0 +1,74 @@
+{
+  "candidate_count": 6,
+  "selected_index": 1,
+  "baseline_index": 1,
+  "selection_reason": "SC winner retained: no strict constraint improvement",
+  "constraints": {
+    "columns": [
+      "date",
+      "value1",
+      "value2",
+      "value3",
+      "value4",
+      "value5",
+      "value6",
+      "value7",
+      "value8",
+      "value9",
+      "value10",
+      "value11",
+      "value12",
+      "value13",
+      "value14",
+      "value15",
+      "value16",
+      "value17",
+      "value18",
+      "value19",
+      "value20",
+      "value21",
+      "value22",
+      "value23",
+      "value24"
+    ],
+    "relations": []
+  },
+  "policy": {
+    "version": "schema-weekday-v1",
+    "pool": "five few-shot SC samples + one greedy few-shot sample",
+    "constraints": [
+      "exact target schema",
+      "uniquely identified date-to-weekday relation"
+    ],
+    "target_rows": "the same 12-row prompt sample as the baselines",
+    "output_rows": "up to 128 evenly spaced training-output rows",
+    "selection": "strictly lower lexicographic constraint loss; preserve SC winner on ties",
+    "forbidden_inputs": [
+      "test_0.csv",
+      "validator results",
+      "case-specific rules",
+      "target row counts"
+    ]
+  },
+  "usage": {
+    "prompt_tokens": 82932,
+    "completion_tokens": 21743,
+    "total_tokens": 104675
+  },
+  "api_attempts": 2,
+  "marginal_api_attempts": 0,
+  "latency_seconds": 370.07374558300216,
+  "inherited_api_seconds": 370.07374558300216,
+  "clusters": {
+    "ec8d0936cdd70d9a329d58b942153e60be3c8192f9c01a2e6685d2ce0732e46b": [
+      1
+    ],
+    "87db8963326b761b9246383aa3fb99b99e38a5eee57c2467a6e78f0a1a0ae6a1": [
+      2
+    ],
+    "b2d1fe58b5977b6ae2a8737cf4636629e6342e338662414fa15cc77272e6bdea": [
+      3
+    ]
+  },
+  "cost_basis": "standalone logical pool cost; reused requests have zero marginal API cost"
+}

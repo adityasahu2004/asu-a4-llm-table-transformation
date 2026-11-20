@@ -1,0 +1,237 @@
+### Operator Plan
+
+1.  **Date Parsing and Shifting**:
+    *   The source `Date` column contains strings in the format `"Day MM/DD/YYYY"` (e.g., `"Thu 10/01/2009"`).
+    *   The target `cst` column contains strings in the same format but represents dates exactly **6 years prior** to the source dates.
+    *   Observation: Source first date `2009-10-01` -> Target first date `2003-01-01`? No, wait.
+        *   Source: `Thu 10/01/2009` (Oct 1, 2009 is a Thursday).
+        *   Target: `Wed 01/01/2003` (Jan 1, 2003 is a Wednesday).
+        *   Let's check the offset.
+        *   Source Last: `Thu 06/30/2016`.
+        *   Target Last: `Wed 09/30/2009`.
+        *   Difference between `2016-06-30` and `2009-09-30` is roughly 6 years and 9 months? No.
+        *   Let's look at the day of week. Source is always Thursday. Target is always Wednesday.
+        *   Let's look at the specific dates.
+        *   Source: `2009-10-01`. Target: `2003-01-01`. This doesn't look like a simple constant shift.
+        *   Let's re-read the sample data carefully.
+        *   Source Row 0: `Thu 10/01/2009`. Target Row 0: `Wed 01/01/2003`.
+        *   Source Row 1: `Thu 05/13/2010`. Target Row 1: `Wed 08/13/2003`.
+        *   Source Row 2: `Thu 12/23/2010`. Target Row 2: `Wed 03/24/2004`.
+        *   This implies the rows are **not** aligned 1-to-1 by index in a simple temporal shift sense, OR the target data is from a different dataset entirely?
+        *   Wait, the problem states "Infer the transformation... Compute the result only from the source DataFrame." and "Never copy target rows".
+        *   However, usually in these tasks, the target is a deterministic function of the source.
+        *   Let's look at the values.
+        *   Source Row 0 values: `1.153, 1.198...`
+        *   Target Row 0 values: `2.188, 2.114...`
+        *   These values are completely different.
+        *   Is it possible the target is just the source shifted by a fixed time delta?
+        *   Let's check if the target dates correspond to source dates minus 6 years?
+        *   `2009-10-01` - 6 years = `2003-10-01`. Target is `2003-01-01`. No.
+        *   Let's check if the target dates correspond to source dates minus some other amount.
+        *   Let's look at the distinct values. Source has 2465 distinct dates. Target has 2465 distinct dates.
+        *   Source dates are all Thursdays. Target dates are all Wednesdays.
+        *   This suggests a day-of-week shift or a specific calendar manipulation.
+        *   Let's look at the difference in days.
+        *   `2009-10-01` (Thu) to `2003-01-01` (Wed).
+        *   `2010-05-13` (Thu) to `2003-08-13` (Wed).
+        *   `2010-12-23` (Thu) to `2004-03-24` (Wed).
+        *   There is no obvious constant offset.
+        *   **Hypothesis**: The target data provided in the JSON is **not** derived from the source data provided in the JSON via a simple row-wise transformation. The prompt says "Source row count describes a training sample only, not the evaluation input." and "The evaluation source contains different rows".
+        *   However, usually, the transformation is structural.
+        *   Let's look at the columns.
+        *   Source columns: `Segment`, `Date`, `1:00` ... `24:00:00`.
+        *   Target columns: `cst`, `1:00` ... `24:00`.
+        *   The numeric columns `1:00` through `23:00` are identical in name.
+        *   The last column `24:00:00` in source becomes `24:00` in target.
+        *   The `Segment` column is dropped.
+        *   The `Date` column is renamed to `cst` and transformed.
+        *   The numeric values in the target sample are **different** from the source sample. This is the critical part. If the values are different, I cannot just copy them. I must calculate them.
+        *   But how? There is no mathematical relationship visible between `1.153` and `2.188` without more context.
+        *   **Re-evaluating the prompt constraints**: "Infer a general transformation from the source schema and target specification."
+        *   Often, in these "schema-only" or "sample-only" inference tasks, if the values change, it might be a **shift** in the data itself (e.g., rolling window, lag, lead) or a **mapping** from a different source. But I only have one source.
+        *   Let's look closer at the dates.
+        *   Source: `Thu 10/01/2009`. Target: `Wed 01/01/2003`.
+        *   Source: `Thu 05/13/2010`. Target: `Wed 08/13/2003`.
+        *   Source: `Thu 12/23/2010`. Target: `Wed 03/24/2004`.
+        *   Is it possible the target is simply the source data **shifted by 6 years and 9 months**? No.
+        *   Is it possible the target is the source data **shifted by 1 day**?
+        *   `Thu 10/01/2009` - 1 day = `Wed 09/30/2009`.
+        *   Target last row is `Wed 09/30/2009`.
+        *   Source last row is `Thu 06/30/2016`.
+        *   Target first row is `Wed 01/01/2003`.
+        *   This implies the target dataset is **not** the same rows as the source dataset.
+        *   **CRITICAL INSIGHT**: The prompt says "The evaluation source contains different rows". The sample provided is just a sample. The transformation must be **row-independent** or based on **column operations**.
+        *   If the values in the target sample (`2.188`) are not in the source sample (`1.153`), and I cannot access external data, then either:
+            1.  The values are calculated from the source values (e.g., `val * 2`). Let's check: `1.153 * 2 = 2.306` (No). `1.153 + 1 = 2.153` (Close to 2.188? No).
+            2.  The target sample provided in the JSON is **misleading** or represents a **different time period** of the same underlying process, and the "transformation" is just the **schema change** and **date formatting**, assuming the *evaluation* source will have the correct values for the target dates?
+            3.  Or, more likely, the target values **are** the source values, but the sample rows in the JSON are **not aligned**.
+                *   Let's check if `2.188` exists in the source column `1:00`.
+                *   Source `1:00` values in sample: `1.153, 1.006, 2.698...`
+                *   It's possible `2.188` is in the full source dataset.
+                *   If the transformation is just "Rename Date to cst, shift date by X, rename 24:00:00 to 24:00, drop Segment", then the values should remain the same.
+                *   Let's assume the values **do not change** and the sample mismatch is due to the sample rows being from different parts of the dataset (or the target sample is from a different file entirely, which happens in some benchmarks).
+                *   However, the date shift is the key.
+                *   Let's look at the date shift again.
+                *   Source: `Thu 10/01/2009`.
+                *   Target: `Wed 01/01/2003`.
+                *   This is a huge jump.
+                *   Let's look at the last rows.
+                *   Source: `Thu 06/30/2016`.
+                *   Target: `Wed 09/30/2009`.
+                *   Difference: `2016-06-30` to `2009-09-30`.
+                *   This is exactly **6 years and 9 months**?
+                *   `2016 - 6 = 2010`. `2010 - 0.75 = 2009.25`.
+                *   Let's check the first rows again.
+                *   `2009-10-01` to `2003-01-01`.
+                *   `2009 - 6 = 2003`. `Oct` to `Jan` is -9 months.
+                *   So the shift is **-6 years and -9 months**?
+                *   Let's verify with the middle rows.
+                *   Source: `Thu 05/13/2010`.
+                *   Minus 6 years: `05/13/2004`.
+                *   Minus 9 months: `05/13/2004` -> `08/13/2003`.
+                *   Target: `Wed 08/13/2003`. **MATCH**.
+                *   Source: `Thu 12/23/2010`.
+                *   Minus 6 years: `12/23/2004`.
+                *   Minus 9 months: `12/23/2004` -> `03/23/2004`.
+                *   Target: `Wed 03/24/2004`.
+                *   Wait. `12/23` minus 9 months is `03/23`. Target is `03/24`.
+                *   Let's check the day of week.
+                *   `2010-12-23` is Thursday.
+                *   `2004-03-23` is Tuesday.
+                *   `2004-03-24` is Wednesday.
+                *   So it's not a simple month subtraction.
+                *   Let's try subtracting **6 years and 9 months and 1 day**?
+                *   `2010-05-13` (Thu) - 6y - 9m = `2003-08-13` (Wed).
+                *   `2010-12-23` (Thu) - 6y - 9m = `2004-03-23` (Tue). Target is `03/24` (Wed).
+                *   Why the difference?
+                *   Maybe it's a fixed number of days?
+                *   `2010-05-13` to `2003-08-13`.
+                *   `2010-12-23` to `2004-03-24`.
+                *   Let's calculate the delta in days.
+                *   `2010-05-13` to `2003-08-13`:
+                    *   2010-05-13 to 2003-05-13 is 7 years.
+                    *   2003-05-13 to 2003-08-13 is 3 months.
+                    *   Total: 7 years - 3 months? No, 2010 to 2003 is -7 years.
+                    *   Wait, `2010 - 2003 = 7`.
+                    *   `May` to `Aug` is +3 months.
+                    *   So `2010-05-13` -> `2003-08-13` is `-7 years + 3 months`?
+                    *   Let's check the first one: `2009-10-01` -> `2003-01-01`.
+                    *   `2009 - 2003 = 6`.
+                    *   `Oct` to `Jan` is -9 months (or +3 months next year?).
+                    *   `2009-10-01` - 6 years = `2003-10-01`.
+                    *   `2003-10-01` - 9 months = `2003-01-01`.
+                    *   So `2009-10-01` -> `2003-01-01` is `-6 years - 9 months`.
+                    *   `2010-05-13` -> `2003-08-13`.
+                    *   `2010-05-13` - 6 years = `2004-05-13`.
+                    *   `2004-05-13` - 9 months = `2003-08-13`.
+                    *   So `2010-05-13` -> `2003-08-13` is `-6 years - 9 months`.
+                    *   `2010-12-23` -> `2004-03-24`.
+                    *   `2010-12-23` - 6 years = `2004-12-23`.
+                    *   `2004-12-23` - 9 months = `2004-03-23`.
+                    *   Target is `2004-03-24`.
+                    *   There is a 1-day discrepancy in the third example.
+                    *   Let's check the fourth example.
+                    *   Source: `Thu 08/04/2011`.
+                    *   Target: `Wed 11/03/2004`.
+                    *   `2011-08-04` - 6 years = `2005-08-04`.
+                    *   `2005-08-04` - 9 months = `2004-11-04`.
+                    *   Target is `2004-11-03`.
+                    *   Discrepancy: 1 day.
+                    *   Let's check the fifth example.
+                    *   Source: `Thu 03/15/2012`.
+                    *   Target: `Wed 06/15/2005`.
+                    *   `2012-03-15` - 6 years = `2006-03-15`.
+                    *   `2006-03-15` - 9 months = `2005-06-15`.
+                    *   Target is `2005-06-15`. **MATCH**.
+                    *   So sometimes it's -9 months, sometimes -9 months - 1 day?
+                    *   Or is it a fixed number of days?
+                    *   `2009-10-01` to `2003-01-01`:
+                        *   Days between: `2443` days?
+                        *   `2010-05-13` to `2003-08-13`:
+                        *   Days between: `2436` days?
+                    *   This is inconsistent.
+
+    *   **Alternative Theory**: The target date is simply the source date **minus 6 years and 9 months**, but handled via pandas `pd.DateOffset(months=-9, years=-6)`.
+        *   Pandas `DateOffset` handles month-end logic.
+        *   `2010-12-23` + `DateOffset(months=-9)` -> `2010-03-23`.
+        *   `2010-03-23` + `DateOffset(years=-6)` -> `2004-03-23`.
+        *   Target is `2004-03-24`.
+        *   Why the +1 day?
+        *   Maybe the shift is **-6 years, -9 months, +1 day**?
+        *   `2009-10-01` - 6y - 9m + 1d = `2003-01-02`. Target `2003-01-01`. No.
+        *   Maybe the shift is **-6 years, -9 months** and the target sample has a typo? Or my calculation of "9 months" is wrong?
+        *   Let's look at the day of week.
+        *   Source is always Thursday.
+        *   Target is always Wednesday.
+        *   This implies a shift of **-1 day** (modulo 7) or similar.
+        *   If I subtract 6 years and 9 months, do I always land on a Tuesday or Wednesday?
+        *   `2009-10-01` (Thu) - 6y - 9m = `2003-01-01` (Wed). **Match**.
+        *   `2010-05-13` (Thu) - 6y - 9m = `2003-08-13` (Wed). **Match**.
+        *   `2010-12-23` (Thu) - 6y - 9m = `2004-03-23` (Tue). Target `Wed`.
+        *   `2011-08-04` (Thu) - 6y - 9m = `2004-11-04` (Fri). Target `Wed`.
+        *   `2012-03-15` (Thu) - 6y - 9m = `2005-06-15` (Wed). **Match**.
+        *   The "Match" cases are when the day of the month doesn't roll over in a weird way?
+        *   Actually, `2010-12-23` to `2004-03-23`.
+        *   `2011-08-04` to `2004-11-04`.
+        *   The target dates `2004-03-24` and `2004-11-03` are **1 day different** from the calculated dates.
+        *   Is it possible the shift is **-6 years, -9 months, and then adjust to the previous Wednesday**?
+        *   `2004-03-23` is Tue. Previous Wed is `2004-03-17`. No. Next Wed is `2004-03-24`.
+        *   `2004-11-04` is Fri. Previous Wed is `2004-11-03`.
+        *   `2003-01-01` is Wed. Previous/Next Wed is `2003-01-01`.
+        *   `2003-08-13` is Wed.
+        *   `2005-06-15` is Wed.
+        *   **Hypothesis**: The transformation is:
+            1.  Parse Date.
+            2.  Subtract 6 years and 9 months.
+            3.  Find the **nearest Wednesday** (or specifically, if the result is not Wednesday, adjust to the closest Wednesday? Or always the Wednesday of that week?).
+            4.  Given the source is always Thursday, and the target is always Wednesday, it's highly likely the target is just **Source Date - 1 Day - 6 Years - 9 Months**?
+                *   `2009-10-01` - 1d = `2009-09-30`. -6y-9m = `2002-12-30`. No.
+            5.  Let's try: **Source Date - 6 Years - 9 Months**. Then **if the day is not Wednesday, adjust**.
+                *   But `2004-03-23` (Tue) -> `2004-03-24` (Wed). (+1 day)
+                *   `2004-11-04` (Fri) -> `2004-11-03` (Wed). (-1 day)
+                *   This looks like "Round to nearest Wednesday".
+                *   `Tue` is 1 day from `Wed`. `Fri` is 2 days from `Wed` (prev) or 5 days (next). Nearest is `Wed` (prev).
+                *   Let's check `2003-01-01` (Wed). Nearest is `Wed`.
+                *   Let's check `2003-08-13` (Wed). Nearest is `Wed`.
+                *   Let's check `2005-06-15` (Wed). Nearest is `Wed`.
+                *   This fits all samples.
+
+    *   **Refined Plan**:
+        1.  Parse `Date` to datetime.
+        2.  Apply offset: `-6 years, -9 months`.
+        3.  Adjust to the nearest Wednesday.
+            *   Calculate days since Wednesday.
+            *   If day is Wed (0), keep.
+            *   If day is Tue (6) or Thu (1), move to Wed (0).
+            *   If day is Mon (5) or Fri (4), move to Wed (0).
+            *   If day is Sun (6) or Sat (5)... wait.
+            *   Standard `weekday()`: Mon=0, Tue=1, Wed=2, Thu=3, Fri=4, Sat=5, Sun=6.
+            *   Target is Wed (2).
+            *   `2004-03-23` is Tue (1). Diff = 1. Round to 2?
+            *   `2004-11-04` is Fri (4). Diff = 2. Round to 2?
+            *   `2003-01-01` is Wed (2). Diff = 0.
+            *   So, `new_date = date + (2 - date.weekday())`?
+                *   Tue (1): `1 + (2-1) = 2` (Wed). Correct.
+                *   Fri (4): `4 + (2-4) = 0` (Mon). Incorrect. Target is Wed.
+                *   So it's not simple subtraction.
+                *   It's `round` to nearest.
+                *   `abs(weekday - 2)`.
+                *   Tue (1): dist 1.
+                *   Wed (2): dist 0.
+                *   Thu (3): dist 1.
+                *   Fri (4): dist 2.
+                *   Sat (5): dist 3.
+                *   Sun (6): dist 4.
+                *   Mon (0): dist 2.
+                *   If we round to nearest:
+                    *   Tue -> Wed.
+                    *   Thu -> Wed.
+                    *   Mon -> Wed (dist 2) or Sun (dist 4)? Nearest is Wed.
+                    *   Fri -> Wed (dist 2) or Sat (dist 3)? Nearest is Wed.
+                    *   So **all days** map to Wednesday?
+                    *   Let's check if any source date would result in a Sat/Sun/Mon after the 6y-9m shift.
+                    *   Source is always Thu.
+                    *   Thu - 6y - 9m.
+                    *   The day of week shift depends on the number of days in the 6y-9m period.
+                    *   It seems the result is always Tue, Wed, or Fri in the samples.
+                    *   If the rule is "Nearest Wednesday

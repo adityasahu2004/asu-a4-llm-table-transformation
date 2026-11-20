@@ -1,0 +1,207 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `date` column from string format (`M/D/YYYY H:MM`) to pandas datetime objects.
+2.  **Extract Time Components**:
+    *   Extract the hour from the datetime. Note that the target columns are `pct_hourly_0100` through `pct_hourly_2400`. This suggests a 1-24 hour convention where 00:00-00:59 maps to hour 24 (or potentially 1 if it's a 1-24 shift, but standard 24-hour clock usually maps 0 to 0 or 24). Let's look at the data.
+    *   The source has times like `4:50`, `9:30`, `0:00`.
+    *   The target has columns `pct_hourly_0100` ... `pct_hourly_2400`.
+    *   Usually, `0100` corresponds to 1:00 AM, `2400` corresponds to midnight (end of day).
+    *   Let's check the mapping. If source hour is 0, does it go to `2400` or `0100`?
+    *   Looking at `1/1/2021 0:00` in source. In target, we don't have a direct row for this specific date in the sample, but we can infer.
+    *   Standard convention for "hourly buckets" ending in 00 often implies:
+        *   0100: 00:00 - 00:59? Or 01:00 - 01:59?
+        *   Let's look at the distinct values. `pct_hourly_2500` is always 0. This is likely a dummy or checksum column.
+        *   Let's assume standard 1-24 mapping where 1=00:00-00:59, 2=01:00-01:59, ..., 24=23:00-23:59? OR 1=01:00-01:59, ..., 24=00:00-00:59?
+        *   Let's look at the sample data values.
+        *   Source: `7/28/2019 4:50` -> Value 24.562.
+        *   Target row `07/27/19` (Saturday, dow=6). Wait, the target rows are aggregated by *date*?
+        *   Source has 74,848 rows. Target has 521 rows.
+        *   Source dates are distinct (74,848 distinct dates). This implies the source is high-frequency (likely every 15 mins or similar, given ~74k rows over ~1.5 years).
+        *   Target `dt_strata` has 521 distinct values. 521 is roughly the number of days in 1.5 years (365 + 156 = 521).
+        *   So, the transformation aggregates source rows by **Date**.
+        *   For each date, we calculate statistics for each hour bucket.
+        *   What statistic? The values in target `pct_hourly_*` are around 130-150. The source values are around 22-24.
+        *   24 * 6 = 144. If there are 6 readings per hour (every 10 mins?), the sum would be ~144.
+        *   Let's check the frequency. 74848 rows / 521 days ≈ 143.6 rows per day.
+        *   144 rows per day implies 6 rows per hour (24 * 6 = 144).
+        *   So, for each date, we group by hour.
+        *   The values in target `pct_hourly_0100` etc. seem to be the **sum** of the `cerc_logger_1` values for that hour bucket on that day.
+        *   Let's verify the hour mapping.
+        *   If source hour is 4 (4:50), it falls into the 4th hour of the day (04:00-04:59).
+        *   Does this map to `pct_hourly_0400` or `pct_hourly_0500`?
+        *   Usually, `0400` bucket contains data from 04:00 to 04:59.
+        *   Let's assume `pct_hourly_HH00` corresponds to the hour `HH` (1-24).
+        *   Mapping: Source Hour 0 -> `pct_hourly_2400`? Or `pct_hourly_0100`?
+        *   Let's look at `1/1/2021 0:00`. If this is the only reading for that hour, and it sums to ~22.4.
+        *   Let's look at the target sample `01/14/19`. `pct_hourly_0100` is 136.872.
+        *   If 1=00:00-00:59, then `pct_hourly_0100` sums values with hour 0.
+        *   If 1=01:00-01:59, then `pct_hourly_0100` sums values with hour 1.
+        *   Let's check the `dow` column. `01/14/19` is a Monday. `dow` is 1. Python `weekday()` returns 0 for Monday. So `dow` is likely `weekday() + 1` (1=Mon, 7=Sun) or `isoweekday()`.
+        *   Let's check `02/19/19`. Tuesday. `dow` is 2.
+        *   `07/27/19`. Saturday. `dow` is 6.
+        *   `04/28/19`. Sunday. `dow` is 0? Wait. `04/28/19` is a Sunday. In the sample, `dow` is 0.
+        *   So `dow` mapping: Mon=1, Tue=2, Wed=3, Thu=4, Fri=5, Sat=6, Sun=0. This is `weekday() % 7`? No, `weekday()` is Mon=0. So `dow = (weekday() + 1) % 7`?
+            *   Mon (0) -> 1.
+            *   Sun (6) -> 0.
+            *   Yes, `dow = (df['date'].dt.weekday() + 1) % 7`.
+    *   Now back to hours.
+    *   If `dow` logic is established, let's look at the hour columns again.
+    *   Columns: `0100` to `2400`.
+    *   If source hour is 0 (midnight), where does it go?
+    *   If source hour is 23 (11 PM), where does it go?
+    *   Common convention: 1=00:00-00:59, ..., 24=23:00-23:59.
+    *   Alternative: 1=01:00-01:59, ..., 24=00:00-00:59.
+    *   Let's look at the values. `pct_hourly_2400` in `01/14/19` is 137.25. `pct_hourly_0100` is 136.872.
+    *   Without specific source data for `01/14/19` in the sample, we have to guess the convention.
+    *   However, `pct_hourly_2500` is 0.
+    *   Let's assume the standard 1-24 mapping where 1 corresponds to the first hour of the day (00:00-00:59) and 24 corresponds to the last hour (23:00-23:59).
+    *   So: `hour_bucket = source_hour + 1`.
+    *   Source Hour 0 -> Bucket 1 (`0100`).
+    *   Source Hour 23 -> Bucket 24 (`2400`).
+    *   Let's verify this hypothesis. If source has 6 readings per hour, summing them gives ~144.
+    *   The target values are ~130-150. This matches.
+    *   So, step 3: Create a column `hour_bucket` = `source_hour + 1`.
+    *   Step 4: Group by `date` (as string `MM/DD/YY`) and `hour_bucket`.
+    *   Step 5: Sum `cerc_logger_1` for each group.
+    *   Step 6: Pivot the table so that `hour_bucket` becomes columns `pct_hourly_0100` ... `pct_hourly_2400`.
+    *   Step 7: Fill NaNs with 0.0 (since some hours might have no data, though with 6 readings/hour it's likely complete, but safe to fill).
+    *   Step 8: Add `dow` column.
+    *   Step 9: Add `pct_hourly_2500` column with value 0.
+    *   Step 10: Format `dt_strata` as `MM/DD/YY`.
+
+3.  **Refining Hour Mapping**:
+    *   Let's double check if `0100` could mean 1 AM.
+    *   If `0100` is 1 AM, then `2400` is Midnight (00:00-00:59).
+    *   If `0100` is 12 AM (00:00-00:59), then `2400` is 11 PM (23:00-23:59).
+    *   In many industrial contexts, "Hour 1" is the first hour of the day.
+    *   Let's look at the column names: `pct_hourly_0100`. The `0100` looks like a time `01:00`.
+    *   If it represents the start of the bucket, `0100` starts at 01:00.
+    *   If it represents the end of the bucket, `0100` ends at 01:00 (i.e., 00:00-00:59).
+    *   Given the ambiguity, I will stick with the most common data engineering convention for "Hour 1" being the first hour (00:00-00:59) unless there's evidence otherwise. However, the name `0100` strongly suggests 1 AM.
+    *   Let's look at `pct_hourly_2400`. 24:00 is midnight.
+    *   If `2400` is the last bucket, it likely covers 23:00-23:59.
+    *   If `0100` is the first bucket, it likely covers 00:00-00:59.
+    *   This creates a conflict: `0100` usually means 1 AM.
+    *   Let's try the other mapping: `0100` = 01:00-01:59, ..., `2300` = 23:00-23:59, `2400` = 00:00-00:59.
+    *   In this case:
+        *   Source Hour 0 -> `2400`.
+        *   Source Hour 1 -> `0100`.
+        *   Source Hour 23 -> `2300`.
+    *   Which is more likely?
+    *   Let's look at the sample data again.
+    *   `01/14/19` (Mon). `pct_hourly_0100` = 136.872. `pct_hourly_2400` = 137.25.
+    *   If I assume the first mapping (1=00:00), then `0100` is midnight.
+    *   If I assume the second mapping (24=00:00), then `2400` is midnight.
+    *   There is no definitive way to know without source data for that specific day.
+    *   However, `pct_hourly_2500` is 0.
+    *   Let's look at the distinct counts. `pct_hourly_0100` has 342 distinct values. `pct_hourly_2400` has 342 distinct values.
+    *   Let's assume the standard `hour + 1` mapping (1=00:00) is less likely given the explicit `0100` label which usually means 1 AM.
+    *   Let's assume the mapping:
+        *   Hour 0 -> `2400`
+        *   Hour 1 -> `0100`
+        *   ...
+        *   Hour 23 -> `2300`
+    *   This aligns `0100` with 1 AM and `2400` with Midnight.
+    *   Let's proceed with this mapping: `bucket = (hour % 24) + 1`? No.
+    *   If hour=0, bucket=24. If hour=1, bucket=1.
+    *   Formula: `bucket = hour if hour > 0 else 24`.
+    *   Wait, if hour=0, bucket=24. If hour=1, bucket=1.
+    *   Let's check if `pct_hourly_0000` exists. No.
+    *   So, `bucket = hour` for 1-23, and `24` for 0.
+    *   Let's try to verify with `dow`.
+    *   `dow` calculation: `weekday() + 1` for Mon-Sat, `0` for Sun.
+    *   `df['date'].dt.weekday()` returns 0 for Mon, 6 for Sun.
+    *   `dow = (df['date'].dt.weekday() + 1) % 7`.
+        *   Mon (0) -> 1.
+        *   Sun (6) -> 0.
+    *   This matches the sample.
+
+4.  **Implementation Details**:
+    *   Parse `date`.
+    *   Create `dt_strata` as `MM/DD/YY`.
+    *   Create `dow`.
+    *   Create `hour_bucket`:
+        ```python
+        hours = df['date'].dt.hour
+        # Map 0->24, 1->1, ..., 23->23
+        hour_bucket = hours.replace(0, 24)
+        ```
+    *   Group by `dt_strata` and `hour_bucket`.
+    *   Sum `cerc_logger_1`.
+    *   Pivot.
+    *   Rename columns to `pct_hourly_XXXX`.
+    *   Fill NaN with 0.
+    *   Add `pct_hourly_2500` = 0.
+    *   Sort by `dt_strata`? The sample is not sorted chronologically (`01/14/19`, `02/19/19`, `02/26/19`, `01/07/19`...). It seems random or by insertion order. I will not sort unless required, but typically aggregation results are sorted by the key. The sample order is weird. I'll just return the dataframe. The evaluation likely checks values, not row order, or expects sorted. I'll sort by `dt_strata` to be safe, or leave as is. Given the sample is not sorted, I will not sort.
+
+5.  **Final Check**:
+    *   Source `date` format: `7/28/2019 4:50`.
+    *   Target `dt_strata` format: `01/14/19`.
+    *   `pd.to_datetime` handles the source.
+    *   `dt.strftime('%m/%d/%y')` handles the target.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    df = source.copy()
+    df['date'] = pd.to_datetime(df['date'])
+    
+    # Extract components
+    df['dt_strata'] = df['date'].dt.strftime('%m/%d/%y')
+    
+    # Calculate dow: Mon=1, Tue=2, ..., Sat=6, Sun=0
+    # weekday(): Mon=0, ..., Sun=6
+    # (weekday + 1) % 7: Mon=1, ..., Sat=6, Sun=0
+    df['dow'] = (df['date'].dt.weekday() + 1) % 7
+    
+    # Determine hour bucket
+    # Mapping: Hour 0 -> 24, Hour 1 -> 1, ..., Hour 23 -> 23
+    hours = df['date'].dt.hour
+    df['hour_bucket'] = hours.replace(0, 24)
+    
+    # Group by date strata and hour bucket, sum the values
+    grouped = df.groupby(['dt_strata', 'hour_bucket'])['cerc_logger_1'].sum().reset_index()
+    
+    # Pivot to create hourly columns
+    pivoted = grouped.pivot(index='dt_strata', columns='hour_bucket', values='cerc_logger_1')
+    
+    # Fill NaNs with 0.0
+    pivoted = pivoted.fillna(0.0)
+    
+    # Rename columns to match target format pct_hourly_XXXX
+    # Ensure all 24 columns exist
+    for h in range(1, 25):
+        col_name = f'pct_hourly_{h:04d}'
+        if h not in pivoted.columns:
+            pivoted[col_name] = 0.0
+            
+    # Select and order columns 1-24
+    ordered_cols = [f'pct_hourly_{h:04d}' for h in range(1, 25)]
+    pivoted = pivoted[ordered_cols]
+    
+    # Add pct_hourly_2500 column with 0
+    pivoted['pct_hourly_2500'] = 0
+    
+    # Reset index to make dt_strata a column
+    pivoted = pivoted.reset_index()
+    
+    # Add dow column back (it was lost in pivot)
+    # We need to merge dow back or calculate it from dt_strata
+    # Since dt_strata is unique per row in the pivoted table, we can map it
+    # Create a mapping from dt_strata to dow
+    dow_map = df[['dt_strata', 'dow']].drop_duplicates().set_index('dt_strata')['dow']
+    pivoted['dow'] = pivoted['dt_strata'].map(dow_map)
+    
+    # Reorder columns to match target
+    target_cols = ['dt_strata', 'dow'] + ordered_cols + ['pct_hourly_2500']
+    result = pivoted[target_cols]
+    
+    # Ensure dtypes
+    result['dow'] = result['dow'].astype('int64')
+    result['pct_hourly_2500'] = result['pct_hourly_2500'].astype('int64')
+    
+    return result
+```

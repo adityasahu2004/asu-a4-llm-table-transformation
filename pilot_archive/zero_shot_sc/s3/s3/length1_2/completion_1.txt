@@ -1,0 +1,181 @@
+To infer the transformation, we analyze the differences between the source and target schemas and data:
+
+1.  **Source Structure**: The source DataFrame has 182 rows. Each row represents a specific date (from `7/3/2011` to `12/31/2011`) with 24 hourly values (`value1` to `value24`). The columns `class`, `Description`, `analysis`, and `uom` are constant across all rows in the sample.
+2.  **Target Structure**: The target DataFrame has 183 rows. The first column is `cst`, which contains formatted dates like `"Sat 01/01/2011"`. The remaining 24 columns are named `"1:00"` through `"24:00"`, corresponding to the 24 hours of the day.
+3.  **Date Range Expansion**: The source dates start at `7/3/2011`, but the target starts at `01/01/2011` and ends at `07/02/2011` (based on the sample last row) or potentially covers a full year or specific period. Wait, looking closely at the target sample:
+    *   First row: `Sat 01/01/2011`
+    *   Last row in sample: `Sat 07/02/2011`
+    *   The target row count is 183.
+    *   The source row count is 182.
+    *   Let's check the dates. The source sample shows dates like `7/3/2011`, `7/19/2011`, etc. These are sparse.
+    *   However, the target has 183 rows. 183 days is roughly 6 months. From Jan 1, 2011 to July 2, 2011 is exactly 183 days (Jan 31 + Feb 28 + Mar 31 + Apr 30 + May 31 + Jun 30 + July 2 = 183).
+    *   The source data provided in the schema description says `distinct: 182` for the `date` column, with first/last `7/3/2011` to `12/31/2011`. This implies the *source* contains data for the second half of the year (or a specific subset).
+    *   BUT, the *target* sample shows dates from Jan 1, 2011 to July 2, 2011.
+    *   There is a discrepancy between the source sample data (July-Dec) and the target sample data (Jan-July).
+    *   Let's re-read the prompt carefully. "Infer a general transformation... The evaluation source contains different rows".
+    *   The schema metadata says Source `date` distinct values are 182, range `7/3/2011` to `12/31/2011`.
+    *   The target metadata says `cst` distinct values are 183, range `Sat 01/01/2011` to `Sat 07/02/2011`.
+    *   This suggests the transformation involves **generating a complete date range** and potentially mapping or calculating values. However, usually, these problems involve reshaping existing data.
+    *   Let's look at the values.
+        *   Source row `7/3/2011` (Sunday): `value1`=1.0243, `value2`=0.8341...
+        *   Target row `Sat 07/02/2011` (Saturday): `1:00`=0.8341, `2:00`=0.6966...
+        *   Wait, `0.8341` is `value2` in the source for `7/3/2011`. In the target for `7/02/2011`, `1:00` is `0.8341`. This looks like a shift or a mismatch in my initial assumption.
+        *   Let's check `7/3/2011` in source again. It's a Sunday.
+        *   Let's check `7/02/2011` in target. It's a Saturday.
+        *   Is it possible the source data is actually for the *previous* day? Or is there a specific mapping?
+        *   Let's look at another data point.
+        *   Source `7/19/2011` (Monday): `value1`=1.0495.
+        *   Target `Mon 01/17/2011`: `1:00`=1.4261. No obvious link.
+        *   Let's look at the Target `Sat 07/02/2011` values: `0.8341, 0.6966, 0.6072...`
+        *   Source `7/3/2011` values: `1.0243, 0.8341, 0.7676...`
+        *   Source `7/2/2011`? Not in source sample.
+        *   Actually, let's look at the Target `Sat 01/01/2011`. Values: `1.3683...`
+        *   Source `1/1/2011`? Not in source sample (starts July).
+
+    **Hypothesis Correction**:
+    The problem likely involves **reshaping** the wide format (24 value columns) into a long format or just renaming/reordering, BUT the date ranges don't match up directly between the source sample and target sample provided in the JSON.
+    
+    *Crucial Observation*: The prompt states "The evaluation source contains different rows". The schema metadata describes the *training* source. The training source has dates `7/3/2011` to `12/31/2011`. The training target has dates `1/1/2011` to `7/2/2011`.
+    
+    This implies the transformation is **not** a direct row-by-row mapping of the provided sample data. Instead, it suggests that the Source DataFrame *always* contains a full year (or specific period) of daily hourly data, and the Target DataFrame is a reshaped version of that data.
+    
+    However, the row counts differ (182 vs 183).
+    2011 is not a leap year.
+    Jan 1 to July 2 is 183 days.
+    July 3 to Dec 31 is:
+    July (31-3+1 = 29) + Aug (31) + Sep (30) + Oct (31) + Nov (30) + Dec (31) = 182 days.
+    
+    So, the Source contains the second half of the year (July 3 - Dec 31).
+    The Target contains the first half of the year (Jan 1 - July 2).
+    
+    This implies the Source and Target in the *training set* are disjoint time periods. This is unusual for a simple "transform source to target" task unless the "Source" provided to the function `transform(source)` in the evaluation phase will contain the data corresponding to the target dates.
+    
+    **Standard Interpretation**: In these types of "pandas transformation" tasks, the `source` DataFrame passed to the function will contain the data that *corresponds* to the rows in the target. The schema/sample block shows *examples* of what the source and target look like, but they might be from different parts of a larger dataset or the "evaluation source" will be aligned.
+    
+    Let's assume the `source` DataFrame passed to `transform` will have rows corresponding to the dates in the target.
+    
+    **Operations**:
+    1.  **Parse Dates**: Convert the `date` column (string, format `%m/%d/%Y`) to a datetime object.
+    2.  **Format Date**: Create the `cst` column by formatting the date as `"DayOfWeek MM/DD/YYYY"` (e.g., `"Sat 07/02/2011"`). Note the day name is abbreviated (3 chars) and the date uses slashes.
+    3.  **Rename Columns**: The columns `value1` to `value24` need to be renamed to `"1:00"` to `"24:00"`.
+    4.  **Select/Drop Columns**: Drop `class`, `Description`, `analysis`, `uom`. Keep `date` (temporarily) and `value*`.
+    5.  **Reorder**: The first column should be `cst`. Then `1:00` to `24:00`.
+    6.  **Sort**: The target sample is sorted by date ascending. The source sample is also sorted by date ascending. We should ensure the output is sorted by date.
+
+    **Assumption**: The `source` DataFrame provided during evaluation will contain the rows that map to the target. The discrepancy in the sample data (Source=H2, Target=H1) is likely due to the sample being drawn from different parts of a larger continuous dataset, or the problem implies that the `source` *is* the data to be reshaped, and the target schema just defines the output format. I will write the code to reshape *whatever* is in the source into the target format.
+
+    **Step-by-step Plan**:
+    1.  Make a copy of the source to avoid SettingWithCopy warnings.
+    2.  Convert `date` column to `datetime`.
+    3.  Generate the `cst` column using `dt.strftime('%a %m/%d/%Y')`. Note: `%a` gives abbreviated weekday (e.g., Sat).
+    4.  Identify the value columns: `['value1', ..., 'value24']`.
+    5.  Rename these columns to `['1:00', ..., '24:00']`.
+    6.  Select the `cst` column and the renamed value columns.
+    7.  Sort by the original date (or `cst` if stable) to ensure order. Since `cst` is a string, sorting by the parsed datetime is safer, then drop the datetime helper or just sort by index if it was already sorted. Given the source is likely sorted, we can just sort by the parsed date.
+    8.  Return the resulting DataFrame.
+
+    **Refinement on Date Formatting**:
+    Target: `"Sat 01/01/2011"`
+    Python `strftime`:
+    `%a` -> Sat
+    `%m` -> 01
+    `%d` -> 01
+    `%Y` -> 2011
+    Format string: `'%a %m/%d/%Y'`
+
+    **Refinement on Column Names**:
+    Source: `value1` ... `value24`
+    Target: `1:00` ... `24:00`
+    
+    Let's construct the mapping.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse the date column
+    # The source date format is 'M/D/YYYY' or 'MM/DD/YYYY'
+    df = source.copy()
+    df['parsed_date'] = pd.to_datetime(df['date'], format='mixed', dayfirst=False)
+    
+    # 2. Create the 'cst' column with format "Ddd MM/DD/YYYY"
+    # %a is abbreviated weekday name (e.g., Sat)
+    df['cst'] = df['parsed_date'].dt.strftime('%a %m/%d/%Y')
+    
+    # 3. Rename value columns to time columns
+    # value1 -> 1:00, value2 -> 2:00, ..., value24 -> 24:00
+    rename_map = {f'value{i}': f'{i}:00' for i in range(1, 25)}
+    df = df.rename(columns=rename_map)
+    
+    # 4. Select the required columns
+    # Target columns: 'cst', '1:00', '2:00', ..., '24:00'
+    time_cols = [f'{i}:00' for i in range(1, 25)]
+    result_cols = ['cst'] + time_cols
+    
+    # 5. Filter and sort
+    # We sort by the parsed_date to ensure chronological order as seen in target sample
+    df = df.sort_values(by='parsed_date')
+    
+    # 6. Select final columns and drop helper column
+    result = df[result_cols].reset_index(drop=True)
+    
+    return result
+```
+
+**Double Check**:
+- Source `date`: "7/3/2011". `pd.to_datetime` handles this.
+- Target `cst`: "Sat 01/01/2011". `strftime('%a %m/%d/%Y')` produces "Sat 01/01/2011" for Jan 1, 2011.
+- Columns: `value1` becomes `1:00`. Correct.
+- Rows: The code preserves all rows from the source. If the source has 182 rows, the output has 182. The target sample has 183, but as discussed, this is likely due to the sample representing a different time slice or the evaluation source having the correct rows. The transformation logic is generic.
+
+One detail: `pd.to_datetime` with `format='mixed'` is available in newer pandas versions. To be safe with standard pandas, `infer_datetime_format=True` or just default behavior usually works for `M/D/YYYY`. Since the prompt allows standard library, I'll stick to standard pandas datetime parsing.
+
+Also, ensure `cst` is the first column.
+
+Final check on distinct values in target `cst`: `Sat 01/01/2011` to `Sat 07/02/2011`.
+The code will produce exactly this format for any input date.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    """
+    Transforms the source DataFrame from a wide format with 'value1'-'value24' columns
+    to a target format with '1:00'-'24:00' columns and a formatted date column 'cst'.
+    """
+    # Create a copy to avoid modifying the original
+    df = source.copy()
+    
+    # Parse the date column. The format in source is 'M/D/YYYY' or 'MM/DD/YYYY'.
+    # We use pd.to_datetime which automatically infers this format.
+    df['parsed_date'] = pd.to_datetime(df['date'])
+    
+    # Create the 'cst' column with the format "DayOfWeek MM/DD/YYYY"
+    # %a: Abbreviated weekday name (e.g., Sat, Sun)
+    # %m: Month as zero-padded decimal number
+    # %d: Day of the month as zero-padded decimal number
+    # %Y: Year with century as a decimal number
+    df['cst'] = df['parsed_date'].dt.strftime('%a %m/%d/%Y')
+    
+    # Define the mapping for renaming value columns to time columns
+    # value1 -> 1:00, value2 -> 2:00, ..., value24 -> 24:00
+    rename_dict = {f'value{i}': f'{i}:00' for i in range(1, 25)}
+    df = df.rename(columns=rename_dict)
+    
+    # Define the list of columns to keep in the final output
+    time_columns = [f'{i}:00' for i in range(1, 25)]
+    output_columns = ['cst'] + time_columns
+    
+    # Sort the dataframe by the parsed date to ensure chronological order
+    df = df.sort_values(by='parsed_date')
+    
+    # Select only the required columns
+    result = df[output_columns]
+    
+    # Reset index to ensure a clean 0-based integer index
+    result = result.reset_index(drop=True)
+    
+    return result
+```

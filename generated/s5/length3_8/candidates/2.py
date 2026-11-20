@@ -1,0 +1,28 @@
+import pandas as pd
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse CST to datetime. Format is "DOW MM/DD/YYYY" e.g., "Sat 12/01/2012"
+    # We can parse by ignoring the weekday part or using a flexible parser, 
+    # but strict parsing is safer. The weekday is irrelevant for the date.
+    # Since the format is fixed, we can strip the first 4 chars (e.g., "Sat ") or parse fully.
+    # pd.to_datetime can handle "Sat 12/01/2012" if we don't specify format, 
+    # but let's be explicit or robust.
+    # Actually, simpler: just take the date part.
+    
+    dt = pd.to_datetime(source['CST'], format='%a %m/%d/%Y')
+    
+    out = pd.DataFrame(index=source.index)
+    out['date'] = dt.dt.strftime('%m/%d/%Y')
+    
+    # Map source columns to target columns
+    # Source: "1:00", "2:00", ..., "23:00", "24:00:00"
+    # Target: "Hour 1", "Hour 2", ..., "Hour 23", "Hour 24"
+    
+    for h in range(1, 25):
+        if h == 24:
+            src_col = "24:00:00"
+        else:
+            src_col = f"{h}:00"
+        
+        out[f"Hour {h}"] = source[src_col]
+        
+    return out.reset_index(drop=True)

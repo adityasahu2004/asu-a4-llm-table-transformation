@@ -1,0 +1,132 @@
+[
+  {
+    "index": 0,
+    "pool_index": 0,
+    "provider_index": 0,
+    "finish_reason": "stop",
+    "path": "generated/s5/length1_9/candidates/0.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:19: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+      "seconds": 0.6430481249990407,
+      "shape": [
+        2,
+        25
+      ],
+      "fingerprint": "454d84091deb84c8c87ea939263c0035acd5c86aa5658fbab670827dc82133ef"
+    },
+    "constraint_loss": [
+      0,
+      0
+    ],
+    "constraint_diagnostics": []
+  },
+  {
+    "index": 1,
+    "pool_index": 0,
+    "provider_index": 1,
+    "finish_reason": "stop",
+    "path": "generated/s5/length1_9/candidates/1.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:19: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+      "seconds": 0.7850466249947203,
+      "shape": [
+        2,
+        25
+      ],
+      "fingerprint": "7caff5344616c89560edc20de73ec413972422ee7f051ea55c0a2585cb6c81ab"
+    },
+    "constraint_loss": [
+      0,
+      0
+    ],
+    "constraint_diagnostics": []
+  },
+  {
+    "index": 2,
+    "pool_index": 0,
+    "provider_index": 2,
+    "finish_reason": "stop",
+    "path": "generated/s5/length1_9/candidates/2.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:19: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+      "seconds": 0.6131697499949951,
+      "shape": [
+        2,
+        25
+      ],
+      "fingerprint": "1c11a07a9a3133bfa11bc16fc7e497e8361400f984e3b56a469e3577b2a5deef"
+    },
+    "constraint_loss": [
+      0,
+      0
+    ],
+    "constraint_diagnostics": []
+  },
+  {
+    "index": 3,
+    "pool_index": 0,
+    "provider_index": 3,
+    "finish_reason": "stop",
+    "path": "generated/s5/length1_9/candidates/3.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:19: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+      "seconds": 0.5938293340004748,
+      "shape": [
+        2,
+        25
+      ],
+      "fingerprint": "8b4e5c88285b814015126db267a57becd642bb7b127a8f8c1e6b4296ba03fe7c"
+    },
+    "constraint_loss": [
+      0,
+      0
+    ],
+    "constraint_diagnostics": []
+  },
+  {
+    "index": 4,
+    "pool_index": 0,
+    "provider_index": 4,
+    "finish_reason": "stop",
+    "path": "generated/s5/length1_9/candidates/4.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:19: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+      "seconds": 0.6030522919973009,
+      "shape": [
+        2,
+        25
+      ],
+      "fingerprint": "83720563005911d67d3868b2335e8c827c6c37675c5f6e3abeab2492766253e7"
+    },
+    "constraint_loss": [
+      0,
+      0
+    ],
+    "constraint_diagnostics": []
+  },
+  {
+    "index": 5,
+    "pool_index": 1,
+    "provider_index": 0,
+    "finish_reason": "length",
+    "execution": {
+      "status": "extraction_error",
+      "error": "unexpected indent (<generated>, line 3)"
+    }
+  }
+]

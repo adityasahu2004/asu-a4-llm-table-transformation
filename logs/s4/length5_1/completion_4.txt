@@ -1,0 +1,33 @@
+Operator plan:
+1. Parse the `DT_STRATA` column from string format `M/D/YYYY` into a datetime object.
+2. Format the parsed dates into `MM/DD/YYYY` strings for the `date` column.
+3. Select the 24 hourly measurement columns (`PCT_HOURLY_0100` through `PCT_HOURLY_2400`).
+4. Rename these columns to `value1` through `value24`.
+5. Construct the final DataFrame with the `date` column followed by the renamed value columns.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date and format as MM/DD/YYYY
+    dates = pd.to_datetime(source['DT_STRATA'], format='%m/%d/%Y')
+    date_strs = dates.dt.strftime('%m/%d/%Y')
+    
+    # Map hourly columns to new names
+    col_map = {}
+    for h in range(1, 25):
+        src_col = f'PCT_HOURLY_{h:02d}00'
+        tgt_col = f'value{h}'
+        col_map[src_col] = tgt_col
+        
+    # Select and rename the hourly columns
+    hour_cols = [f'PCT_HOURLY_{h:02d}00' for h in range(1, 25)]
+    df_hours = source[hour_cols].rename(columns=col_map)
+    
+    # Construct final dataframe
+    result = pd.DataFrame({'date': date_strs})
+    result = pd.concat([result, df_hours], axis=1)
+    
+    return result.reset_index(drop=True)
+```

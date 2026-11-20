@@ -1,0 +1,115 @@
+Operator plan:
+1. Parse `local_15min` into datetime, format as `YYYY-MM-DD HH:MM:SS` for the `datetime` column.
+2. Aggregate specific `_sum` columns into the target categories using pandas addition (which handles NaNs by propagating them if any operand is NaN, but here we sum specific groups. If a group has mixed nulls, `sum` skips nulls. The target schema shows nulls in aggregates, implying that if *all* components are null or if the logic requires strict presence, it might be null. However, standard `sum(skipna=True)` returns NaN only if all inputs are NaN. Let's look at the target nulls. Target `hvac` has 29160 nulls. Source `air1_sum` has 1950 nulls. It's likely that if the resulting sum is composed entirely of NaNs, it's NaN. If some are present, it sums them.
+3. Map columns:
+   - `hvac`: `air1_sum` + `air2_sum` + `air3_sum` + `airwindowunit1_sum` + `heater1_sum` + `heater2_sum` + `heater3_sum` + `furnace1_sum` + `furnace2_sum` + `jacuzzi1_sum`? No, jacuzzi is usually pool/spa. Let's look at standard AEI mappings.
+     - HVAC: air1, air2, air3, airwindowunit1, heater1, heater2, heater3, furnace1, furnace2. (Note: `jacuzzi1` is often separate).
+   - `water_heating`: `waterheater1_sum` + `waterheater2_sum`.
+   - `refrigerator`: `refrigerator1_sum` + `refrigerator2_sum` + `winecooler1_sum` + `icemaker1_sum` + `freezer1_sum`.
+   - `clothes_washer`: `clotheswasher1_sum`.
+   - `clothes_dryer`: `clotheswasher_dryg1_sum` + `drye1_sum` + `dryg1_sum`.
+   - `dishwasher`: `dishwasher1_sum`.
+   - `cooking_range`: `oven1_sum` + `oven2_sum` + `range1_sum` + `microwave1_sum` + `disposal1_sum`.
+   - `pool_spa_pumps`: `poolpump1_sum` + `pool1_sum` + `pool2_sum` + `sumppump1_sum` + `sewerpump1_sum` + `wellpump1_sum` + `circpump1_sum` + `pump1_sum`.
+   - `interior_lighting`: `kitchen1_sum` + `kitchen2_sum` + `diningroom1_sum` + `livingroom1_sum` + `livingroom2_sum` + `bedroom1_sum` + `bedroom2_sum` + `bedroom3_sum` + `bedroom4_sum` + `bedroom5_sum` + `bathroom1_sum` + `bathroom2_sum` + `office1_sum` + `utilityroom1_sum` + `garage1_sum` + `garage2_sum` + `shed1_sum` + `housefan1_sum` + `venthood1_sum` + `kitchenapp1_sum` + `kitchenapp2_sum`.
+   - `exterior_lighting`: `outsidelights_plugs1_sum` + `outsidelights_plugs2_sum` + `sprinkler1_sum`.
+   - `lighting`: `interior_lighting` + `exterior_lighting`. (Wait, target has `lighting` as a separate column. Usually `lighting` = `interior` + `exterior`. Or `lighting` is just interior? The target has `interior_lighting`, `exterior_lighting`, AND `lighting`. The sample data shows `lighting` = `interior` + `exterior`. E.g., Row 4: Interior 3.546, Exterior 0.25, Lighting 3.796. Yes.
+   - `plug`: `lights_plugs1_sum` + `lights_plugs2_sum` + `lights_plugs3_sum` + `lights_plugs4_sum` + `lights_plugs5_sum` + `lights_plugs6_sum` + `car1_sum` + `car2_sum` + `battery1_sum` + `aquarium1_sum` + `security1_sum` + `solar2_sum`.
+   - `pool_spa_heater`: Constant 0.
+
+Let's refine the groups based on typical AEI (Advanced Energy Institute) or similar dataset mappings which this resembles (likely the "SmartALM" or similar dataset).
+
+- **hvac**: `air1_sum`, `air2_sum`, `air3_sum`, `airwindowunit1_sum`, `heater1_sum`, `heater2_sum`, `heater3_sum`, `furnace1_sum`, `furnace2_sum`.
+- **water_heating**: `waterheater1_sum`, `waterheater2_sum`.
+- **refrigerator**: `refrigerator1_sum`, `refrigerator2_sum`, `winecooler1_sum`, `icemaker1_sum`, `freezer1_sum`.
+- **clothes_washer**: `clotheswasher1_sum`.
+- **clothes_dryer**: `clotheswasher_dryg1_sum`, `drye1_sum`, `dryg1_sum`.
+- **dishwasher**: `dishwasher1_sum`.
+- **cooking_range**: `oven1_sum`, `oven2_sum`, `range1_sum`, `microwave1_sum`, `disposal1_sum`.
+- **pool_spa_pumps**: `poolpump1_sum`, `pool1_sum`, `pool2_sum`, `sumppump1_sum`, `sewerpump1_sum`, `wellpump1_sum`, `circpump1_sum`, `pump1_sum`.
+- **interior_lighting**: `kitchen1_sum`, `kitchen2_sum`, `diningroom1_sum`, `livingroom1_sum`, `livingroom2_sum`, `bedroom1_sum`, `bedroom2_sum`, `bedroom3_sum`, `bedroom4_sum`, `bedroom5_sum`, `bathroom1_sum`, `bathroom2_sum`, `office1_sum`, `utilityroom1_sum`, `garage1_sum`, `garage2_sum`, `shed1_sum`, `housefan1_sum`, `venthood1_sum`, `kitchenapp1_sum`, `kitchenapp2_sum`.
+- **exterior_lighting**: `outsidelights_plugs1_sum`, `outsidelights_plugs2_sum`, `sprinkler1_sum`.
+- **lighting**: Sum of `interior_lighting` and `exterior_lighting`.
+- **plug**: `lights_plugs1_sum`, `lights_plugs2_sum`, `lights_plugs3_sum`, `lights_plugs4_sum`, `lights_plugs5_sum`, `lights_plugs6_sum`, `car1_sum`, `car2_sum`, `battery1_sum`, `aquarium1_sum`, `security1_sum`, `solar2_sum`.
+- **pool_spa_heater**: 0.
+
+Note on `solar_sum`: It's often treated as a source, not a load, or excluded from these specific load categories. `grid_sum` is the total. `solar2_sum` is in plug? In some datasets, solar chargers are plugs.
+
+Let's verify the `lighting` calculation from sample:
+Row 4 (2013-01-26):
+Interior: 3.546
+Exterior: 0.25
+Lighting: 3.796
+3.546 + 0.25 = 3.796. Correct.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse datetime
+    dt = pd.to_datetime(source['local_15min'], format='%m/%d/%Y %H:%M')
+    out = pd.DataFrame()
+    out['datetime'] = dt.dt.strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Define groups
+    hvac_cols = ['air1_sum', 'air2_sum', 'air3_sum', 'airwindowunit1_sum', 
+                 'heater1_sum', 'heater2_sum', 'heater3_sum', 
+                 'furnace1_sum', 'furnace2_sum']
+    
+    water_heating_cols = ['waterheater1_sum', 'waterheater2_sum']
+    
+    refrigerator_cols = ['refrigerator1_sum', 'refrigerator2_sum', 
+                         'winecooler1_sum', 'icemaker1_sum', 'freezer1_sum']
+    
+    clothes_washer_cols = ['clotheswasher1_sum']
+    
+    clothes_dryer_cols = ['clotheswasher_dryg1_sum', 'drye1_sum', 'dryg1_sum']
+    
+    dishwasher_cols = ['dishwasher1_sum']
+    
+    cooking_range_cols = ['oven1_sum', 'oven2_sum', 'range1_sum', 
+                          'microwave1_sum', 'disposal1_sum']
+    
+    pool_spa_pumps_cols = ['poolpump1_sum', 'pool1_sum', 'pool2_sum', 
+                           'sumppump1_sum', 'sewerpump1_sum', 'wellpump1_sum', 
+                           'circpump1_sum', 'pump1_sum']
+    
+    interior_lighting_cols = ['kitchen1_sum', 'kitchen2_sum', 'diningroom1_sum', 
+                              'livingroom1_sum', 'livingroom2_sum', 
+                              'bedroom1_sum', 'bedroom2_sum', 'bedroom3_sum', 
+                              'bedroom4_sum', 'bedroom5_sum', 
+                              'bathroom1_sum', 'bathroom2_sum', 
+                              'office1_sum', 'utilityroom1_sum', 
+                              'garage1_sum', 'garage2_sum', 'shed1_sum', 
+                              'housefan1_sum', 'venthood1_sum', 
+                              'kitchenapp1_sum', 'kitchenapp2_sum']
+    
+    exterior_lighting_cols = ['outsidelights_plugs1_sum', 'outsidelights_plugs2_sum', 
+                              'sprinkler1_sum']
+    
+    plug_cols = ['lights_plugs1_sum', 'lights_plugs2_sum', 'lights_plugs3_sum', 
+                 'lights_plugs4_sum', 'lights_plugs5_sum', 'lights_plugs6_sum', 
+                 'car1_sum', 'car2_sum', 'battery1_sum', 'aquarium1_sum', 
+                 'security1_sum', 'solar2_sum']
+
+    # Helper to sum columns
+    def sum_cols(cols):
+        return source[cols].sum(axis=1, skipna=True)
+
+    out['hvac'] = sum_cols(hvac_cols)
+    out['water_heating'] = sum_cols(water_heating_cols)
+    out['refrigerator'] = sum_cols(refrigerator_cols)
+    out['clothes_washer'] = sum_cols(clothes_washer_cols)
+    out['clothes_dryer'] = sum_cols(clothes_dryer_cols)
+    out['dishwasher'] = sum_cols(dishwasher_cols)
+    out['cooking_range'] = sum_cols(cooking_range_cols)
+    out['pool_spa_pumps'] = sum_cols(pool_spa_pumps_cols)
+    out['interior_lighting'] = sum_cols(interior_lighting_cols)
+    out['exterior_lighting'] = sum_cols(exterior_lighting_cols)
+    out['lighting'] = out['interior_lighting'] + out['exterior_lighting']
+    out['plug'] = sum_cols(plug_cols)
+    out['pool_spa_heater'] = 0
+    
+    return out.reset_index(drop=True)
+```

@@ -1,0 +1,49 @@
+**Operator Plan:**
+1.  **Map Month Names**: Convert source `Month` abbreviations (e.g., "Mar") to full lowercase month names (e.g., "march"). Note: The target sample shows capitalized full names ("September"), but the source distinct values are capitalized abbreviations ("Mar"). The target distinct values list shows capitalized full names. I will map the source abbreviations to the corresponding full capitalized month names.
+2.  **Map Day Type**: Convert source `Daytype` ("WD", "WE") to lowercase full words ("weekday", "weekend") as seen in the target distinct values and sample.
+3.  **Rename Hour Columns**: Rename the 24 hour columns (e.g., "1:00", "2:00") to the target format (e.g., "hr1", "hr2").
+4.  **Construct Result**: Create a new DataFrame with the mapped `month`, `day`, and renamed hour columns.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Mapping for months from abbreviation to full capitalized name
+    month_map = {
+        'Jan': 'January',
+        'Feb': 'February',
+        'Mar': 'March',
+        'Apr': 'April',
+        'May': 'May',
+        'Jun': 'June',
+        'Jul': 'July',
+        'Aug': 'August',
+        'Sep': 'September',
+        'Oct': 'October',
+        'Nov': 'November',
+        'Dec': 'December'
+    }
+    
+    # Mapping for day type
+    daytype_map = {
+        'WD': 'weekday',
+        'WE': 'weekend'
+    }
+    
+    # Create output dataframe
+    out = pd.DataFrame(index=source.index)
+    
+    # Map month
+    out['month'] = source['Month'].map(month_map)
+    
+    # Map day type
+    out['day'] = source['Daytype'].map(daytype_map)
+    
+    # Rename and copy hour columns
+    for h in range(1, 25):
+        src_col = f"{h}:00"
+        tgt_col = f"hr{h}"
+        out[tgt_col] = source[src_col]
+        
+    return out.reset_index(drop=True)
+```

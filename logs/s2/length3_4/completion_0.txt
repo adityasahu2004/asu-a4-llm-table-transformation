@@ -1,0 +1,113 @@
+**Operator Plan:**
+
+1.  **Parse Dates**: Convert the `date` column from string format (`M/D/YYYY H:MM`) to datetime objects.
+2.  **Filter**: The target data contains dates from September and October 2018. The source sample shows data from Nov 2018 to Jan 2019, but the target distinct count (53) and date range (`09/16/2018` to `10/20/2018`) imply a specific subset of the full source data. However, looking at the target sample, all rows have identical values for all hours (73.0 or 73). This suggests the transformation is aggregating or pivoting data.
+3.  **Pivot/Reshape**: The source has one row per timestamp. The target has one row per *date* with 24 columns (`Hour 1` to `Hour 24`). This implies a pivot operation where the date is the index and the hour of the day determines the column.
+4.  **Hour Extraction**: Extract the hour from the parsed datetime. Map hour 0 to "Hour 24" (or handle 1-24 mapping carefully). Standard 24-hour clock: 00:00 is Hour 24? Or is it Hour 1?
+    *   Let's check the target column names: `Hour 1` to `Hour 24`.
+    *   Usually, `Hour 1` corresponds to 01:00, ..., `Hour 24` corresponds to 00:00 (midnight) or 24:00.
+    *   Let's look at the source sample: `11/6/2018 21:45`. If this were in the target, it would fall into `Hour 22` (if 21:00-21:59 is Hour 22) or `Hour 21`?
+    *   Actually, let's look at the target values. They are all 73. The source values are 73.0 or 84.0. The target only has 73. This implies filtering for `zone_016_cooling_sp == 73.0`? Or perhaps the 84.0 values are in a different date range not shown in the target sample?
+    *   Wait, the target has `nulls` in some columns. The source has `nulls` in `zone_016_cooling_sp`.
+    *   The target date format is `MM/DD/YYYY`.
+    *   The target has 53 rows. The source has 15117 rows.
+    *   The transformation likely involves:
+        1.  Parsing the date.
+        2.  Extracting the date part and the hour part.
+        3.  Pivoting the data so that each unique date becomes a row, and the 24 hours become columns.
+        4.  Since there might be multiple entries per hour (e.g., 21:45 and 21:15), we need an aggregation. The target values are constant 73.0 for most cells. If there are multiple values, `first`, `last`, or `mean` might be used. Given the values are mostly constant 73.0 in the source for the relevant period, `first` or `mean` would yield 73.0.
+        5.  Mapping hours:
+            *   Hour 1 -> 01:00
+            *   ...
+            *   Hour 23 -> 23:00
+            *   Hour 24 -> 00:00 (Midnight)
+        6.  Formatting the date column as `MM/DD/YYYY`.
+        7.  Sorting the result by date? The target sample is not sorted chronologically (`09/16`, `10/06`, `11/03`... wait, `11/03` is after `10/06`? No, `11/03` is Nov 3. `10/31` is Oct 31. The sample order is mixed. `09/16`, `10/06`, `11/03`, `10/31`... This looks like it might be sorted by the original index or just arbitrary. I will preserve the order of first appearance or sort by date if standard. Usually, pivot tables are sorted by index. I'll sort by date to be safe, or just let pandas pivot handle it.
+        8.  The target columns `Hour 10` to `Hour 21` are `int64`, while others are `float64`. This is a specific dtype requirement. I should cast these columns to `int64` if they are not null. However, `Hour 10` has `nulls: 0` in the target schema, but `Hour 1` has `nulls: 1`. This suggests that for the dates in the target, hours 10-21 always have data, while others might not. I will perform the pivot and then cast the specific columns to `int64` if possible, or leave as float if nulls exist. The schema says `Hour 10` is `int64` with 0 nulls. So I can safely cast `Hour 10` through `Hour 21` to `int64`.
+
+**Refined Plan:**
+1.  Parse `date` to datetime.
+2.  Extract `date_part` (date only) and `hour` (0-23).
+3.  Map `hour` to target column names:
+    *   0 -> "Hour 24"
+    *   1-23 -> "Hour 1" to "Hour 23"
+4.  Pivot the dataframe: index=`date_part`, columns=`mapped_hour`, values=`zone_016_cooling_sp`.
+5.  Aggregate: Use `first` or `mean`. Since values are constant, `first` is efficient.
+6.  Reset index.
+7.  Format `date_part` to `MM/DD/YYYY`.
+8.  Rename columns to match target exactly.
+9.  Cast `Hour 10` to `Hour 21` to `int64`.
+10. Sort by `date`? The target sample is not sorted. I will not sort explicitly unless required, but pivot usually sorts columns. I'll ensure the column order is `date`, `Hour 1`, ..., `Hour 24`.
+
+**Assumptions:**
+*   The target represents a daily aggregation of the hourly data.
+*   Hour 0 (midnight) maps to "Hour 24".
+*   If multiple records exist for the same date and hour, the value is consistent (73.0), so `first` is sufficient.
+*   The filtering of dates (Sep-Oct 2018) is implicit in the evaluation data or the source data provided to the function will only contain the relevant rows? No, the function must handle the general case. The target schema shows 53 rows. The source has 15117. The transformation must *produce* the target structure. If the source contains all dates, the pivot will produce all dates. The target *sample* only shows 53 rows. This implies the *evaluation* source might only contain those 53 days, or the transformation should filter?
+*   Looking at the source sample: `11/6/2018` to `1/18/2019`. The target sample: `09/16/2018` to `10/20/2018`. These are disjoint. This suggests the *evaluation* input will be different from the *training* sample. The transformation logic must be general: Pivot all available data. The row count difference (15117 vs 53) is due to the aggregation (15117 hourly records -> ~53 days * 24 hours = 1272 records? No, 53 days * 24 hours = 1272. 15117 / 24 = 629 days. The source has 15117 rows. 15117 / 24 ≈ 630 days. The target has 53 rows. This implies the target is a *subset* of the pivoted data.
+*   However, I cannot hardcode a date filter. I must assume the `source` passed to `transform` is already filtered or the transformation is just the pivot. Given the prompt "Compute the result only from the source DataFrame", and the target schema describes the *output* of the transformation on the *evaluation* source, I will perform the pivot on the entire source. If the evaluation source only contains the relevant dates, the output will match.
+
+**Step-by-step Code Construction:**
+1.  `df['dt'] = pd.to_datetime(df['date'])`
+2.  `df['date_str'] = df['dt'].dt.strftime('%m/%d/%Y')`
+3.  `df['hour'] = df['dt'].dt.hour`
+4.  Map hour to column name: `df['col'] = df['hour'].apply(lambda h: f"Hour {24 if h == 0 else h}")`
+5.  `pivot_df = df.pivot_table(index='date_str', columns='col', values='zone_016_cooling_sp', aggfunc='first')`
+6.  `pivot_df = pivot_df.reset_index()`
+7.  Ensure column order: `['date'] + [f'Hour {i}' for i in range(1, 25)]`
+8.  Cast `Hour 10` to `Hour 21` to `int64`. Note: `pivot_table` might produce NaNs. The target schema says `Hour 10` has 0 nulls. I will cast only if no nulls, or use `astype` which might fail on nulls. I'll use `pd.to_numeric(..., downcast='integer')` or similar, but `int64` is required. If there are nulls, `int64` is not possible in pandas without using nullable integer types (which are `Int64`, not `int64`). The target schema says `int64` and `nulls: 0`. So I can safely cast.
+9.  Return the dataframe.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    df = source.copy()
+    df['dt'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract date string and hour
+    df['date_str'] = df['dt'].dt.strftime('%m/%d/%Y')
+    df['hour'] = df['dt'].dt.hour
+    
+    # Map hour to target column names: 0 -> Hour 24, 1-23 -> Hour 1-23
+    def map_hour(h):
+        if h == 0:
+            return 'Hour 24'
+        else:
+            return f'Hour {h}'
+            
+    df['col_name'] = df['hour'].apply(map_hour)
+    
+    # Pivot the data
+    # Using 'first' as aggregation function since values are consistent per hour in the sample
+    pivot_df = df.pivot_table(
+        index='date_str', 
+        columns='col_name', 
+        values='zone_016_cooling_sp', 
+        aggfunc='first'
+    ).reset_index()
+    
+    # Rename index column to 'date'
+    pivot_df = pivot_df.rename(columns={'date_str': 'date'})
+    
+    # Ensure all hour columns exist and are in the correct order
+    expected_cols = ['date'] + [f'Hour {i}' for i in range(1, 25)]
+    
+    # Reindex columns to ensure order and presence
+    pivot_df = pivot_df.reindex(columns=expected_cols)
+    
+    # Cast Hour 10 to Hour 21 to int64 as per target schema
+    # The target schema indicates these columns have 0 nulls, so direct cast is safe
+    int_cols = [f'Hour {i}' for i in range(10, 22)]
+    for col in int_cols:
+        if col in pivot_df.columns:
+            # Fill NaNs with 0 if any exist unexpectedly, though schema says 0 nulls
+            # But to be safe and deterministic, we only cast if no nulls or handle them
+            # Given the constraint "Preserve NaNs unless...", and target says 0 nulls for these,
+            # we assume they are present.
+            pivot_df[col] = pivot_df[col].astype('int64')
+            
+    return pivot_df
+```

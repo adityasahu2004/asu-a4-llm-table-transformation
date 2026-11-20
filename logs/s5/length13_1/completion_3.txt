@@ -1,0 +1,84 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `time` column from string to datetime. Format it as `YYYY-MM-DD HH:MM:SS` for the target column `datetime`.
+2.  **Aggregate HVAC**: Sum all electricity columns related to heating, cooling, fans, and pumps to create the `hvac` column. Specifically:
+    *   `electricity_heating_kwh`
+    *   `electricity_central_system_heating_kwh`
+    *   `electricity_cooling_kwh`
+    *   `electricity_central_system_cooling_kwh`
+    *   `electricity_fans_heating_kwh`
+    *   `electricity_fans_cooling_kwh`
+    *   `electricity_pumps_heating_kwh`
+    *   `electricity_central_system_pumps_heating_kwh`
+    *   `electricity_pumps_cooling_kwh`
+    *   `electricity_central_system_pumps_cooling_kwh`
+3.  **Aggregate Domestic Water Heating**: Sum `electricity_water_systems_kwh` into `domestic_water_heating`.
+4.  **Aggregate Major Appliances**: Sum `electricity_refrigerator_kwh`, `electricity_clothes_washer_kwh`, `electricity_clothes_dryer_kwh`, `electricity_cooking_range_kwh`, and `electricity_dishwasher_kwh` into `major_appliances`.
+5.  **Aggregate Lighting**: Sum `electricity_interior_lighting_kwh` and `electricity_exterior_lighting_kwh` into `lighting`.
+6.  **Aggregate Miscellaneous Plug Loads**: Sum `electricity_plug_loads_kwh`, `electricity_house_fan_kwh`, `electricity_range_fan_kwh`, `electricity_bath_fan_kwh`, `electricity_ceiling_fan_kwh`, `electricity_pool_heater_kwh`, `electricity_pool_pump_kwh`, `electricity_hot_tub_heater_kwh`, and `electricity_hot_tub_pump_kwh` into `miscellaneous_plug_loads`.
+7.  **Total**: Use `net_site_electricity_kwh` as the `total` column.
+8.  **Construct Output**: Create a new DataFrame with columns `datetime`, `hvac`, `domestic_water_heating`, `major_appliances`, `lighting`, `miscellaneous_plug_loads`, and `total`. Reset index.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse and format datetime
+    dt = pd.to_datetime(source['time'])
+    out = pd.DataFrame()
+    out['datetime'] = dt.strftime('%Y-%m-%d %H:%M:%S')
+    
+    # 2. HVAC Aggregation
+    hvac_cols = [
+        'electricity_heating_kwh',
+        'electricity_central_system_heating_kwh',
+        'electricity_cooling_kwh',
+        'electricity_central_system_cooling_kwh',
+        'electricity_fans_heating_kwh',
+        'electricity_fans_cooling_kwh',
+        'electricity_pumps_heating_kwh',
+        'electricity_central_system_pumps_heating_kwh',
+        'electricity_pumps_cooling_kwh',
+        'electricity_central_system_pumps_cooling_kwh'
+    ]
+    out['hvac'] = source[hvac_cols].sum(axis=1)
+    
+    # 3. Domestic Water Heating
+    out['domestic_water_heating'] = source['electricity_water_systems_kwh']
+    
+    # 4. Major Appliances
+    major_appliances_cols = [
+        'electricity_refrigerator_kwh',
+        'electricity_clothes_washer_kwh',
+        'electricity_clothes_dryer_kwh',
+        'electricity_cooking_range_kwh',
+        'electricity_dishwasher_kwh'
+    ]
+    out['major_appliances'] = source[major_appliances_cols].sum(axis=1)
+    
+    # 5. Lighting
+    lighting_cols = [
+        'electricity_interior_lighting_kwh',
+        'electricity_exterior_lighting_kwh'
+    ]
+    out['lighting'] = source[lighting_cols].sum(axis=1)
+    
+    # 6. Miscellaneous Plug Loads
+    misc_plug_cols = [
+        'electricity_plug_loads_kwh',
+        'electricity_house_fan_kwh',
+        'electricity_range_fan_kwh',
+        'electricity_bath_fan_kwh',
+        'electricity_ceiling_fan_kwh',
+        'electricity_pool_heater_kwh',
+        'electricity_pool_pump_kwh',
+        'electricity_hot_tub_heater_kwh',
+        'electricity_hot_tub_pump_kwh'
+    ]
+    out['miscellaneous_plug_loads'] = source[misc_plug_cols].sum(axis=1)
+    
+    # 7. Total
+    out['total'] = source['net_site_electricity_kwh']
+    
+    return out.reset_index(drop=True)
+```

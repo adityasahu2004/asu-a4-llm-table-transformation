@@ -1,0 +1,70 @@
+**Operator plan:**
+1. Parse the `date` column into datetime objects.
+2. Extract the date part (YYYY-MM-DD) to group records by day.
+3. Extract the hour part (0-23) to determine the target column for each record.
+4. Map the 24-hour integer hours to the specific 12-hour AM/PM string labels required by the target schema (e.g., 0 -> "12:00 AM", 1 -> "1:00 AM", ..., 12 -> "12:00 PM", ..., 23 -> "11:00 PM").
+5. Pivot the data so that each row represents a unique date, and columns represent the hours. Since there might be multiple entries or specific aggregation needs, but looking at the source `distinct` counts vs target `distinct` counts and the nature of such time-series pivots, we assume we are taking the value for that hour. Given the source has one value per timestamp and the target has one value per hour per day, we group by Date and Hour, then pivot. If there are multiple values for the same date/hour (unlikely given the sample but possible in raw logs), we typically take the mean or the single value. The sample data shows clean 1:1 mapping per hour in the target. We will group by Date and Hour, taking the mean (or first) to handle potential duplicates, then pivot.
+6. Format the date index as "MM/DD/YYYY".
+7. Reorder columns to match the target specification: 1:00 AM through 12:00 AM.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date
+    df = source.copy()
+    df['dt'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract date and hour
+    df['date_key'] = df['dt'].dt.date
+    df['hour'] = df['dt'].dt.hour
+    
+    # Map hour to target column name
+    def hour_to_label(h):
+        if h == 0:
+            return "12:00 AM"
+        elif 1 <= h <= 11:
+            return f"{h}:00 AM"
+        elif h == 12:
+            return "12:00 PM"
+        else:
+            return f"{h-12}:00 PM"
+            
+    df['hour_label'] = df['hour'].apply(hour_to_label)
+    
+    # Pivot: Group by date and hour_label, aggregate (mean handles duplicates if any, otherwise just the value)
+    pivot_df = df.groupby(['date_key', 'hour_label'])['cerc_logger_1'].mean().reset_index()
+    
+    # Pivot table
+    result = pivot_df.pivot(index='date_key', columns='hour_label', values='cerc_logger_1')
+    
+    # Define the desired column order
+    hour_order = [
+        "1:00 AM", "2:00 AM", "3:00 AM", "4:00 AM", "5:00 AM", "6:00 AM", 
+        "7:00 AM", "8:00 AM", "9:00 AM", "10:00 AM", "11:00 AM", "12:00 PM",
+        "1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM", "5:00 PM", "6:00 PM", 
+        "7:00 PM", "8:00 PM", "9:00 PM", "10:00 PM", "11:00 PM", "12:00 AM"
+    ]
+    
+    # Ensure all columns are present, even if NaN for some dates
+    for col in hour_order:
+        if col not in result.columns:
+            result[col] = np.nan
+            
+    # Select and order columns
+    result = result[hour_order]
+    
+    # Reset index to make date a column
+    result = result.reset_index()
+    
+    # Format date column as MM/DD/YYYY
+    result['date'] = pd.to_datetime(result['date_key']).dt.strftime('%m/%d/%Y')
+    
+    # Drop the helper date_key column
+    result = result.drop(columns=['date_key'])
+    
+    # Rename 'date' to match target exactly (it is already 'date')
+    
+    return result
+```

@@ -1,0 +1,93 @@
+Operator plan:
+1. Parse `DT_STRATA` to datetime and format as `MM/DD/YYYY` for the `date` column.
+2. Map the 24 hourly source columns (`PCT_HOURLY_0100` to `PCT_HOURLY_2400`) to the target 12-hour clock names.
+   - Hours 1-11 map to `1:00 AM` - `11:00 AM`.
+   - Hour 12 maps to `12:00 AM` (per target schema sample order and naming convention where 12:00 AM follows 11:00 AM in this specific dataset context, likely representing midnight start or specific labeling logic observed in target: `12:00 AM` is the 12th column). *Correction*: Looking at the target sample data and column order:
+     - Target cols: `1:00 AM`, `2:00 AM`, ..., `11:00 AM`, `12:00 AM`, `1:00 PM`, ..., `11:00 PM`, `12:00 PM`.
+     - Source cols: `0100` ... `2400`.
+     - Let's verify the mapping by looking at typical 24h to 12h conversion or the specific sample data.
+     - Source `0100` (1 AM) -> Target `1:00 AM`
+     - ...
+     - Source `1100` (11 AM) -> Target `11:00 AM`
+     - Source `1200` (12 PM/Noon) -> Target `12:00 AM`? This seems unusual. Let's look closer.
+     - Target column 12 is `12:00 AM`. Target column 25 is `12:00 PM`.
+     - Usually 12:00 is Noon (PM) and 00:00 is Midnight (AM).
+     - Source `1200` is Noon. Source `2400` is Midnight (end of day).
+     - If Target `12:00 AM` corresponds to Source `1200`, that's Noon labeled as AM? Or is the source `1200` actually Midnight?
+     - Let's check the values.
+     - Source row 1: `0100`=0.0007, `1200`=0.0019, `2400`=0.0008.
+     - Target row 1: `1:00 AM`=0.0012, `12:00 AM`=0.0012, `12:00 PM`=0.0011.
+     - Wait, the rows in the sample are different between source and target. The source sample starts with `7/2/2016`. The target sample starts with `01/01/2016`. I cannot map by value directly.
+     - I must infer from standard conventions or the specific column names provided.
+     - Target columns: `1:00 AM` ... `11:00 AM`, `12:00 AM`, `1:00 PM` ... `11:00 PM`, `12:00 PM`.
+     - This sequence is: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12.
+     - This is a 12-hour clock cycle.
+     - Standard 24-hour to 12-hour mapping:
+       - 01:00 -> 1:00 AM
+       - ...
+       - 11:00 -> 11:00 AM
+       - 12:00 -> 12:00 PM (Noon)
+       - 13:00 -> 1:00 PM
+       - ...
+       - 23:00 -> 11:00 PM
+       - 24:00 -> 12:00 AM (Midnight)
+     - However, the target column order is: `1:00 AM` ... `11:00 AM`, **`12:00 AM`**, `1:00 PM` ... `11:00 PM`, **`12:00 PM`**.
+     - This implies the 12th column is `12:00 AM` and the 24th is `12:00 PM`.
+     - If we follow the standard mapping:
+       - Source `1200` (Noon) should be `12:00 PM`.
+       - Source `2400` (Midnight) should be `12:00 AM`.
+     - But the target puts `12:00 AM` *before* `1:00 PM`. This suggests `12:00 AM` is the noon slot in this specific nomenclature (which is non-standard, usually 12:00 PM is noon), OR the source `1200` is midnight?
+     - Let's look at the source distinct values for `DOW`. `7` is Sunday. `7/2/2016` was a Saturday.
+     - Let's look at the previous task's target for `24:00:00`. It was mapped to `pct_hourly_2400`.
+     - Let's assume the column order in Target matches the chronological order of the day: 1am, 2am... 11am, 12am (Noon?), 1pm... 11pm, 12pm (Midnight?).
+     - Actually, a common confusion is 12:00 AM/PM.
+     - If the target follows the sequence 1..12, 1..12, then:
+       - Slot 12 is `12:00 AM`.
+       - Slot 24 is `12:00 PM`.
+     - If Source `1200` is Noon, and Source `2400` is Midnight.
+     - If Target Slot 12 is Noon, it is labeled `12:00 AM`.
+     - If Target Slot 24 is Midnight, it is labeled `12:00 PM`.
+     - This labeling is reversed from standard (where Noon is PM, Midnight is AM). However, I must follow the target schema.
+     - Mapping:
+       - Source `0100` -> `1:00 AM`
+       - ...
+       - Source `1100` -> `11:00 AM`
+       - Source `1200` -> `12:00 AM` (The 12th target column)
+       - Source `1300` -> `1:00 PM`
+       - ...
+       - Source `2300` -> `11:00 PM`
+       - Source `2400` -> `12:00 PM` (The 24th target column)
+
+3. Construct the dataframe with `date` and the renamed columns.
+
+```python
+import pandas as pd
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date
+    dates = pd.to_datetime(source['DT_STRATA'], format='%m/%d/%Y')
+    out = pd.DataFrame(index=source.index)
+    out['date'] = dates.dt.strftime('%m/%d/%Y')
+    
+    # Define mapping from source column suffix to target column name
+    # Source: 0100-2400
+    # Target: 1:00 AM - 11:00 AM, 12:00 AM, 1:00 PM - 11:00 PM, 12:00 PM
+    
+    mapping = {}
+    # 1-11 AM
+    for h in range(1, 12):
+        mapping[f'PCT_HOURLY_{h:02d}00'] = f'{h}:00 AM'
+    # 12 -> 12:00 AM (based on target column order: 12th col is 12:00 AM)
+    mapping['PCT_HOURLY_1200'] = '12:00 AM'
+    # 13-23 -> 1:00 PM - 11:00 PM
+    for h in range(13, 24):
+        hour_12 = h - 12
+        mapping[f'PCT_HOURLY_{h:02d}00'] = f'{hour_12}:00 PM'
+    # 24 -> 12:00 PM (based on target column order: 24th col is 12:00 PM)
+    mapping['PCT_HOURLY_2400'] = '12:00 PM'
+    
+    # Apply mapping
+    for src_col, tgt_col in mapping.items():
+        out[tgt_col] = source[src_col]
+        
+    return out.reset_index(drop=True)
+```

@@ -1,0 +1,256 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `Date` column from string format (`m/d/yyyy`) to datetime objects.
+2.  **Shift Dates**: The target dates are roughly 2 weeks prior to the source dates (e.g., Source `7/3/2013` -> Target `6/19/2013` is not quite right, let's look closer).
+    *   Source `7/3/2013` is a Wednesday.
+    *   Target `Tue 01/01/2013` is the first row.
+    *   Target `Tue 07/02/2013` is the last row.
+    *   Source `12/31/2013` is the last source row.
+    *   Let's check the offset.
+        *   Source `7/3/2013` corresponds to which target? The target has 183 rows, source has 182. The target starts at Jan 1, 2013. The source starts at July 3, 2013.
+        *   Let's look at the values.
+        *   Source Row 0 (`7/3/2013`): `1` = 0.56.
+        *   Target Row 0 (`Tue 01/01/2013`): `1:00` = 0.89. No obvious direct match.
+        *   Let's look at the date progression.
+        *   Source dates: 7/3, 7/19, 8/4... roughly every 16-17 days.
+        *   Target dates: 1/1, 1/17, 2/3... roughly every 16-17 days.
+        *   The target dates are *before* the source dates? Or is it a time shift?
+        *   Let's check the difference in days.
+        *   Source `7/3/2013` - Target `6/19/2013` (if it existed) = 14 days.
+        *   Let's look at the last rows. Source `12/31/2013`. Target `7/2/2013`? No, Target ends at `Tue 07/02/2013` in the sample, but the schema says 183 rows. The sample shows the *last* target row as `Tue 07/02/2013`. Wait, the sample data for target shows 12 rows. The first is `Tue 01/01/2013`, the last is `Tue 07/02/2013`.
+        *   The source sample shows 12 rows. First `7/3/2013`, last `12/31/2013`.
+        *   This implies the Target DataFrame covers a different time period or is shifted.
+        *   However, usually in these problems, the rows correspond 1-to-1 or via a specific key.
+        *   Let's look at the values again.
+        *   Source `7/3/2013` (Row 0) has `1`=0.56.
+        *   Target `6/19/2013`? Not in sample.
+        *   Let's check if the Target is simply the Source dates shifted back by 14 days?
+        *   Source `7/3/2013` - 14 days = `6/19/2013` (Tuesday).
+        *   Source `7/19/2013` - 14 days = `7/5/2013` (Saturday).
+        *   Let's check the Target sample for `6/19/2013` or `7/5/2013`.
+        *   Target sample has: `1/1`, `1/17`, `2/3`, `2/19`, `3/8`, `3/24`, `4/10`, `4/26`, `5/13`, `5/29`, `6/15`, `7/2`.
+        *   Source sample has: `7/3`, `7/19`, `8/4`, `8/21`, `9/6`, `9/23`, `10/9`, `10/26`, `11/11`, `11/28`, `12/14`, `12/31`.
+        *   Let's subtract 14 days from Source dates:
+            *   `7/3` - 14d = `6/19` (Tue). Target has `6/15` (Sat) and `7/2` (Tue). No `6/19`.
+            *   `7/19` - 14d = `7/5` (Sat). Target has `7/2` (Tue). No `7/5`.
+        *   Let's try subtracting a different amount.
+        *   Maybe the Target is the *previous* period?
+        *   Let's look at the Target `6/15/2013` (Sat). Source `6/29/2013`?
+        *   Let's look at the Target `7/2/2013` (Tue). Source `7/16/2013`?
+        *   Actually, let's look at the row indices.
+        *   Source Row 0 (`7/3/2013`) -> Target Row ?
+        *   Source Row 11 (`12/31/2013`) -> Target Row ?
+        *   The target has 183 rows. Source has 182.
+        *   The target dates in the sample are `Jan 1` to `Jul 2`.
+        *   The source dates in the sample are `Jul 3` to `Dec 31`.
+        *   It seems the Target is the *first half* of the year (or a specific range) and Source is the *second half*.
+        *   But the problem asks to transform Source to Target. This implies the Source *contains* the data for the Target, or the Target is derived from Source.
+        *   Wait, the "evaluation source contains different rows". This means I must infer the logic.
+        *   If the Source provided in the prompt is just a *sample* of the full evaluation source, and the Target is the *result* of the transformation on the *full* source, then I need to find a mapping.
+        *   However, the prompt says "Infer the transformation from this schema/sample block".
+        *   The sample block shows Source rows and Target rows. They do *not* overlap in time.
+        *   Source: July-Dec 2013.
+        *   Target: Jan-July 2013.
+        *   This suggests the transformation might involve shifting dates or the Source actually contains all dates but the sample only shows the tail?
+        *   No, the schema says Source has 182 rows, distinct dates 182. Target has 183 rows.
+        *   If the evaluation source is different, maybe the evaluation source *does* contain the Jan-July dates?
+        *   Let's assume the standard pattern: The Source DataFrame has dates, and we need to output a DataFrame with dates shifted or formatted differently.
+        *   Let's look at the values.
+        *   Source `7/3/2013` (Wed): `1`=0.56.
+        *   Target `6/19/2013` (Tue) is not in sample.
+        *   Target `7/2/2013` (Tue): `1:00`=0.66.
+        *   Source `7/16/2013`? Not in sample.
+        *   Let's look at the date format.
+        *   Target `cst`: "Tue 01/01/2013". Format: `%a %m/%d/%Y`.
+        *   Source `Date`: "7/3/2013".
+        *   The target columns are renamed from `1`...`24` to `1:00`...`24:00`.
+        *   The values in Target `1:00`...`24:00` seem to correspond to Source `1`...`24`.
+        *   Let's check if Target Row `i` corresponds to Source Row `i` with a date shift.
+        *   Target Row 0: `Tue 01/01/2013`.
+        *   Target Row 11: `Tue 07/02/2013`.
+        *   Source Row 0: `7/3/2013`.
+        *   Source Row 11: `12/31/2013`.
+        *   There is no obvious 1-to-1 row alignment in the *samples* because the samples show disjoint time periods.
+        *   **Hypothesis**: The transformation is simply:
+            1.  Take the `Date` column.
+            2.  Shift the date by a fixed amount? Or maybe the Source *is* the Target data but the sample is misleading?
+            3.  Let's look at the distinct counts. Source `1` has 45 distinct. Target `1:00` has 57 distinct.
+            4.  This implies the Target DataFrame is *larger* or has different data.
+            5.  Wait, the note says: "Source row count describes a training sample only, not the evaluation input."
+            6.  This is key. The *evaluation* source will have different rows. The transformation must be general.
+            7.  What is the relationship between the Source structure and Target structure?
+            8.  Source Columns: `Date`, `Class`, `1`...`24`.
+            9.  Target Columns: `cst`, `1:00`...`24:00`.
+            10. The `Class` column is dropped.
+            11. The numeric columns are renamed.
+            12. The `Date` column is reformatted.
+            13. **Crucial**: Does the date change?
+                *   In the sample, Source dates are July-Dec. Target dates are Jan-July.
+                *   If the evaluation source contains the Jan-July dates, then the transformation is just reformatting.
+                *   If the evaluation source contains July-Dec dates, and we need Jan-July, we need a shift.
+                *   However, usually, the "Source" in the prompt is a snippet of the *actual* input data for the evaluation. If the evaluation input has dates in July-Dec, and the expected output has dates in Jan-July, then a shift is required.
+                *   Let's check the offset again.
+                *   Source `7/3/2013` (Wed). Target `6/19/2013` (Tue) is 14 days prior.
+                *   Source `12/31/2013` (Tue). Target `12/17/2013` (Tue) is 14 days prior.
+                *   Let's check if the Target sample's last date `7/2/2013` corresponds to a Source date.
+                *   If the pattern is "Target Date = Source Date - 14 days", then:
+                    *   Source `7/16/2013` would map to Target `7/2/2013`.
+                    *   Is `7/16/2013` in the Source? The Source sample jumps from `7/3` to `7/19`. It skips `7/16`.
+                    *   The Source sample has 12 rows. The Target sample has 12 rows.
+                    *   Source: `7/3`, `7/19`, `8/4`...
+                    *   Target: `1/1`, `1/17`, `2/3`...
+                    *   Let's check the day of the week.
+                    *   Source `7/3/2013` is Wednesday.
+                    *   Target `1/1/2013` is Tuesday.
+                    *   Source `7/19/2013` is Friday.
+                    *   Target `1/17/2013` is Thursday.
+                    *   It seems Target dates are exactly **14 days before** the Source dates?
+                        *   `7/3` - 14 days = `6/19` (Tuesday). Target has `6/15` and `7/2`. No `6/19`.
+                        *   Wait, the Target sample *starts* at `1/1/2013`. The Source sample *starts* at `7/3/2013`.
+                        *   If the transformation is `Date - 14 days`, then the Source for the Target sample would have started at `1/15/2013`.
+                        *   The Source sample provided is likely just the *end* of the dataset, while the Target sample is the *start* of the dataset?
+                        *   Or, the Source sample provided is disjoint from the Target sample provided, just to show schema?
+                        *   "Source row count describes a training sample only".
+                        *   If I assume the transformation is **just** reformatting the date and renaming columns, and the dates in the evaluation source will match the dates in the evaluation target (i.e., no shift), then I should just format the date.
+                        *   BUT, the samples show a clear time difference.
+                        *   Let's look at the distinct counts again.
+                        *   Source `1`: 45 distinct. Target `1:00`: 57 distinct.
+                        *   If it were a 1-to-1 mapping with a shift, distinct counts should be similar (unless the distribution changes significantly).
+                        *   Let's look at the values.
+                        *   Source `7/3/2013` (Wed) `1` = 0.56.
+                        *   Target `6/19/2013` (Tue) is not in sample.
+                        *   Target `7/2/2013` (Tue) `1:00` = 0.66.
+                        *   Source `7/16/2013` (Wed) is not in sample.
+                        *   Let's assume the standard "Shift Date" operation.
+                        *   Common shifts: -1 day, -7 days, -14 days.
+                        *   Given the bi-weekly-ish frequency (16-17 days between samples), a 14-day shift is plausible.
+                        *   Let's check the first and last dates again.
+                        *   Target Start: `2013-01-01`.
+                        *   Target End (Sample): `2013-07-02`.
+                        *   Source Start (Sample): `2013-07-03`.
+                        *   Source End (Sample): `2013-12-31`.
+                        *   If the Source *actually* contains the dates for the Target (just shifted), then the Source for the Target sample would be `2013-01-15` to `2013-07-16`.
+                        *   The provided Source sample is `2013-07-03` to `2013-12-31`.
+                        *   This implies the Source and Target samples are from different parts of the same continuous dataset, or the Source *is* the shifted data.
+                        *   If the evaluation source contains dates like `2013-01-15`, and we need to output `2013-01-01`, we subtract 14 days.
+                        *   If the evaluation source contains dates like `2013-07-03`, and we need to output `2013-06-19`, we subtract 14 days.
+                        *   The prompt asks to infer the transformation. The most robust inference from disjoint samples showing a consistent offset in the "story" of the data (if we assume they are linked) is a date shift.
+                        *   However, without explicit linkage, **reformatting** is the safest bet if the dates are expected to match. But the dates *don't* match in the samples.
+                        *   Let's look at the column `Class`. It is "RESIDENT". It is dropped.
+                        *   Let's look at the target column name `cst`. This might stand for "Central Standard Time" or similar, implying a timezone conversion?
+                        *   If it's a timezone conversion, `Date` might be in UTC and `cst` in CST.
+                        *   CST is UTC-6.
+                        *   `7/3/2013` UTC -> `7/2/2013` CST?
+                        *   `7/3/2013` 00:00 UTC is `7/2/2013` 18:00 CST.
+                        *   The target date is `Tue 01/01/2013`.
+                        *   If Source `1/1/2013` UTC -> Target `12/31/2012` CST?
+                        *   This doesn't explain the 6-month gap in the samples.
+                        *   Let's reconsider the **14-day shift**.
+                        *   Why 14 days?
+                        *   Source `7/3` (Wed). Target `6/19` (Tue) is 14 days prior.
+                        *   Source `7/19` (Fri). Target `7/5` (Sat) is 14 days prior.
+                        *   The Target sample has `6/15` (Sat) and `7/2` (Tue).
+                        *   This doesn't align perfectly with the Source sample rows.
+                        *   **Alternative**: The Source sample and Target sample are just *examples* of the schema, and the actual transformation is **Identity** on the dates (just reformatting), but the samples are from different time periods to show the format?
+                        *   If I assume Identity:
+                            *   Source `7/3/2013` -> Target `Wed 07/03/2013`.
+                            *   But Target sample shows `Tue 01/01/2013`.
+                            *   If the evaluation source has `1/1/2013`, it becomes `Tue 01/01/2013`.
+                            *   This is the most standard "cleaning" task. The disjoint samples are likely just to show the format of `cst` and the numeric columns, and the fact that `Class` is dropped. The time gap is likely an artifact of how the samples were selected (e.g., random rows or head/tail).
+                            *   However, the Target sample starts at `1/1/2013` and ends at `7/2/2013`. The Source sample starts at `7/3/2013` and ends at `12/31/2013`.
+                            *   This is a very specific split. July 3 is the day after July 2.
+                            *   This strongly suggests that the Source and Target are **consecutive** parts of a dataset, or the Source is shifted.
+                            *   If they are consecutive, there is no row-wise mapping.
+                            *   If the task is to transform the *entire* Source DataFrame into the Target format, and the Target DataFrame is the *expected output* for the *evaluation* Source, then:
+                                *   Does the Evaluation Source contain Jan-July data?
+                                *   If yes, and we just reformat, the output will match the Target sample format.
+                                *   If the Evaluation Source contains July-Dec data, and we just reformat, the output will be July-Dec, which does *not* match the Target sample dates (Jan-July).
+                                *   Therefore, if the Target sample is representative of the *expected output values/dates* for the *evaluation*, and the evaluation source is "different rows", we must assume the evaluation source *also* contains the dates that map to the Target sample dates.
+                                *   This implies the transformation is **Date Reformatting Only**. The samples are just illustrative of the schema and format, not linked 1-to-1 in time. The "different rows" note supports this: the evaluation source will have its own dates, and we just format them.
+
+3.  **Refined Plan**:
+    *   **Drop** the `Class` column.
+    *   **Rename** numeric columns `1`...`24` to `1:00`...`24:00`.
+    *   **Parse** `Date` to datetime.
+    *   **Format** `Date` to string `"%a %m/%d/%Y"` (e.g., "Tue 01/01/2013"). Note: `%a` gives abbreviated weekday name (Tue, Wed, etc.). The sample shows "Tue", "Thu", "Sun". This matches `%a`.
+    *   **Rename** `Date` column to `cst`.
+    *   **Return** the DataFrame with columns `['cst', '1:00', ..., '24:00']`.
+
+4.  **Verification of Date Format**:
+    *   Target: "Tue 01/01/2013"
+    *   Python `strftime`: `%a %m/%d/%Y`
+    *   `2013-01-01` is a Tuesday. `%a` -> "Tue". `%m` -> "01". `%d` -> "01". `%Y` -> "2013".
+    *   Result: "Tue 01/01/2013". Matches.
+
+5.  **Column Renaming**:
+    *   Source: `1`, `2`, ..., `24` (strings or floats in schema, but names are strings "1", "2").
+    *   Target: `1:00`, `2:00`, ..., `24:00`.
+    *   Mapping: `str(i) + ":00"`.
+
+6.  **Final Code Structure**:
+    ```python
+    import pandas as pd
+    import numpy as np
+
+    def transform(source: pd.DataFrame) -> pd.DataFrame:
+        # Create a copy to avoid modifying original
+        df = source.copy()
+        
+        # Parse dates
+        df['Date'] = pd.to_datetime(df['Date'])
+        
+        # Format dates
+        df['cst'] = df['Date'].dt.strftime('%a %m/%d/%Y')
+        
+        # Drop old columns
+        df = df.drop(columns=['Date', 'Class'])
+        
+        # Rename numeric columns
+        # Source columns 1..24 are strings "1", "2", etc.
+        # We need to rename them to "1:00", "2:00", etc.
+        rename_map = {str(i): f"{i}:00" for i in range(1, 25)}
+        df = df.rename(columns=rename_map)
+        
+        # Reorder columns to match target schema: cst, 1:00, ..., 24:00
+        cols = ['cst'] + [f"{i}:00" for i in range(1, 25)]
+        df = df[cols]
+        
+        return df
+```
+
+One detail: The target `cst` column is `str`. The numeric columns are `float64`. The source numeric columns are `float64`. This matches.
+
+Double check the "14 day shift" hypothesis. If I don't shift, and the evaluation source has dates that *should* be shifted, I'll fail. But if I shift, and the evaluation source dates are already the target dates, I'll fail.
+Given "Source row count describes a training sample only", and the samples are disjoint, the most logical interpretation in data cleaning tasks is that the samples illustrate the *schema* and *format*, not a time-series alignment. The `Class` column drop and column renames are explicit structural changes. The date format change is explicit. A time shift is an implicit assumption that is risky without explicit linkage (e.g., "Target is 14 days prior to Source"). The disjoint nature of the samples (Jan-July vs July-Dec) is likely just to show that the date format works for different months/years and that the data is continuous over time, but the transformation itself is local to each row.
+
+I will proceed with **Reformatting Only**.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    """
+    Transforms the source DataFrame by:
+    1. Dropping the 'Class' column.
+    2. Parsing the 'Date' column and formatting it as 'DayOfWeek MM/DD/YYYY' (e.g., 'Tue 01/01/2013').
+    3. Renaming the 'Date' column to 'cst'.
+    4. Renaming columns '1' through '24' to '1:00' through '24:00'.
+    5. Reordering columns to start with 'cst' followed by the time columns.
+    """
+    df = source.copy()
+    
+    # Parse the Date column to datetime
+    df['Date'] = pd.to_datetime(df['Date'])
+    
+    # Format the date to the target string format: "Tue 01/01/2013"
+    # %a: Abbreviated weekday name (Tue)
+    # %m: Month as zero-padded decimal (01)
+    # %d: Day as zero-padded decimal (01)
+    # %Y: Year with century (2013)
+    df['cst'] = df['Date'].dt.strftime('%a %m/%d/%Y')
+    
+    # Drop the original Date and Class columns
+    df = df.drop(columns=['Date', 'Class'])
+    
+   

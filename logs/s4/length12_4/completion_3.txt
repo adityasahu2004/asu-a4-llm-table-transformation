@@ -1,0 +1,196 @@
+Operator plan:
+1. Map `Time Period` (month names) to seasons (Winter/Summer/Spring/Fall).
+2. Filter rows to only those where `Day Type` is 'All' and `Average Demand Per Home With This End Use [kW]` is not null.
+3. Map `End Use` to target column names:
+   - 'Freezer' -> 'refrigerator' (Note: Sample shows 'Freezer' contributing to 'refrigerator' likely, or 'Refrigerator' if present. The source distinct values for End Use aren't fully listed but sample has 'Freezer'. Target has 'refrigerator'. Usually Freezer+Refrigerator are grouped or Freezer is part of it. Let's look at the target columns: hvac, water_heating, refrigerator, clothes_washer, clothes_dryer, dishwasher, cooking_range, pool_spa_pumps, interior_lighting, exterior_lighting, lighting, plug, pool_spa_heater.
+   - Source End Uses in sample: 'Freezer', 'Clothes Dryer - Electric', 'Clothes Washer', 'Primary TV and Peripherals', 'Primary Desktop Computer', 'Misc Metered', 'Pool Pump', 'Lighting'.
+   - We need to infer the mapping.
+     - 'Freezer' -> 'refrigerator'? Or is there a 'Refrigerator' end use? The sample doesn't show 'Refrigerator'. It shows 'Freezer'. The target has 'refrigerator'. It's highly likely 'Freezer' maps to 'refrigerator' or they are combined. Given the distinct count of 15 for End Use, there are likely specific mappings.
+     - 'Clothes Dryer - Electric' -> 'clothes_dryer'
+     - 'Clothes Washer' -> 'clothes_washer'
+     - 'Pool Pump' -> 'pool_spa_pumps'
+     - 'Lighting' -> 'lighting' (or interior/exterior? Target has 'lighting', 'interior_lighting', 'exterior_lighting'. Source just has 'Lighting'. Likely maps to 'lighting').
+     - 'Primary TV and Peripherals', 'Primary Desktop Computer', 'Misc Metered' -> 'plug'?
+     - What about 'hvac' and 'water_heating'? They are not in the sample End Uses. They must be other End Use values in the 15 distinct values. Common ones: 'Central AC', 'Heat Pump', 'Water Heater'.
+     - Since I cannot see all 15 distinct values, I must rely on standard naming conventions or infer from the target.
+     - However, the target sample shows non-zero values for `hvac`, `water_heating`, `refrigerator`, `dishwasher`.
+     - The source sample shows non-nulls for 'Freezer', 'Clothes Dryer - Electric', 'Clothes Washer', 'Pool Pump', 'Lighting'.
+     - Wait, the target sample has `hvac` and `water_heating` populated. The source sample provided in the prompt is just a *sample* of the 258k rows. It does not contain all End Uses.
+     - I need to construct a mapping dictionary. Since I don't have the full list of source End Uses, I will assume standard mappings based on the target column names and common utility end-use categories.
+     - Mappings inferred:
+       - HVAC related (e.g., 'Central AC', 'Heat Pump', 'Furnace') -> 'hvac'
+       - 'Water Heater' -> 'water_heating'
+       - 'Refrigerator', 'Freezer' -> 'refrigerator'
+       - 'Clothes Washer' -> 'clothes_washer'
+       - 'Clothes Dryer - Electric' -> 'clothes_dryer'
+       - 'Dishwasher' -> 'dishwasher'
+       - 'Cooking Range', 'Oven' -> 'cooking_range'
+       - 'Pool Pump' -> 'pool_spa_pumps'
+       - 'Interior Lighting' -> 'interior_lighting'
+       - 'Exterior Lighting' -> 'exterior_lighting'
+       - 'Lighting' (if generic) -> 'lighting'
+       - 'TV', 'Computer', 'Misc Metered' -> 'plug'
+       - 'Pool Heater' -> 'pool_spa_heater'
+     - Since I can't know the exact source strings for HVAC/Water Heater/etc., I will create a robust mapping function that checks if the source string *contains* or *equals* keywords.
+     - Actually, looking at the target, many columns are 0. The source has 15 distinct End Uses.
+     - Let's look at the distinct values of End Use in the source schema: it says distinct: 15.
+     - The sample shows: 'Freezer', 'Clothes Dryer - Electric', 'Clothes Washer', 'Primary TV and Peripherals', 'Primary Desktop Computer', 'Misc Metered', 'Pool Pump', 'Lighting'. That's 8.
+     - Missing 7. Likely: 'Refrigerator' (maybe separate from Freezer?), 'Dishwasher', 'Water Heater', 'Central AC', 'Heat Pump', 'Cooking Range', 'Pool Heater'?
+     - If 'Freezer' is separate from 'Refrigerator', both might map to 'refrigerator'.
+     - Let's assume the following keyword mapping logic:
+       - if 'ac' or 'cooling' or 'heat pump' in lower: 'hvac'
+       - if 'water' in lower: 'water_heating'
+       - if 'refrigerator' or 'freezer' in lower: 'refrigerator'
+       - if 'washer' in lower: 'clothes_washer'
+       - if 'dryer' in lower: 'clothes_dryer'
+       - if 'dish' in lower: 'dishwasher'
+       - if 'range' or 'oven' or 'cook' in lower: 'cooking_range'
+       - if 'pool' and 'pump' in lower: 'pool_spa_pumps'
+       - if 'interior' in lower: 'interior_lighting'
+       - if 'exterior' in lower: 'exterior_lighting'
+       - if 'lighting' in lower: 'lighting' (fallback for generic)
+       - if 'tv' or 'computer' or 'misc' or 'plug' in lower: 'plug'
+       - if 'pool' and 'heat' in lower: 'pool_spa_heater'
+     - This heuristic approach is risky if names are weird.
+     - However, often in these problems, if the mapping isn't explicit, there might be a simpler structure.
+     - Let's look at the target columns again. `hvac`, `water_heating`, `refrigerator`, `dishwasher` are float. Others are int 0 in the sample? No, `clothes_washer` is int 0 in sample, but dtype is int64. `hvac` is float.
+     - Wait, the target sample shows `hvac`, `water_heating`, `refrigerator`, `dishwasher` having values. The others are 0.
+     - This implies that for the *sample rows* in the target, only those categories had data.
+     - I will aggregate by Season, Hour, and Mapped End Use.
+     - Steps:
+       1. Parse Season from Time Period.
+       2. Filter for Day Type == 'All'.
+       3. Drop nulls in Demand.
+       4. Map End Use to Target Column Name.
+       5. GroupBy Season, Hour, Target Column Name.
+       6. Sum the Demand.
+       7. Pivot/Unpivot to get the target shape.
+
+    - Mapping Logic Refinement:
+      - 'Freezer' -> 'refrigerator'
+      - 'Clothes Dryer - Electric' -> 'clothes_dryer'
+      - 'Clothes Washer' -> 'clothes_washer'
+      - 'Pool Pump' -> 'pool_spa_pumps'
+      - 'Lighting' -> 'lighting'
+      - 'Primary TV and Peripherals' -> 'plug'
+      - 'Primary Desktop Computer' -> 'plug'
+      - 'Misc Metered' -> 'plug'
+      
+      - What are the other 7?
+      - Likely: 'Refrigerator' -> 'refrigerator'
+      - 'Dishwasher' -> 'dishwasher'
+      - 'Water Heater' -> 'water_heating'
+      - 'Central AC' -> 'hvac'
+      - 'Heat Pump' -> 'hvac'
+      - 'Cooking Range' -> 'cooking_range'
+      - 'Pool Heater' -> 'pool_spa_heater'
+      
+      - I will implement a function that maps based on substring containment to be safe.
+
+4. Group by `season`, `hour`, and the mapped `end_use_category`. Sum `Average Demand Per Home With This End Use [kW]`.
+5. Pivot the table so that `end_use_category` becomes columns.
+6. Fill missing columns with 0.
+7. Ensure correct dtypes (float for hvac, water_heating, refrigerator, dishwasher; int for others? The target schema says `clothes_washer` is int64 with distinct 1 (value 0). `hvac` is float64. I will cast accordingly).
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Map months to seasons
+    month_to_season = {
+        'December': 'Winter', 'January': 'Winter', 'February': 'Winter',
+        'March': 'Spring', 'April': 'Spring', 'May': 'Spring',
+        'June': 'Summer', 'July': 'Summer', 'August': 'Summer',
+        'September': 'Fall', 'October': 'Fall', 'November': 'Fall'
+    }
+    
+    df = source.copy()
+    
+    # Assign season
+    df['season'] = df['Time Period'].map(month_to_season)
+    
+    # Filter for 'All' day type and non-null demand
+    df = df[df['Day Type'] == 'All']
+    df = df.dropna(subset=['Average Demand Per Home With This End Use [kW]'])
+    
+    # Function to map End Use to target column name
+    def map_end_use(use):
+        use_lower = use.lower()
+        if 'ac' in use_lower or 'cooling' in use_lower or 'heat pump' in use_lower or 'furnace' in use_lower:
+            return 'hvac'
+        if 'water' in use_lower:
+            return 'water_heating'
+        if 'refrigerator' in use_lower or 'freezer' in use_lower:
+            return 'refrigerator'
+        if 'dish' in use_lower:
+            return 'dishwasher'
+        if 'washer' in use_lower:
+            return 'clothes_washer'
+        if 'dryer' in use_lower:
+            return 'clothes_dryer'
+        if 'range' in use_lower or 'oven' in use_lower or 'cook' in use_lower:
+            return 'cooking_range'
+        if 'pool' in use_lower and 'pump' in use_lower:
+            return 'pool_spa_pumps'
+        if 'interior' in use_lower:
+            return 'interior_lighting'
+        if 'exterior' in use_lower:
+            return 'exterior_lighting'
+        if 'lighting' in use_lower:
+            return 'lighting'
+        if 'tv' in use_lower or 'computer' in use_lower or 'misc' in use_lower or 'plug' in use_lower:
+            return 'plug'
+        if 'pool' in use_lower and 'heat' in use_lower:
+            return 'pool_spa_heater'
+        return 'other' # Should not happen if mapping covers all 15
+
+    df['target_col'] = df['End Use'].apply(map_end_use)
+    
+    # Aggregate
+    agg_df = df.groupby(['season', 'Hour Ending', 'target_col'])['Average Demand Per Home With This End Use [kW]'].sum().reset_index()
+    
+    # Pivot
+    pivot_df = agg_df.pivot_table(index=['season', 'Hour Ending'], columns='target_col', values='Average Demand Per Home With This End Use [kW]', fill_value=0)
+    
+    # Reset index
+    pivot_df = pivot_df.reset_index()
+    pivot_df.rename(columns={'Hour Ending': 'hour'}, inplace=True)
+    
+    # Define target columns and ensure they exist
+    target_cols = [
+        'hvac', 'water_heating', 'refrigerator', 'clothes_washer', 'clothes_dryer',
+        'dishwasher', 'cooking_range', 'pool_spa_pumps', 'interior_lighting',
+        'exterior_lighting', 'lighting', 'plug', 'pool_spa_heater'
+    ]
+    
+    for col in target_cols:
+        if col not in pivot_df.columns:
+            pivot_df[col] = 0
+            
+    # Reorder columns
+    pivot_df = pivot_df[['season', 'hour'] + target_cols]
+    
+    # Cast dtypes as per target schema
+    # Floats: hvac, water_heating, refrigerator, dishwasher
+    # Ints: clothes_washer, clothes_dryer, cooking_range, pool_spa_pumps, interior_lighting, exterior_lighting, lighting, plug, pool_spa_heater
+    float_cols = ['hvac', 'water_heating', 'refrigerator', 'dishwasher']
+    int_cols = [c for c in target_cols if c not in float_cols]
+    
+    for col in float_cols:
+        pivot_df[col] = pivot_df[col].astype(float)
+    for col in int_cols:
+        pivot_df[col] = pivot_df[col].astype(int)
+        
+    # Sort by season and hour? The sample isn't strictly sorted by season then hour, but it's good practice.
+    # The target sample order is mixed. We'll just return the dataframe.
+    # To match the exact row order of the target if necessary, we might need to sort.
+    # The target sample shows: Spring, Spring, Fall, Spring, Summer, Summer, Spring, Summer, Spring, Spring, Winter, Spring.
+    # It seems the target might be sorted by the original source order or just arbitrary.
+    # Since we grouped, the order is determined by groupby.
+    # Let's sort by season (Winter, Spring, Summer, Fall) and hour? 
+    # The distinct values in target season are Spring, Fall, Summer, Winter.
+    # Let's just return the grouped result.
+    
+    return pivot_df
+```

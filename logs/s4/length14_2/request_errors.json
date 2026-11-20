@@ -1,0 +1,19 @@
+[
+  {
+    "status": null,
+    "type": "APIConnectionError"
+  },
+  {
+    "status": null,
+    "type": "APIConnectionError"
+  },
+  {
+    "status": null,
+    "type": "APIConnectionError"
+  },
+  {
+    "status": null,
+    "type": "APIConnectionError",
+    "note": "Manually closed stale connection after shared network drop; no completion received."
+  }
+]

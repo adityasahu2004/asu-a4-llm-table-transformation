@@ -1,0 +1,23 @@
+**Operator plan:**
+1.  **Select and Rename Columns**: Keep the `Date` column and the 24 numeric columns representing hours (named "1" through "24").
+2.  **Transform Date**: Parse the `Date` string into a datetime object and format it as `MM/DD/YYYY` into a new column named `date`.
+3.  **Transform Hour Columns**: Rename the columns "1" through "24" to "Hour 1" through "Hour 24".
+4.  **Construct Output**: Create a new DataFrame with the `date` column followed by the 24 renamed hour columns. Reset the index to ensure a clean 0-based integer index.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date and format it
+    dt = pd.to_datetime(source['Date'])
+    
+    # Create the output dataframe
+    out = pd.DataFrame()
+    out['date'] = dt.dt.strftime('%m/%d/%Y')
+    
+    # Map the numeric hour columns to the target names
+    for h in range(1, 25):
+        out[f'Hour {h}'] = source[str(h)]
+        
+    return out.reset_index(drop=True)
+```

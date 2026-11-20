@@ -1,0 +1,19 @@
+Operator plan: Parse the date string `DT_STRATA` into a datetime object and format it as `MM/DD/YYYY` for the `Date` column. Rename the 24 hourly percentage columns (`PCT_HOURLY_0100` through `PCT_HOURLY_2400`) to `Hr 1` through `Hr 24`. Discard all other columns (`Strata_ID`, `Strata`, `DOW`, `PCT_HOURLY_2500`).
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date and format as MM/DD/YYYY
+    dates = pd.to_datetime(source['DT_STRATA'], format='%m/%d/%Y')
+    out = pd.DataFrame()
+    out['Date'] = dates.dt.strftime('%m/%d/%Y')
+    
+    # Rename hourly columns
+    for h in range(1, 25):
+        src_col = f'PCT_HOURLY_{h:02d}00'
+        tgt_col = f'Hr {h}'
+        out[tgt_col] = source[src_col]
+        
+    return out
+```

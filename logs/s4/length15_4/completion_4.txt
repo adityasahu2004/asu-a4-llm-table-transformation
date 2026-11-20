@@ -1,0 +1,156 @@
+Operator plan:
+1. Map `Time Period` to `season` using standard quarter definitions (Dec/Jan/Feb -> Winter, Mar/Apr/May -> Spring, Jun/Jul/Aug -> Summer, Sep/Oct/Nov -> Fall).
+2. Filter out rows where `Average Demand Per Home With This End Use [kW]` is null, as the target has no nulls in numeric columns and the sample implies aggregation of valid data.
+3. Group the data by `season` and `Hour Ending`.
+4. Aggregate `Average Demand Per Home With This End Use [kW]` by summing, categorized into the target columns:
+   - `hvac`: Likely corresponds to "Remaining Load" (often HVAC in these profiles) or specific HVAC end uses. Looking at the source distinct values, "Remaining Load" is the biggest category usually containing HVAC. However, standard end-use profiles often separate HVAC. Let's look at the target column names: `hvac`, `domestic_water_heating`, `major_appliances`, `lighting`, `miscellaneous_plug_loads`.
+   - Source `End Use` values: "Freezer", "Clothes Dryer - Electric", "Clothes Washer", "Primary TV and Peripherals", "Primary Desktop Computer", "Misc Metered", "Pool Pump", "Lighting", "Remaining Load".
+   - Mapping:
+     - `lighting`: "Lighting"
+     - `major_appliances`: "Clothes Dryer - Electric", "Clothes Washer", "Freezer" (Refrigerator/Freezer is often major appliance)
+     - `miscellaneous_plug_loads`: "Primary TV and Peripherals", "Primary Desktop Computer", "Misc Metered", "Pool Pump"
+     - `domestic_water_heating`: Not explicitly listed in the small sample, but might be part of "Remaining Load" or missing from sample. However, "Remaining Load" is usually the residual.
+     - `hvac`: "Remaining Load" is the most likely candidate for HVAC + other residuals, or perhaps HVAC is embedded. Given the target has `hvac` as a large value and `Remaining Load` is typically the largest component including HVAC, I will map "Remaining Load" to `hvac`.
+     - Wait, let's look at the target sample values. `hvac` is ~3000-12000. `major_appliances` is ~1000-1500. `domestic_water_heating` is ~600-2000. `misc` is ~100-600.
+     - If "Remaining Load" maps to `hvac`, what maps to `domestic_water_heating`? It's not in the sample `End Use` list. It might be in the full dataset. I should assume standard mappings if present, or default to 0 if not present.
+     - Let's define the mapping logic robustly:
+       - `lighting`: Sum of "Lighting"
+       - `major_appliances`: Sum of "Freezer", "Clothes Dryer - Electric", "Clothes Washer"
+       - `miscellaneous_plug_loads`: Sum of "Primary TV and Peripherals", "Primary Desktop Computer", "Misc Metered", "Pool Pump"
+       - `hvac`: Sum of "Remaining Load" (assuming it captures HVAC or is the primary residual load labeled as such in this specific schema context, or there are explicit HVAC end uses not shown in the tiny sample but present in the full data. If explicit HVAC end uses exist, they should be summed. If not, Remaining Load is the best proxy for the large residual).
+       - `domestic_water_heating`: Sum of any end use containing "Water Heater" or similar. If none found in the group, it will be 0. But the target shows non-zero values. This implies there are End Uses like "Water Heater" in the full dataset. I will sum any `End Use` that matches common water heater patterns.
+5. The target `hour` is `Hour Ending`.
+6. The target `lighting` and `total` are int64 and 0 in the sample? No, `lighting` is 0 in the sample data provided in the prompt's target sample? Wait, the target sample shows `lighting` as 0 and `total` as 0. This is suspicious.
+   - Let's re-read the target sample.
+   - `lighting`: 0
+   - `total`: 0
+   - But `hvac`, `domestic_water_heating`, `major_appliances`, `miscellaneous_plug_loads` have values.
+   - Why would lighting be 0? Maybe the source "Lighting" end use is not being summed? Or maybe the mapping is different.
+   - Or perhaps the target sample provided is just a subset where lighting happened to be 0? Unlikely for all rows.
+   - Let's look at the source sample: It has "Lighting" entries.
+   - If I sum "Lighting", I should get non-zero values.
+   - Maybe `lighting` in the target refers to something else? Or maybe the target sample data is illustrative and not fully consistent with the source sample's aggregation?
+   - However, the instruction says "Infer a general transformation".
+   - If the target column `lighting` is 0 in the sample, but the source has lighting data, there might be a filter or a specific mapping.
+   - Alternative theory: The target `lighting` column is actually `int64` and distinct values is `[0]`. This strongly suggests it is always 0.
+   - Why? Maybe the "Lighting" end use in the source is not considered "lighting" in the target schema, or it's dropped?
+   - Similarly, `total` is 0.
+   - This suggests that for this specific transformation, `lighting` and `total` are hardcoded to 0, or the source columns mapping to them are empty/filtered out.
+   - Given the distinct values in the target schema are `[0]`, I will hardcode `lighting` and `total` to 0.
+   - For the others, I will sum the relevant end uses.
+
+Refined Mapping:
+- `hvac`: Sum of `Average Demand...` where `End Use` is "Remaining Load" (and potentially explicit HVAC uses if they exist).
+- `domestic_water_heating`: Sum of `Average Demand...` where `End Use` contains "Water Heater".
+- `major_appliances`: Sum of `Average Demand...` where `End Use` in ["Freezer", "Clothes Dryer - Electric", "Clothes Washer"].
+- `miscellaneous_plug_loads`: Sum of `Average Demand...` where `End Use` in ["Primary TV and Peripherals", "Primary Desktop Computer", "Misc Metered", "Pool Pump"].
+- `lighting`: 0
+- `total`: 0
+
+Note: The source `Hour Ending` is 1-24. The target `hour` is 1-24.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Map Time Period to Season
+    def get_season(month):
+        month = month.strip()
+        if month in ['December', 'January', 'February']:
+            return 'Winter'
+        elif month in ['March', 'April', 'May']:
+            return 'Spring'
+        elif month in ['June', 'July', 'August']:
+            return 'Summer'
+        elif month in ['September', 'October', 'November']:
+            return 'Fall'
+        return None
+
+    source = source.copy()
+    source['season'] = source['Time Period'].apply(get_season)
+    
+    # Drop rows with null demand
+    source = source.dropna(subset=['Average Demand Per Home With This End Use [kW]'])
+    
+    # Define end use mappings
+    # We will create columns for each target category and sum them up
+    
+    # Helper to check if end use belongs to category
+    def is_hvac(use):
+        # Remaining Load is the primary candidate for HVAC/Residual
+        if use == 'Remaining Load':
+            return True
+        # Check for explicit HVAC uses if they exist
+        if 'HVAC' in use.upper() or 'AC' in use.upper() or 'Heating' in use.upper():
+            return True
+        return False
+
+    def is_water_heating(use):
+        return 'Water Heater' in use or 'Water Heating' in use
+
+    def is_major_appliance(use):
+        major_uses = [
+            'Freezer', 
+            'Clothes Dryer - Electric', 
+            'Clothes Washer',
+            'Refrigerator',
+            'Clothes Dryer - Gas',
+            'Clothes Dryer'
+        ]
+        return use in major_uses
+
+    def is_misc_plug(use):
+        misc_uses = [
+            'Primary TV and Peripherals',
+            'Primary Desktop Computer',
+            'Misc Metered',
+            'Pool Pump',
+            'TV',
+            'Computer',
+            'Miscellaneous'
+        ]
+        return use in misc_uses
+
+    def is_lighting(use):
+        return 'Lighting' in use
+
+    # Assign values to temporary columns
+    source['hvac_val'] = source['Average Demand Per Home With This End Use [kW]'].where(source['End Use'].apply(is_hvac), 0.0)
+    source['dwh_val'] = source['Average Demand Per Home With This End Use [kW]'].where(source['End Use'].apply(is_water_heating), 0.0)
+    source['major_val'] = source['Average Demand Per Home With This End Use [kW]'].where(source['End Use'].apply(is_major_appliance), 0.0)
+    source['misc_val'] = source['Average Demand Per Home With This End Use [kW]'].where(source['End Use'].apply(is_misc_plug), 0.0)
+    source['lighting_val'] = source['Average Demand Per Home With This End Use [kW]'].where(source['End Use'].apply(is_lighting), 0.0)
+
+    # Group by season and Hour Ending
+    grouped = source.groupby(['season', 'Hour Ending']).agg(
+        hvac=('hvac_val', 'sum'),
+        domestic_water_heating=('dwh_val', 'sum'),
+        major_appliances=('major_val', 'sum'),
+        miscellaneous_plug_loads=('misc_val', 'sum'),
+        lighting_sum=('lighting_val', 'sum')
+    ).reset_index()
+
+    # Create the final dataframe
+    out = pd.DataFrame()
+    out['season'] = grouped['season']
+    out['hour'] = grouped['Hour Ending']
+    out['hvac'] = grouped['hvac']
+    out['domestic_water_heating'] = grouped['domestic_water_heating']
+    out['major_appliances'] = grouped['major_appliances']
+    out['miscellaneous_plug_loads'] = grouped['miscellaneous_plug_loads']
+    
+    # Target schema shows lighting and total as 0
+    out['lighting'] = 0
+    out['total'] = 0
+    
+    # Ensure dtypes match target
+    out['hour'] = out['hour'].astype('int64')
+    out['lighting'] = out['lighting'].astype('int64')
+    out['total'] = out['total'].astype('int64')
+    
+    # The target sample has nulls in season. My grouping preserves nulls in season key.
+    # The target columns for floats are float64.
+    
+    return out
+```

@@ -1,0 +1,88 @@
+**Operator plan:**
+1.  **Parse Date:** Parse the `CST` column (format `%a %m/%d/%Y`) into datetime objects.
+2.  **Format Date:** Create the `date` column by formatting the parsed datetime as `%m/%d/%Y`.
+3.  **Map Hours:** Create 24 new columns named `1:00 AM` through `12:00 PM` (mapped from source hours 1-24).
+    *   Source `1:00` to `11:00` map to `1:00 AM` to `11:00 AM`.
+    *   Source `12:00` maps to `12:00 AM` (based on target schema ordering and standard 12-hour clock logic where 12:00:00 is midnight/AM, though typically noon is 12:00 PM. However, looking at the target sample:
+        *   Target Col 13 is `12:00 AM`. Target Col 25 is `12:00 PM`.
+        *   Source Col 13 is `12:00`. Source Col 24 is `24:00:00`.
+        *   Usually `12:00` in 24h format is noon (12 PM). `24:00:00` is midnight (00:00 next day or 12 AM previous day).
+        *   Let's check the target column order carefully.
+        *   Target cols: `1:00 AM`...`11:00 AM`, `12:00 AM`, `1:00 PM`...`11:00 PM`, `12:00 PM`.
+        *   This order is non-chronological for 12:00. It lists 1-11 AM, then 12 AM, then 1-11 PM, then 12 PM.
+        *   Source cols: `1:00`...`11:00`, `12:00`, `13:00`...`23:00`, `24:00:00`.
+        *   Mapping hypothesis:
+            *   Source 1-11 -> Target 1:00 AM - 11:00 AM.
+            *   Source 12 -> Target 12:00 AM? Or 12:00 PM?
+            *   Source 13-23 -> Target 1:00 PM - 11:00 PM.
+            *   Source 24 -> Target 12:00 PM? Or 12:00 AM?
+        *   Standard convention: 12:00 is Noon (PM). 00:00/24:00 is Midnight (AM).
+        *   If Source 12 is Noon, it should be `12:00 PM`.
+        *   If Source 24 is Midnight, it should be `12:00 AM`.
+        *   Let's look at the target sample data values if possible, or rely on standard naming.
+        *   Target Sample Row 1:
+            *   `12:00 AM` value: 3.68
+            *   `12:00 PM` value: 3.18
+            *   Source Row 1 (Sat 12/01/2012):
+                *   `12:00` value: 3.5242
+                *   `24:00:00` value: 2.5122
+            *   This doesn't match directly because the target sample starts with `04/01/2009` while source sample starts with `12/01/2012`. We cannot compare values directly.
+        *   However, usually `12:00` in a 1-24 hour series represents Noon (12 PM). And `24:00:00` represents the end of the day (Midnight/12 AM).
+        *   Let's assume standard mapping:
+            *   1-11 -> AM
+            *   12 -> PM (Noon)
+            *   13-23 -> PM (1-11)
+            *   24 -> AM (Midnight)
+        *   BUT, the target column order is: `1:00 AM`...`11:00 AM`, `12:00 AM`, `1:00 PM`...`11:00 PM`, `12:00 PM`.
+        *   If we map Source 12 (`12:00`) to `12:00 PM` and Source 24 (`24:00:00`) to `12:00 AM`:
+            *   We need to place Source 24 data into the `12:00 AM` column (which is the 13th column in target).
+            *   We need to place Source 12 data into the `12:00 PM` column (which is the 25th column in target).
+            *   We need to place Source 13-23 data into `1:00 PM`...`11:00 PM`.
+        *   Let's verify this interpretation. In many datasets, 12:00 is noon. 24:00 is midnight.
+        *   Target `12:00 AM` is between 11 AM and 1 PM. This is chronologically odd for a standard list, but matches the slot for "Midnight" if we consider 12 AM as the start of the next day or end of current.
+        *   Target `12:00 PM` is at the very end.
+        *   If Source 12 is Noon (12 PM), it goes to the last column.
+        *   If Source 24 is Midnight (12 AM), it goes to the 13th column.
+        *   Let's try this mapping.
+
+4.  **Construct Output:** Build the DataFrame with columns in the exact order specified by the target schema.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the CST column to datetime
+    dt = pd.to_datetime(source['CST'], format='%a %m/%d/%Y')
+    
+    # Create the date column formatted as MM/DD/YYYY
+    out = pd.DataFrame()
+    out['date'] = dt.dt.strftime('%m/%d/%Y')
+    
+    # Map hours 1-11 to AM
+    for h in range(1, 12):
+        out[f'{h}:00 AM'] = source[f'{h}:00']
+        
+    # Map hour 24 (24:00:00) to 12:00 AM (Midnight)
+    # Note: In 12-hour clock, 12:00:00 AM is midnight. 
+    # The target schema places '12:00 AM' after '11:00 AM' and before '1:00 PM'.
+    out['12:00 AM'] = source['24:00:00']
+    
+    # Map hours 13-23 to PM (1:00 PM to 11:00 PM)
+    for h in range(13, 24):
+        pm_hour = h - 12
+        out[f'{pm_hour}:00 PM'] = source[f'{h}:00']
+        
+    # Map hour 12 (12:00) to 12:00 PM (Noon)
+    # The target schema places '12:00 PM' at the very end.
+    out['12:00 PM'] = source['12:00']
+    
+    # Ensure column order matches target specification exactly
+    target_cols = [
+        'date', '1:00 AM', '2:00 AM', '3:00 AM', '4:00 AM', '5:00 AM', '6:00 AM', '7:00 AM', '8:00 AM', '9:00 AM', '10:00 AM', '11:00 AM',
+        '12:00 AM', 
+        '1:00 PM', '2:00 PM', '3:00 PM', '4:00 PM', '5:00 PM', '6:00 PM', '7:00 PM', '8:00 PM', '9:00 PM', '10:00 PM', '11:00 PM',
+        '12:00 PM'
+    ]
+    
+    return out[target_cols].reset_index(drop=True)
+```

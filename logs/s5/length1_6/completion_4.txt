@@ -1,0 +1,25 @@
+**Operator Plan:**
+1.  **Parse Date:** Convert the `Date` column (format `m/d/yyyy`) to a datetime object.
+2.  **Format `cst`:** Format the parsed datetime into the target string format `%a %m/%d/%Y` (e.g., "Wed 01/01/2014") and assign it to the new column `cst`.
+3.  **Map Hour Columns:** Iterate through the 24 source hour columns (`Hr 1` to `Hr 24`). Rename them to the target format (`1:00` to `24:00`) and copy their float values.
+4.  **Construct Output:** Create a new DataFrame containing only the `cst` column and the 24 renamed hour columns, preserving the original row order.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column to datetime
+    dt = pd.to_datetime(source['Date'], format='%m/%d/%Y')
+    
+    # Create the output dataframe with the formatted date column
+    out = pd.DataFrame()
+    out['cst'] = dt.dt.strftime('%a %m/%d/%Y')
+    
+    # Map the 24 hourly columns from source to target names
+    for h in range(1, 25):
+        src_col = f'Hr {h}'
+        tgt_col = f'{h}:00'
+        out[tgt_col] = source[src_col].astype('float64')
+        
+    return out.reset_index(drop=True)
+```

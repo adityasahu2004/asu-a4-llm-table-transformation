@@ -1,0 +1,218 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `Date` column from string format (`M/D/YYYY`) to pandas datetime objects.
+2.  **Extract Features**:
+    *   Extract the month name (e.g., "January") from the parsed date.
+    *   Determine the day type ("weekday" or "weekend") based on the day of the week. Monday-Friday are weekdays; Saturday-Sunday are weekends.
+3.  **Reshape Data (Melt)**: The source data has 24 columns representing hours (`1` to `24`). We need to transform this wide format into a long format where each row represents a specific hour for a specific date.
+    *   Melt the DataFrame so that columns `1` through `24` become a single column `hour` (with values 1-24) and their values become a single column `value`.
+    *   Keep `Date`, `Class` (though `Class` seems constant, we might drop it later if not needed, but the target doesn't have it), and the extracted `month` and `daytype`.
+4.  **Pivot/Aggregate**: The target schema shows one row per `month` and `daytype` combination, with columns `hr1` through `hr24`. This implies an aggregation.
+    *   Looking at the source, there are multiple dates per month/daytype combination.
+    *   Looking at the target values, they appear to be averages or some aggregate of the source values for that specific hour, month, and daytype. Let's verify with a sample.
+        *   Source: July 3, 2013 (Wednesday, weekday). Hour 1 value: 0.56.
+        *   Source: July 19, 2013 (Friday, weekday). Hour 1 value: 0.81.
+        *   Target: July, weekday, hr1: 0.66.
+        *   (0.56 + 0.81) / 2 = 0.685. Close to 0.66, but not exact. There are more July weekdays in the full dataset (182 rows total). The sample only shows 12 rows. The target has 183 rows.
+        *   Let's check the distinct counts. Target `hr1` has 57 distinct values. Source `1` has 45 distinct values.
+        *   The target has 7 months * 2 daytypes = 14 combinations? No, target has 183 rows.
+        *   Wait, the target sample shows multiple rows for the same month/daytype.
+            *   Row 1: January, weekday
+            *   Row 2: January, weekday
+            *   Row 3: February, weekend
+            *   Row 4: February, weekday
+        *   This suggests the target is **not** aggregated to a single row per month/daytype.
+        *   Let's re-read the target schema.
+            *   Target rows: 183.
+            *   Source rows: 182.
+            *   Target columns: `month`, `daytype`, `hr1`...`hr24`.
+            *   Source columns: `Date`, `Class`, `1`...`24`.
+        *   If the target has 183 rows and source has 182, and the target still has `hr1`...`hr24`, it looks like the transformation is simply **renaming and reformatting** the rows, possibly adding one row or handling a specific case.
+        *   Let's look at the target sample data again.
+            *   Target Row 1: `January`, `weekday`, `0.89` (hr1)...
+            *   Target Row 2: `January`, `weekday`, `0.68` (hr1)...
+            *   These look like individual daily profiles, but labeled by month and daytype instead of Date.
+            *   If it's just a rename, why 183 vs 182?
+            *   Maybe the source has a header row or index issue? Or maybe one date is split?
+            *   Let's look at the source dates: `7/3/2013` to `12/31/2013`. That's about 6 months.
+            *   The target months are `January` to `July`. This is a different year or dataset?
+            *   Wait, the prompt says "Source row count describes a training sample only, not the evaluation input." and "Infer a general transformation".
+            *   The source sample provided in the JSON is just a snippet. The *schema* says source has 182 rows. The target schema says 183 rows.
+            *   The target distinct values for `month` are Jan-Jul. The source sample dates are Jul-Dec 2013.
+            *   This implies the transformation logic must be general:
+                1.  Parse Date.
+                2.  Extract Month Name.
+                3.  Extract Day Type.
+                4.  Rename columns `1`-`24` to `hr1`-`hr24`.
+                5.  Drop `Date` and `Class`.
+                6.  Sort? The target sample is sorted by Month then Daytype?
+                    *   Jan weekday, Jan weekday, Feb weekend, Feb weekday...
+                    *   It seems sorted by Month (alphabetical or chronological?) and then Daytype.
+            *   Why 183 vs 182?
+                *   Perhaps the source has a duplicate or the target includes a summary row?
+                *   Or maybe the source `Date` column has a non-date value in the real evaluation data that gets handled?
+                *   Or maybe the "182" vs "183" is a red herring or due to an index reset?
+                *   Let's look at the distinct values in target `hr1`: 57. Source `1`: 45.
+                *   If it's a 1-to-1 mapping, the distinct values should be similar (unless aggregation happens).
+                *   If it's 1-to-1, why do distinct values change?
+                *   Maybe the target is **aggregated**?
+                *   If aggregated, how many rows?
+                    *   Months: 7 (Jan-Jul).
+                    *   Daytypes: 2.
+                    *   Total combinations: 14.
+                    *   Target rows: 183. This is way more than 14.
+                *   So it's not aggregated to month/daytype level.
+                *   Is it possible the target is **daily** data, but the `Date` column is replaced by `month` and `daytype`?
+                *   If so, 182 source rows -> 182 target rows. Where does the 183rd come from?
+                *   Maybe the source has a header row that was parsed as data? No, schema says 182 rows.
+                *   Maybe the target includes a "Total" or "Average" row?
+                *   Let's look at the target sample again.
+                    *   It lists specific values.
+                    *   If I assume 1-to-1 mapping:
+                        *   Source Row 1: `7/3/2013` -> July, Wednesday (weekday).
+                        *   Target Row 1: `January`, `weekday`.
+                        *   This doesn't match. The source sample is Jul-Dec. The target sample is Jan-Jul.
+                        *   This confirms the sample data in the JSON is just illustrative of the *schema*, not the actual content mapping. The actual evaluation data will have different dates.
+                        *   The transformation must be:
+                            1.  Parse `Date`.
+                            2.  Create `month` column from `Date`.
+                            3.  Create `daytype` column from `Date`.
+                            4.  Rename `1`-`24` to `hr1`-`hr24`.
+                            5.  Drop `Date` and `Class`.
+                            6.  Sort by `month` (chronologically? or alphabetically?) and `daytype`.
+                            7.  Reset index.
+                *   What about the row count difference (182 vs 183)?
+                    *   In many such problems, if the row counts differ by 1, it might be due to an empty row, a header, or a specific aggregation row added.
+                    *   However, without seeing the target data for the 183rd row, it's hard to guess.
+                    *   Let's look at the distinct values of `month` in target: 7.
+                    *   If the source covers a full year, there are 12 months.
+                    *   If the source covers 6 months, there are 6 months.
+                    *   The target has 7 months.
+                    *   This suggests the evaluation data might cover 7 months.
+                    *   If it's 1-to-1, the row count should be identical.
+                    *   Is it possible `Class` is used to split rows? No, `Class` is constant "RESIDENT".
+                    *   Is it possible the target is **hourly** data?
+                        *   If melted, 182 * 24 = 4368 rows. Target has 183. So no.
+                    *   Is it possible the target is **daily** data, but sorted?
+                        *   If sorted, row count is same.
+                    *   Let's reconsider the "183" vs "182".
+                        *   Maybe the source has a NaN date that is dropped? Or added?
+                        *   Maybe the target includes a row for "Unknown" or "Total"?
+                        *   Let's look at the target `month` distinct values: Jan, Feb, Mar, Apr, May, Jun, Jul.
+                        *   If the source data is from Jan to Jul, that's 7 months.
+                        *   Days in Jan-Jul 2013 (non-leap): 31+28+31+30+31+30+31 = 212 days.
+                        *   Source has 182 rows. This is not a full daily dataset. It's likely weekly or bi-weekly.
+                        *   182 / 7 months = 26 rows/month. ~4-5 rows per month.
+                        *   If the target has 183 rows, it's extremely likely to be a 1-to-1 mapping with one extra row.
+                        *   What extra row?
+                        *   Maybe the source has a header row that is not counted in the schema but is in the data? No, schema says 182 rows.
+                        *   Maybe the target has a summary row at the end?
+                        *   Or maybe the source has a duplicate date that is merged?
+                        *   Let's assume the standard transformation: Parse, Extract, Rename, Drop, Sort.
+                        *   If the row count differs, I need to handle it.
+                        *   However, usually in these "infer transformation" tasks, if the row count is off by 1, it might be an index artifact or a specific edge case.
+                        *   Let's look at the target sample data values again.
+                            *   Target `hr1` values: 0.89, 0.68, 0.85, 0.84...
+                            *   Source `1` values: 0.56, 0.81, 0.57...
+                            *   They are different. This is expected because the samples are from different datasets (Source: Jul-Dec, Target: Jan-Jul).
+                            *   The structure is the key.
+                            *   Structure:
+                                *   Source: `Date`, `Class`, `1`...`24`
+                                *   Target: `month`, `daytype`, `hr1`...`hr24`
+                            *   Transformation:
+                                1.  `df['month'] = pd.to_datetime(df['Date']).dt.strftime('%B')`
+                                2.  `df['daytype'] = pd.to_datetime(df['Date']).dt.dayofweek.apply(lambda x: 'weekday' if x < 5 else 'weekend')`
+                                3.  Rename columns `1`-`24` to `hr1`-`hr24`.
+                                4.  Drop `Date`, `Class`.
+                                5.  Select columns `month`, `daytype`, `hr1`...`hr24`.
+                                6.  Sort by `month` (using a month order) and `daytype`.
+                                7.  Reset index.
+
+                    *   What about the 183rd row?
+                        *   If I simply perform the above, I get 182 rows.
+                        *   If the evaluation expects 183, I might be missing something.
+                        *   Could `Class` have another value? Schema says distinct: 1.
+                        *   Could there be a NaN date? Schema says nulls: 0.
+                        *   Maybe the target includes a row for the *next* day or a summary?
+                        *   Without more info, the most robust assumption is that the row count difference is due to the specific sample data provided in the JSON (which might be truncated or have an extra header/footer in the raw file not reflected in the schema count) or an index reset issue.
+                        *   However, looking at the target sample, it has 12 rows. The source sample has 12 rows.
+                        *   The schema says Source: 182, Target: 183.
+                        *   This is a strong signal.
+                        *   Is it possible that the `Date` column contains a value that parses to NaT, and that row is kept with default values?
+                        *   Or is it possible that the transformation involves a `groupby` and `sum`/`mean`?
+                            *   If grouped by `month` and `daytype`, we'd have ~14-20 rows. Not 183.
+                        *   Is it possible the data is **unpivoted** and then **pivoted** back?
+                        *   Let's look at the column names `hr1`...`hr24`.
+                        *   If the source had `1`...`24`, and we rename them, it's 1-to-1.
+                        *   What if the source has a `Time` column? No.
+                        *   What if the `Class` column is used to create multiple rows? No, it's constant.
+                        *   Let's guess that the 183rd row is an artifact of the evaluation setup (e.g., an empty row appended) or that the source schema count is slightly off.
+                        *   I will implement the 1-to-1 transformation. If the evaluation fails due to row count, it's likely a specific edge case not inferable from the schema alone (like "add a total row"). But "add a total row" is a common pattern.
+                        *   However, the target sample does *not* show a total row. It shows specific daily profiles.
+                        *   I will stick to the 1-to-1 mapping.
+
+5.  **Sorting**:
+    *   The target sample is sorted by `month` (January, February...) and then `daytype` (weekday, weekend).
+    *   Note: "January" comes before "February".
+    *   "weekday" comes before "weekend" alphabetically? No, 'w' vs 'w'. 'weekday' < 'weekend'.
+    *   So sorting by `month` (chronologically) and `daytype` (alphabetically) seems correct.
+    *   To sort months chronologically, we can map month names to numbers or use `pd.to_datetime` for sorting.
+
+6.  **Final Code Structure**:
+    *   Parse `Date`.
+    *   Create `month` and `daytype`.
+    *   Rename `1`-`24` to `hr1`-`hr24`.
+    *   Drop `Date`, `Class`.
+    *   Sort by `month` (using a custom order or datetime) and `daytype`.
+    *   Reset index.
+    *   Return DataFrame.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Create a copy to avoid modifying the original
+    df = source.copy()
+    
+    # Parse the Date column
+    df['Date'] = pd.to_datetime(df['Date'], format='%m/%d/%Y')
+    
+    # Extract month name
+    df['month'] = df['Date'].dt.strftime('%B')
+    
+    # Extract day type: weekday (Mon-Fri) or weekend (Sat-Sun)
+    # dayofweek: 0=Mon, ..., 4=Fri, 5=Sat, 6=Sun
+    df['daytype'] = df['Date'].dt.dayofweek.apply(lambda x: 'weekday' if x < 5 else 'weekend')
+    
+    # Rename columns 1-24 to hr1-hr24
+    rename_map = {str(i): f'hr{i}' for i in range(1, 25)}
+    df.rename(columns=rename_map, inplace=True)
+    
+    # Drop the original Date and Class columns
+    df.drop(columns=['Date', 'Class'], inplace=True)
+    
+    # Define the desired column order
+    hour_cols = [f'hr{i}' for i in range(1, 25)]
+    final_cols = ['month', 'daytype'] + hour_cols
+    
+    # Select and reorder columns
+    df = df[final_cols]
+    
+    # Sort by month (chronologically) and daytype
+    # To sort months chronologically, we can map them to numbers or use a custom sort key
+    month_order = {
+        'January': 1, 'February': 2, 'March': 3, 'April': 4,
+        'May': 5, 'June': 6, 'July': 7, 'August': 8, 'September': 9,
+        'October': 10, 'November': 11, 'December': 12
+    }
+    
+    df['month_num'] = df['month'].map(month_order)
+    df.sort_values(by=['month_num', 'daytype'], inplace=True)
+    df.drop(columns=['month_num'], inplace=True)
+    
+    # Reset index
+    df.reset_index(drop=True, inplace=True)
+    
+    return df
+```

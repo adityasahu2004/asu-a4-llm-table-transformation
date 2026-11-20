@@ -1,0 +1,72 @@
+Operator plan:
+1. Parse the `date` string into a datetime object.
+2. Extract the date part (`MM/DD/YYYY`) for the target `date` column.
+3. Extract the hour part (0-23) from the datetime.
+4. Map the extracted hour (0-23) to the target column names "Hour 1" through "Hour 24" (Hour = h + 1).
+5. Pivot the data so that each row represents a unique date, and columns represent the hours.
+6. The value in each cell is the `cerc_logger_1` measurement for that specific hour on that date.
+7. Since the source has one row per observation (which appears to be roughly every 10 minutes or so, but we need hourly buckets), and the target has one row per date with 24 columns, we need to aggregate. Looking at the source sample, there are multiple entries per day potentially? No, the source `date` column has 74,848 distinct values and 74,848 rows. This implies one row per timestamp. The target has 521 rows (days). This implies we are aggregating multiple timestamps per day into hourly buckets.
+8. However, looking closely at the target sample:
+   - Date "05/08/2019" has values for all 24 hours.
+   - Date "07/28/2019" has values for Hour 1-4 and Hour 24, with NaNs in between.
+   - The source data seems to be sparse or irregular.
+   - We need to pivot on the date and the hour.
+   - If there are multiple records for the same date and same hour, we need an aggregation function. The problem doesn't specify, but usually `mean` or `first` is used. Given the precision (e.g., 24.25), it looks like raw values or simple averages. Let's assume `mean` if duplicates exist, or just taking the value if unique.
+   - Actually, let's look at the distinct count of source dates: 74,848. Rows: 74,848. So every row is a unique timestamp.
+   - The target has 521 days.
+   - We group by Date and Hour.
+   - We pivot/unstack to get columns Hour 1..24.
+   - We fill NaNs with NaN (default).
+
+Steps:
+1. Parse `date` column to datetime.
+2. Create `date_str` column formatted as `%m/%d/%Y`.
+3. Create `hour_num` column from the hour of the datetime.
+4. Map `hour_num` to `Hour {h+1}` strings.
+5. Group by `date_str` and `hour_label`, aggregate `cerc_logger_1` (using mean to handle potential duplicates, though likely unique).
+6. Unstack/pivot to get `hour_label` as columns.
+7. Rename columns to match target exactly.
+8. Reset index and ensure column order.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    df = source.copy()
+    df['datetime'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract date string for grouping
+    df['date_str'] = df['datetime'].dt.strftime('%m/%d/%Y')
+    
+    # Extract hour (0-23) and map to "Hour 1" - "Hour 24"
+    df['hour_label'] = df['datetime'].dt.hour.apply(lambda h: f'Hour {h + 1}')
+    
+    # Aggregate: Since each timestamp is unique, we might just have one value per hour per day.
+    # If there are multiple, mean is a safe default for sensor data.
+    pivot_table = df.groupby(['date_str', 'hour_label'])['cerc_logger_1'].mean()
+    
+    # Unstack to get hours as columns
+    result = pivot_table.unstack(level='hour_label')
+    
+    # Rename columns to ensure they are strings and in correct format
+    result.columns = [f'Hour {i}' for i in range(1, 25)]
+    
+    # Reset index to make date_str a column
+    result = result.reset_index()
+    
+    # Rename date_str to date
+    result = result.rename(columns={'date_str': 'date'})
+    
+    # Ensure column order matches target: date, Hour 1, ..., Hour 24
+    cols = ['date'] + [f'Hour {i}' for i in range(1, 25)]
+    result = result[cols]
+    
+    # Sort by date? The target sample isn't strictly sorted chronologically in the snippet provided 
+    # (05/08/2019, 07/13/2019, 07/09/2018...), but usually datasets are sorted. 
+    # The prompt says "Infer a general transformation". The target sample order is arbitrary.
+    # We will leave it in the order produced by groupby (sorted by date_str).
+    
+    return result
+```

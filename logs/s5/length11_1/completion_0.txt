@@ -1,0 +1,85 @@
+**Operator Plan:**
+
+1.  **Parse Date/Time**: Parse the `time` column into a datetime object.
+2.  **Derive `month`**: Extract the month from the parsed datetime.
+3.  **Derive `hour`**: Extract the hour from the parsed datetime.
+4.  **Compute `hvac`**: Sum the following columns:
+    *   `electricity_heating_kwh`
+    *   `electricity_central_system_heating_kwh`
+    *   `electricity_cooling_kwh`
+    *   `electricity_central_system_cooling_kwh`
+    *   `electricity_fans_heating_kwh`
+    *   `electricity_fans_cooling_kwh`
+    *   `electricity_pumps_heating_kwh`
+    *   `electricity_central_system_pumps_heating_kwh`
+    *   `electricity_pumps_cooling_kwh`
+    *   `electricity_central_system_pumps_cooling_kwh`
+5.  **Compute `water_heating`**: Copy `electricity_water_systems_kwh`.
+6.  **Compute `refrigerator`**: Copy `electricity_refrigerator_kwh`.
+7.  **Compute `clothes_washer`**: Copy `electricity_clothes_washer_kwh`.
+8.  **Compute `clothes_dryer`**: Copy `electricity_clothes_dryer_kwh`.
+9.  **Compute `dishwasher`**: Copy `electricity_dishwasher_kwh`.
+10. **Compute `cooking_range`**: Copy `electricity_cooking_range_kwh`.
+11. **Compute `pool_spa_pumps`**: Sum `electricity_pool_pump_kwh` and `electricity_hot_tub_pump_kwh`.
+12. **Compute `interior_lighting`**: Copy `electricity_interior_lighting_kwh`.
+13. **Compute `exterior_lighting`**: Copy `electricity_exterior_lighting_kwh`.
+14. **Compute `lighting`**: Sum `interior_lighting` and `exterior_lighting`.
+15. **Compute `plug`**: Copy `electricity_plug_loads_kwh`.
+16. **Compute `pool_spa_heater`**: Sum `electricity_pool_heater_kwh` and `electricity_hot_tub_heater_kwh`.
+17. **Return**: Construct the final DataFrame with the specified column order.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse time column to extract month and hour
+    dt = pd.to_datetime(source['time'])
+    
+    # Create output dataframe
+    out = pd.DataFrame(index=source.index)
+    
+    # Derive month and hour
+    out['month'] = dt.dt.month.astype('int64')
+    out['hour'] = dt.dt.hour.astype('int64')
+    
+    # Compute hvac: sum of all heating, cooling, fans, and pumps components
+    hvac_cols = [
+        'electricity_heating_kwh',
+        'electricity_central_system_heating_kwh',
+        'electricity_cooling_kwh',
+        'electricity_central_system_cooling_kwh',
+        'electricity_fans_heating_kwh',
+        'electricity_fans_cooling_kwh',
+        'electricity_pumps_heating_kwh',
+        'electricity_central_system_pumps_heating_kwh',
+        'electricity_pumps_cooling_kwh',
+        'electricity_central_system_pumps_cooling_kwh'
+    ]
+    out['hvac'] = source[hvac_cols].sum(axis=1)
+    
+    # Direct mappings
+    out['water_heating'] = source['electricity_water_systems_kwh']
+    out['refrigerator'] = source['electricity_refrigerator_kwh']
+    out['clothes_washer'] = source['electricity_clothes_washer_kwh']
+    out['clothes_dryer'] = source['electricity_clothes_dryer_kwh']
+    out['dishwasher'] = source['electricity_dishwasher_kwh']
+    out['cooking_range'] = source['electricity_cooking_range_kwh']
+    out['plug'] = source['electricity_plug_loads_kwh']
+    
+    # Derived sums
+    out['pool_spa_pumps'] = source['electricity_pool_pump_kwh'] + source['electricity_hot_tub_pump_kwh']
+    out['interior_lighting'] = source['electricity_interior_lighting_kwh']
+    out['exterior_lighting'] = source['electricity_exterior_lighting_kwh']
+    out['lighting'] = out['interior_lighting'] + out['exterior_lighting']
+    out['pool_spa_heater'] = source['electricity_pool_heater_kwh'] + source['electricity_hot_tub_heater_kwh']
+    
+    # Select and order columns
+    columns = [
+        'month', 'hour', 'hvac', 'water_heating', 'refrigerator', 'clothes_washer', 
+        'clothes_dryer', 'dishwasher', 'cooking_range', 'pool_spa_pumps', 
+        'interior_lighting', 'exterior_lighting', 'lighting', 'plug', 'pool_spa_heater'
+    ]
+    
+    return out[columns].reset_index(drop=True)
+```

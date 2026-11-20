@@ -1,0 +1,293 @@
+### Operator Plan
+
+1.  **Filter Data**: Select rows where `Day Type` is "All". The target output contains aggregated values that likely represent the total or average across all day types, and the "All" category in the source typically represents the aggregate or the specific breakdown for the whole day. Given the target has 96 rows (4 seasons * 24 hours), and the source has "All" day type entries, we filter for `Day Type == "All"`.
+2.  **Map Months to Seasons**: Create a mapping from the `Time Period` (Month) to `season`.
+    *   Winter: December, January, February
+    *   Spring: March, April, May
+    *   Summer: June, July, August
+    *   Fall: September, October, November
+3.  **Map End Uses to Target Columns**: Identify which source `End Use` strings correspond to the target columns.
+    *   `hvac`: Likely "Remaining Load" or specific HVAC end uses. Looking at the source distinct values for `End Use Category`, "Remaining Load" is a category. However, standard energy disaggregation often puts HVAC in "Remaining Load" if not explicitly metered, or specific HVAC categories. Let's look at the target values. `hvac` values are large (e.g., 2105 kW). `water_heating` is also large. `refrigerator` is moderate.
+    *   Let's inspect the source `End Use` distinct values (15 distinct). Common end uses:
+        *   "Freezer" -> `refrigerator`? Or `clothes_washer`? No, Freezer is fridge.
+        *   "Clothes Dryer - Electric" -> `clothes_dryer`
+        *   "Clothes Washer" -> `clothes_washer`
+        *   "Primary TV and Peripherals" -> `plug`?
+        *   "Primary Desktop Computer" -> `plug`?
+        *   "Misc Metered" -> `plug`?
+        *   "Pool Pump" -> `pool_spa_pumps`
+        *   "Lighting" -> `lighting`?
+        *   "Remaining Load" -> This usually contains HVAC and Water Heating in many datasets if they aren't separately metered, OR it might be just HVAC.
+    *   Let's look at the target columns again: `hvac`, `water_heating`, `refrigerator`, `clothes_washer`, `clothes_dryer`, `dishwasher`, `cooking_range`, `pool_spa_pumps`, `interior_lighting`, `exterior_lighting`, `lighting`, `plug`, `pool_spa_heater`.
+    *   Many target columns are 0 in the sample. This suggests that for this specific dataset/source, only a few end uses are present or non-zero.
+    *   The source sample shows: "Freezer", "Clothes Dryer - Electric", "Clothes Washer", "Primary TV and Peripherals", "Primary Desktop Computer", "Misc Metered", "Pool Pump", "Lighting", "Remaining Load".
+    *   Mapping hypothesis:
+        *   `End Use` == "Remaining Load" -> `hvac`? Or `water_heating`?
+        *   `End Use` == "Freezer" -> `refrigerator`?
+        *   `End Use` == "Clothes Dryer - Electric" -> `clothes_dryer`? (Target is 0 in sample, but source has data. Wait, target `clothes_dryer` is 0. Source has "Clothes Dryer - Electric". Why is it 0? Maybe the aggregation logic is different, or "All" day type doesn't have it? Or maybe the target columns `clothes_washer`, `clothes_dryer` etc are 0 because the specific "All" rows for those end uses are missing or null?
+        *   Let's look at the target `hvac` values. They are high. `Remaining Load` in source has `Average Demand` values like `null` or small numbers in the sample? No, sample row 12: "Remaining Load", "Remaining Load", "December", "Weekend", 24, "120", null.
+        *   Actually, let's look at the `Average Demand Per Home With This End Use [kW]` column.
+        *   The target values are quite large (e.g., 2105 kW). The source values are small (0.031 kW).
+        *   There is a column `Number of Homes in Bin With This End Use Metered`.
+        *   Calculation: `Total Demand = Average Demand * Number of Homes`.
+        *   Example: Source row 1: 0.031 kW * 11 homes = 0.341 kW. This is still small.
+        *   Wait, the target `hvac` is 2105.7569.
+        *   Maybe the `Average Demand` is not per home? The column name says "Per Home".
+        *   Let's check the units. Source: kW. Target: kW?
+        *   If we sum up all homes?
+        *   Let's look at the distinct values of `End Use`.
+        *   Perhaps the mapping is:
+            *   `hvac`: "Remaining Load"
+            *   `water_heating`: ? (Not in sample distinct values shown, but might be in the 15 distinct values)
+            *   `refrigerator`: "Freezer"
+            *   `clothes_washer`: "Clothes Washer"
+            *   `clothes_dryer`: "Clothes Dryer - Electric"
+            *   `dishwasher`: ?
+            *   `cooking_range`: ?
+            *   `pool_spa_pumps`: "Pool Pump"
+            *   `lighting`: "Lighting"
+            *   `plug`: "Primary TV...", "Primary Desktop...", "Misc Metered"
+    *   Why are `clothes_washer`, `clothes_dryer` 0 in the target sample?
+        *   In the source sample, we see "Clothes Washer" and "Clothes Dryer - Electric".
+        *   However, the target sample rows are for specific Season/Hour combinations.
+        *   Maybe for "Spring", Hour 6, there are no "Clothes Washer" entries with Day Type "All"?
+        *   Or maybe the aggregation is `sum(Average Demand * Number of Homes)`?
+        *   Let's re-read the target schema. `clothes_washer` is `int64` and distinct value is `[0]`. This implies it's always 0 in the target.
+        *   This suggests that either:
+            1.  The source data for these categories is filtered out.
+            2.  The mapping is different.
+            3.  The values are so small they round to 0? No, `hvac` is 2105.
+        *   Let's look at `hvac` again. 2105 kW.
+        *   If `Remaining Load` is HVAC, and we have ~100-300 homes?
+        *   Source sample: "Remaining Load", "Remaining Load", "December", "Weekend", 24, "120", null.
+        *   If we take "All" day type rows for "Remaining Load".
+        *   Let's assume the transformation is:
+            1.  Filter `Day Type == "All"`.
+            2.  Map `Time Period` to `season`.
+            3.  Group by `season` and `Hour Ending`.
+            4.  For each target column, sum the product of `Average Demand` and `Number of Homes` for the corresponding `End Use`.
+            5.  If an `End Use` is not present in the group, the value is 0.
+    *   Why are `clothes_washer` etc 0?
+        *   Maybe there are no "All" day type rows for "Clothes Washer" in the source?
+        *   Or maybe "Clothes Washer" is mapped to a different column?
+        *   Given the target columns `clothes_washer`, `clothes_dryer` are explicitly 0, and the source has these end uses, it's highly likely that for the "All" day type, these specific end uses are either not present or their contribution is negligible/zeroed out by some logic.
+        *   However, `hvac`, `water_heating`, `refrigerator`, `dishwasher` have non-zero values.
+        *   This implies:
+            *   `hvac` comes from "Remaining Load" (or similar).
+            *   `water_heating` comes from an end use not shown in the small sample but present in the 15 distinct values (e.g., "Water Heater").
+            *   `refrigerator` comes from "Freezer" (or "Refrigerator").
+            *   `dishwasher` comes from "Dishwasher".
+    *   Let's refine the mapping based on standard energy end-use categories:
+        *   `hvac`: "Remaining Load" (Often HVAC is the residual load).
+        *   `water_heating`: "Water Heater" (Likely one of the 15 distinct values).
+        *   `refrigerator`: "Freezer" (or "Refrigerator").
+        *   `clothes_washer`: "Clothes Washer".
+        *   `clothes_dryer`: "Clothes Dryer - Electric".
+        *   `dishwasher`: "Dishwasher".
+        *   `cooking_range`: "Cooking Range" or "Oven".
+        *   `pool_spa_pumps`: "Pool Pump".
+        *   `interior_lighting`: "Interior Lighting".
+        *   `exterior_lighting`: "Exterior Lighting".
+        *   `lighting`: "Lighting" (General).
+        *   `plug`: "Primary TV...", "Primary Desktop...", "Misc Metered", "Plug Loads".
+        *   `pool_spa_heater`: "Pool Heater".
+
+    *   Since many target columns are 0, and we must produce a deterministic transform, we will map the known source `End Use` strings to the target columns. If a source `End Use` doesn't map to a target column, it's ignored. If a target column has no matching source `End Use` in the group, it's 0.
+
+    *   **Crucial Step**: Calculate `Total Demand = Average Demand * Number of Homes`.
+        *   Note: `Number of Homes` is a string, sometimes "0 (Modeled)". We need to parse this. If it contains "(Modeled)", treat as 0? Or parse the number? "0 (Modeled)" -> 0. "11" -> 11.
+        *   `Average Demand` is float.
+        *   Sum these products for each group.
+
+    *   **Mapping Details**:
+        *   `season`: Map Month -> Season.
+        *   `hour`: `Hour Ending`.
+        *   `hvac`: Sum of `Remaining Load`?
+        *   `water_heating`: Sum of `Water Heater`?
+        *   `refrigerator`: Sum of `Freezer`?
+        *   `dishwasher`: Sum of `Dishwasher`?
+        *   Others: Map accordingly.
+
+    *   Let's verify the `hvac` value magnitude.
+        *   Target `hvac` ~ 2000-8000 kW.
+        *   If `Remaining Load` is HVAC, and we have ~100-200 homes with avg demand ~10-20 kW?
+        *   Source sample: "Remaining Load", "Remaining Load", "December", "Weekend", 24, "120", null.
+        *   We need "All" day type.
+        *   If there are ~100 homes with 20 kW avg, total is 2000 kW. This matches.
+
+    *   **Implementation**:
+        1.  Filter `Day Type == "All"`.
+        2.  Parse `Number of Homes` to numeric (coerce errors to 0).
+        3.  Calculate `Total Demand = Average Demand * Number of Homes`.
+        4.  Map `Time Period` to `season`.
+        5.  Pivot/Group by `season` and `Hour Ending`.
+        6.  For each target column, sum the `Total Demand` for the corresponding `End Use`.
+        7.  Fill missing combinations with 0.
+        8.  Ensure column types match target (int64 for 0s, float64 for others).
+
+    *   **End Use Mapping**:
+        *   `hvac`: "Remaining Load"
+        *   `water_heating`: "Water Heater" (Assuming this is the distinct value)
+        *   `refrigerator`: "Freezer"
+        *   `clothes_washer`: "Clothes Washer"
+        *   `clothes_dryer`: "Clothes Dryer - Electric"
+        *   `dishwasher`: "Dishwasher"
+        *   `cooking_range`: "Cooking Range"
+        *   `pool_spa_pumps`: "Pool Pump"
+        *   `interior_lighting`: "Interior Lighting"
+        *   `exterior_lighting`: "Exterior Lighting"
+        *   `lighting`: "Lighting"
+        *   `plug`: "Primary TV and Peripherals", "Primary Desktop Computer", "Misc Metered" (and potentially others like "Plug Loads")
+        *   `pool_spa_heater`: "Pool Heater"
+
+    *   Since the target `clothes_washer`, `clothes_dryer` etc are 0, it's possible these end uses don't appear in the "All" day type data, or their sum is 0. The code will naturally handle this by summing 0 if no rows match.
+
+    *   **Date/Season Mapping**:
+        *   Winter: Dec, Jan, Feb
+        *   Spring: Mar, Apr, May
+        *   Summer: Jun, Jul, Aug
+        *   Fall: Sep, Oct, Nov
+
+    *   **Final Output**:
+        *   Columns: `season`, `hour`, `hvac`, `water_heating`, `refrigerator`, `clothes_washer`, `clothes_dryer`, `dishwasher`, `cooking_range`, `pool_spa_pumps`, `interior_lighting`, `exterior_lighting`, `lighting`, `plug`, `pool_spa_heater`.
+        *   Sort by `season` (Winter, Spring, Summer, Fall? Or alphabetical? Target sample shows Spring, Fall, Summer, Winter. It's not sorted. But usually, we return a DataFrame. The order of rows in the target sample is mixed. I will sort by `season` and `hour` for determinism, or just return the grouped result. The target schema doesn't specify order. I'll sort by `season` (Winter, Spring, Summer, Fall) and `hour` to be safe, or just let pandas groupby order it. The target sample has 96 rows. 4 seasons * 24 hours.
+
+    *   **Refining End Use Names**:
+        *   I need to be careful with exact string matches.
+        *   Source distinct `End Use` values (15):
+            1.  Freezer
+            2.  Clothes Dryer - Electric
+            3.  Clothes Washer
+            4.  Primary TV and Peripherals
+            5.  Primary Desktop Computer
+            6.  Misc Metered
+            7.  Pool Pump
+            8.  Lighting
+            9.  Remaining Load
+            10. Water Heater (Inferred)
+            11. Dishwasher (Inferred)
+            12. Cooking Range (Inferred)
+            13. Interior Lighting (Inferred)
+            14. Exterior Lighting (Inferred)
+            15. Pool Heater (Inferred)
+        *   This matches the 15 distinct values.
+
+    *   **Code Structure**:
+        *   Define season map.
+        *   Define end use map to target columns.
+        *   Filter, parse, calculate, group, sum, pivot, fillna, cast types.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Filter for "All" Day Type
+    df = source[source['Day Type'] == 'All'].copy()
+    
+    # 2. Map Time Period to Season
+    season_map = {
+        'December': 'Winter', 'January': 'Winter', 'February': 'Winter',
+        'March': 'Spring', 'April': 'Spring', 'May': 'Spring',
+        'June': 'Summer', 'July': 'Summer', 'August': 'Summer',
+        'September': 'Fall', 'October': 'Fall', 'November': 'Fall'
+    }
+    df['season'] = df['Time Period'].map(season_map)
+    
+    # 3. Parse Number of Homes
+    # Handle "0 (Modeled)" and other strings
+    def parse_homes(val):
+        if pd.isna(val):
+            return 0
+        val_str = str(val).strip()
+        if '(Modeled)' in val_str:
+            return 0
+        try:
+            return int(val_str)
+        except ValueError:
+            return 0
+            
+    df['num_homes'] = df['Number of Homes in Bin With This End Use Metered'].apply(parse_homes)
+    
+    # 4. Calculate Total Demand
+    # Ensure Average Demand is numeric
+    df['avg_demand'] = pd.to_numeric(df['Average Demand Per Home With This End Use [kW]'], errors='coerce')
+    df['total_demand'] = df['avg_demand'] * df['num_homes']
+    
+    # 5. Map End Use to Target Columns
+    end_use_map = {
+        'Remaining Load': 'hvac',
+        'Water Heater': 'water_heating',
+        'Freezer': 'refrigerator',
+        'Clothes Washer': 'clothes_washer',
+        'Clothes Dryer - Electric': 'clothes_dryer',
+        'Dishwasher': 'dishwasher',
+        'Cooking Range': 'cooking_range',
+        'Pool Pump': 'pool_spa_pumps',
+        'Interior Lighting': 'interior_lighting',
+        'Exterior Lighting': 'exterior_lighting',
+        'Lighting': 'lighting',
+        'Primary TV and Peripherals': 'plug',
+        'Primary Desktop Computer': 'plug',
+        'Misc Metered': 'plug',
+        'Pool Heater': 'pool_spa_heater'
+    }
+    
+    df['target_col'] = df['End Use'].map(end_use_map)
+    
+    # Drop rows where End Use doesn't map to a target column
+    df = df.dropna(subset=['target_col'])
+    
+    # 6. Group by season, hour, and target_col, sum total_demand
+    grouped = df.groupby(['season', 'Hour Ending', 'target_col'])['total_demand'].sum().reset_index()
+    
+    # 7. Pivot to wide format
+    pivot_df = grouped.pivot_table(index=['season', 'Hour Ending'], columns='target_col', values='total_demand', fill_value=0).reset_index()
+    
+    # 8. Ensure all target columns exist
+    target_columns = [
+        'season', 'hour', 'hvac', 'water_heating', 'refrigerator', 
+        'clothes_washer', 'clothes_dryer', 'dishwasher', 'cooking_range', 
+        'pool_spa_pumps', 'interior_lighting', 'exterior_lighting', 
+        'lighting', 'plug', 'pool_spa_heater'
+    ]
+    
+    # Rename Hour Ending to hour
+    pivot_df = pivot_df.rename(columns={'Hour Ending': 'hour'})
+    
+    # Add missing columns with 0
+    for col in target_columns:
+        if col not in pivot_df.columns:
+            pivot_df[col] = 0
+            
+    # Select and order columns
+    result = pivot_df[target_columns]
+    
+    # 9. Cast types
+    # season: str
+    # hour: int64
+    # hvac, water_heating, refrigerator, dishwasher: float64
+    # clothes_washer, clothes_dryer, cooking_range, pool_spa_pumps, interior_lighting, exterior_lighting, lighting, plug, pool_spa_heater: int64
+    
+    result['season'] = result['season'].astype(str)
+    result['hour'] = result['hour'].astype(int)
+    
+    float_cols = ['hvac', 'water_heating', 'refrigerator', 'dishwasher']
+    int_cols = ['clothes_washer', 'clothes_dryer', 'cooking_range', 'pool_spa_pumps', 
+                'interior_lighting', 'exterior_lighting', 'lighting', 'plug', 'pool_spa_heater']
+    
+    for col in float_cols:
+        result[col] = result[col].astype(float)
+        
+    for col in int_cols:
+        result[col] = result[col].astype(int)
+        
+    # Sort for deterministic output (optional but good practice)
+    # Target sample order is mixed, but standard is usually Season then Hour
+    # We'll sort by season (Winter, Spring, Summer, Fall) and hour
+    season_order = ['Winter', 'Spring', 'Summer', 'Fall']
+    result['season_cat'] = pd.Categorical(result['season'], categories=season_order, ordered=True)
+    result = result.sort_values(['season_cat', 'hour']).drop(columns=['season_cat']).reset_index(drop=True)
+    
+    return result
+```

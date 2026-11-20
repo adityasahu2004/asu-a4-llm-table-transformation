@@ -1,0 +1,63 @@
+[
+  {
+    "index": 0,
+    "finish_reason": "stop",
+    "path": "generated/s4/length2_10/candidates/0.py",
+    "execution": {
+      "status": "execution_error",
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\nTraceback (most recent call last):\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py\", line 21, in <module>\n    output = namespace['transform'](source)\n  File \"transform.py\", line 61, in transform\n    pivot_df[col] = pivot_df[col].astype(int)\n                    ~~~~~~~~~~~~~~~~~~~~^^^^^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/generic.py\", line 6781, in astype\n    new_data = self._mgr.astype(dtype=dtype, errors=errors)\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/internals/managers.py\", line 632, in astype\n    return self.apply(\"astype\", dtype=dtype, errors=errors)\n           ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/internals/managers.py\", line 456, in apply\n    applied = getattr(b, f)(**kwargs)\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/internals/blocks.py\", line 623, in astype\n    new_values = astype_array_safe(values, dtype, errors=errors)\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/dtypes/astype.py\", line 245, in astype_array_safe\n    new_values = astype_array(values, dtype, copy=copy)\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/dtypes/astype.py\", line 190, in astype_array\n    values = _astype_nansafe(values, dtype, copy=copy)\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/dtypes/astype.py\", line 102, in _astype_nansafe\n    return astype_float_to_int_nansafe(arr, dtype, copy)\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/dtypes/astype.py\", line 151, in astype_float_to_int_nansafe\n    raise IntCastingNaNError(\n    ...<3 lines>...\n    )\npandas.errors.IntCastingNaNError: Cannot convert non-finite values (NA or inf) to integer. Replace or remove non-finite values or cast to an integer type that supports these values (e.g. 'Int64')\n",
+      "seconds": 0.6159761670060107
+    }
+  },
+  {
+    "index": 1,
+    "finish_reason": "stop",
+    "path": "generated/s4/length2_10/candidates/1.py",
+    "execution": {
+      "status": "execution_error",
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\nTraceback (most recent call last):\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py\", line 21, in <module>\n    output = namespace['transform'](source)\n  File \"transform.py\", line 78, in transform\n    res['dt_strata'] = res.index.strftime('%m/%d/%y')\n                       ^^^^^^^^^^^^^^^^^^\nAttributeError: 'Index' object has no attribute 'strftime'\n",
+      "seconds": 0.5970483339988277
+    }
+  },
+  {
+    "index": 2,
+    "finish_reason": "length",
+    "execution": {
+      "status": "extraction_error",
+      "error": "No fenced Python block"
+    }
+  },
+  {
+    "index": 3,
+    "finish_reason": "stop",
+    "path": "generated/s4/length2_10/candidates/3.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+      "seconds": 0.581647333005094,
+      "shape": [
+        56,
+        27
+      ],
+      "fingerprint": "19fe8ecdc782c0f8e3d51cebb8d7aafc77675cb3a981edfddeb54f7942884ff5"
+    }
+  },
+  {
+    "index": 4,
+    "finish_reason": "stop",
+    "path": "generated/s4/length2_10/candidates/4.py",
+    "execution": {
+      "status": "execution_error",
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\nTraceback (most recent call last):\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py\", line 21, in <module>\n    output = namespace['transform'](source)\n  File \"transform.py\", line 28, in transform\n    pivoted['dt_strata'] = pd.to_datetime(pivoted.index).dt.strftime('%m/%d/%y')\n                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAttributeError: 'DatetimeIndex' object has no attribute 'dt'\n",
+      "seconds": 0.5878151249999064
+    }
+  }
+]

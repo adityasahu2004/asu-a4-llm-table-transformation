@@ -1,0 +1,119 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `Date` column from string (`M/D/YYYY`) to datetime objects to enable formatting and sorting if necessary (though row count suggests a simple projection/rename, the target has 183 rows vs source 182, implying a potential missing row in source sample or an added row in target not visible in sample, but usually these tasks are 1-to-1 transformations on the provided dataframe. The row count difference in the schema description is likely due to the "training sample" note. We will transform the input dataframe as is).
+2.  **Format Date**: Convert the parsed datetime to the target format `MM/DD/YYYY` and assign to column `date`.
+3.  **Rename Columns**: Map the source integer hour columns (`1` through `24`) to the specific target string labels.
+    *   Source `1` -> `1:00 AM`
+    *   Source `2` -> `2:00 AM`
+    *   ...
+    *   Source `11` -> `11:00 AM`
+    *   Source `12` -> `12:00 AM` (Note: Target schema shows `12:00 AM` at index 12, which corresponds to source `12`. Standard 12-hour clock logic: 12:00 is noon/midnight. In the target sample, `12:00 AM` is the 13th column (index 12). Let's look at the target column list carefully.
+        Target Columns:
+        0: `date`
+        1: `1:00 AM` (Src 1)
+        2: `2:00 AM` (Src 2)
+        ...
+        11: `11:00 AM` (Src 11)
+        12: `12:00 AM` (Src 12) -- *Wait, typically 12:00 PM is noon. Let's check the values.*
+        Source `12` value for first row: `0.82`.
+        Target `12:00 AM` value for first row: `1.16`.
+        Target `1:00 PM` value for first row: `1.11`.
+        
+        Let's re-examine the mapping based on the sample data provided.
+        Source Row 1: `1`=0.56, `2`=0.51, ..., `11`=0.83, `12`=0.82, `13`=0.85, ...
+        Target Row 1: `1:00 AM`=0.89? No, the target sample data starts with `01/01/2013`. The source sample starts with `7/3/2013`. The samples are disjoint in time. I cannot match values directly between the provided source sample and target sample.
+        
+        However, I can infer the mapping from the column names and standard conventions or the order.
+        Source columns: `1` to `24`.
+        Target columns:
+        `1:00 AM` to `11:00 AM` (11 cols)
+        `12:00 AM` (1 col) -> This is likely Hour 12.
+        `1:00 PM` to `11:00 PM` (11 cols)
+        `12:00 PM` (1 col) -> This is likely Hour 24? Or Hour 12?
+        
+        Let's look at the target column list order again:
+        1. `1:00 AM`
+        2. `2:00 AM`
+        ...
+        11. `11:00 AM`
+        12. `12:00 AM`  <-- This is the 12th hour column.
+        13. `1:00 PM`
+        ...
+        23. `11:00 PM`
+        24. `12:00 PM` <-- This is the 24th hour column.
+
+        Standard 12-hour clock:
+        Hour 1 -> 1:00 AM
+        Hour 2 -> 2:00 AM
+        ...
+        Hour 11 -> 11:00 AM
+        Hour 12 -> 12:00 PM (Noon)
+        Hour 13 -> 1:00 PM
+        ...
+        Hour 23 -> 11:00 PM
+        Hour 24 -> 12:00 AM (Midnight)
+
+        However, the target names are:
+        `12:00 AM` is at position 12 (Source `12`).
+        `12:00 PM` is at position 24 (Source `24`).
+        
+        This implies:
+        Source `12` -> `12:00 AM`
+        Source `24` -> `12:00 PM`
+        
+        This is a non-standard labeling (swapping AM/PM for 12), but I must follow the target schema exactly.
+        
+        Mapping:
+        1 -> `1:00 AM`
+        2 -> `2:00 AM`
+        3 -> `3:00 AM`
+        4 -> `4:00 AM`
+        5 -> `5:00 AM`
+        6 -> `6:00 AM`
+        7 -> `7:00 AM`
+        8 -> `8:00 AM`
+        9 -> `9:00 AM`
+        10 -> `10:00 AM`
+        11 -> `11:00 AM`
+        12 -> `12:00 AM`
+        13 -> `1:00 PM`
+        14 -> `2:00 PM`
+        15 -> `3:00 PM`
+        16 -> `4:00 PM`
+        17 -> `5:00 PM`
+        18 -> `6:00 PM`
+        19 -> `7:00 PM`
+        20 -> `8:00 PM`
+        21 -> `9:00 PM`
+        22 -> `10:00 PM`
+        23 -> `11:00 PM`
+        24 -> `12:00 PM`
+
+4.  **Construct Output**: Create a new DataFrame with `date` and the renamed hour columns.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    dates = pd.to_datetime(source['Date'], format='%m/%d/%Y')
+    
+    # Format date to MM/DD/YYYY
+    out = pd.DataFrame()
+    out['date'] = dates.dt.strftime('%m/%d/%Y')
+    
+    # Define the mapping from source integer columns to target string columns
+    # Source columns are strings "1" through "24"
+    target_names = [
+        '1:00 AM', '2:00 AM', '3:00 AM', '4:00 AM', '5:00 AM', '6:00 AM', 
+        '7:00 AM', '8:00 AM', '9:00 AM', '10:00 AM', '11:00 AM', '12:00 AM',
+        '1:00 PM', '2:00 PM', '3:00 PM', '4:00 PM', '5:00 PM', '6:00 PM', 
+        '7:00 PM', '8:00 PM', '9:00 PM', '10:00 PM', '11:00 PM', '12:00 PM'
+    ]
+    
+    for i, target_name in enumerate(target_names):
+        source_col = str(i + 1)
+        out[target_name] = source[source_col]
+        
+    return out
+```

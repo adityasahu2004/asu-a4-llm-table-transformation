@@ -1,0 +1,11 @@
+[
+  {
+    "index": 0,
+    "finish_reason": "length",
+    "execution": {
+      "status": "extraction_error",
+      "error": "unexpected indent (<generated>, line 3)"
+    },
+    "invalid_code_path": "generated/s2/length1_9/candidates/0_invalid.py"
+  }
+]

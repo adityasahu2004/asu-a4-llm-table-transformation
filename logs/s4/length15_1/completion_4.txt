@@ -1,0 +1,134 @@
+Operator plan:
+1. Parse the `time` column to extract the hour and month.
+2. Derive `season` based on the month (Winter: Dec-Feb, Spring: Mar-May, Summer: Jun-Aug, Fall: Sep-Nov). Note: The target sample only shows Summer, Winter, Spring. I will map months accordingly.
+3. Group the data by `season` and `hour`.
+4. Aggregate the relevant electricity columns by summing them up.
+   - `hvac`: Sum of heating and cooling related columns.
+     - `electricity_heating_kwh`
+     - `electricity_central_system_heating_kwh`
+     - `electricity_cooling_kwh`
+     - `electricity_central_system_cooling_kwh`
+     - `electricity_fans_heating_kwh`
+     - `electricity_fans_cooling_kwh`
+     - `electricity_pumps_heating_kwh`
+     - `electricity_central_system_pumps_heating_kwh`
+     - `electricity_pumps_cooling_kwh`
+     - `electricity_central_system_pumps_cooling_kwh`
+   - `domestic_water_heating`: Sum of `electricity_water_systems_kwh`.
+   - `major_appliances`: Sum of `electricity_refrigerator_kwh`, `electricity_clothes_washer_kwh`, `electricity_clothes_dryer_kwh`, `electricity_cooking_range_kwh`, `electricity_dishwasher_kwh`.
+   - `lighting`: Sum of `electricity_interior_lighting_kwh`, `electricity_exterior_lighting_kwh`.
+   - `miscellaneous_plug_loads`: Sum of `electricity_plug_loads_kwh`, `electricity_house_fan_kwh`, `electricity_range_fan_kwh`, `electricity_bath_fan_kwh`, `electricity_ceiling_fan_kwh`, `electricity_pool_heater_kwh`, `electricity_pool_pump_kwh`, `electricity_hot_tub_heater_kwh`, `electricity_hot_tub_pump_kwh`.
+   - `total`: Sum of `net_site_electricity_kwh`.
+5. Reset index and ensure column order.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse time
+    dt = pd.to_datetime(source['time'])
+    
+    # Define season
+    def get_season(month):
+        if month in [12, 1, 2]:
+            return 'Winter'
+        elif month in [3, 4, 5]:
+            return 'Spring'
+        elif month in [6, 7, 8]:
+            return 'Summer'
+        else:
+            return 'Fall'
+            
+    source['season'] = dt.dt.month.apply(get_season)
+    source['hour'] = dt.dt.hour
+    
+    # Define columns for aggregation
+    hvac_cols = [
+        'electricity_heating_kwh',
+        'electricity_central_system_heating_kwh',
+        'electricity_cooling_kwh',
+        'electricity_central_system_cooling_kwh',
+        'electricity_fans_heating_kwh',
+        'electricity_fans_cooling_kwh',
+        'electricity_pumps_heating_kwh',
+        'electricity_central_system_pumps_heating_kwh',
+        'electricity_pumps_cooling_kwh',
+        'electricity_central_system_pumps_cooling_kwh'
+    ]
+    
+    dwhe_cols = [
+        'electricity_water_systems_kwh'
+    ]
+    
+    major_appl_cols = [
+        'electricity_refrigerator_kwh',
+        'electricity_clothes_washer_kwh',
+        'electricity_clothes_dryer_kwh',
+        'electricity_cooking_range_kwh',
+        'electricity_dishwasher_kwh'
+    ]
+    
+    lighting_cols = [
+        'electricity_interior_lighting_kwh',
+        'electricity_exterior_lighting_kwh'
+    ]
+    
+    misc_plug_cols = [
+        'electricity_plug_loads_kwh',
+        'electricity_house_fan_kwh',
+        'electricity_range_fan_kwh',
+        'electricity_bath_fan_kwh',
+        'electricity_ceiling_fan_kwh',
+        'electricity_pool_heater_kwh',
+        'electricity_pool_pump_kwh',
+        'electricity_hot_tub_heater_kwh',
+        'electricity_hot_tub_pump_kwh'
+    ]
+    
+    total_cols = [
+        'net_site_electricity_kwh'
+    ]
+    
+    # Group and aggregate
+    grouped = source.groupby(['season', 'hour'])
+    
+    agg_data = {
+        'hvac': (hvac_cols, 'sum'),
+        'domestic_water_heating': (dwhe_cols, 'sum'),
+        'major_appliances': (major_appl_cols, 'sum'),
+        'lighting': (lighting_cols, 'sum'),
+        'miscellaneous_plug_loads': (misc_plug_cols, 'sum'),
+        'total': (total_cols, 'sum')
+    }
+    
+    result_parts = {}
+    for col_name, (src_cols, agg_func) in agg_data.items():
+        # Sum the specified columns for each group
+        if agg_func == 'sum':
+            # We need to sum these columns within the group
+            # A convenient way is to groupby and sum the dataframe, then select columns
+            pass
+            
+    # Perform aggregation in one go for efficiency
+    agg_df = grouped.sum()
+    
+    # Construct the result dataframe
+    result = pd.DataFrame()
+    result['season'] = agg_df.index.get_level_values('season')
+    result['hour'] = agg_df.index.get_level_values('hour')
+    
+    result['hvac'] = agg_df[hvac_cols].sum(axis=1)
+    result['domestic_water_heating'] = agg_df[dwhe_cols].sum(axis=1)
+    result['major_appliances'] = agg_df[major_appl_cols].sum(axis=1)
+    result['lighting'] = agg_df[lighting_cols].sum(axis=1)
+    result['miscellaneous_plug_loads'] = agg_df[misc_plug_cols].sum(axis=1)
+    result['total'] = agg_df[total_cols].sum(axis=1)
+    
+    # Ensure correct column order
+    result = result[['season', 'hour', 'hvac', 'domestic_water_heating', 'major_appliances', 'lighting', 'miscellaneous_plug_loads', 'total']]
+    
+    # Reset index to remove multi-index
+    result = result.reset_index(drop=True)
+    
+    return result
+```

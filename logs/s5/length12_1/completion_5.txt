@@ -1,0 +1,138 @@
+**Operator Plan:**
+1.  **Parse Time**: Convert the `time` column to a datetime object to extract the hour and month.
+2.  **Derive Season**: Map the month to a season string ("Winter", "Spring", "Summer"). Note: The target sample shows "Spring" for months like 3, 4, 5 (March, April, May) and "Winter" for 12, 1, 2. "Summer" corresponds to 6, 7, 8. The target distinct values are "Summer", "Winter", "Spring". We assume standard meteorological seasons or similar mapping based on the sample data (e.g., July is Summer, January is Winter, March/April/May is Spring).
+    *   Months 12, 1, 2 -> Winter
+    *   Months 3, 4, 5 -> Spring
+    *   Months 6, 7, 8 -> Summer
+    *   (Note: The source data only contains months 7, 8, 9, 10, 11, 12, 1. Wait, looking at the source sample: `2012-07-02`, `2012-08-04`, `2012-09-06`, `2012-10-09`, `2012-11-12`, `2012-12-15`, `2013-01-01`. The target sample has "Spring". This implies the full dataset likely contains Spring months, or the mapping is different. However, standard mapping is safest. Let's look at the target distinct values: "Summer", "Winter", "Spring". It's missing "Fall/Autumn". This suggests a 3-season model or specific mapping. Given the source sample has Sept, Oct, Nov, which are typically Fall, but the target doesn't list Fall, perhaps they are grouped into Winter or Spring? Or maybe the source sample is just a subset. Let's look at the target sample data: "Spring" hour 8. "Winter" hour 21. "Summer" hour 19.
+    *   Let's check the source `time` range: `2012-07-02` to `2013-01-01`. This covers Summer, Fall, Winter. The target has "Spring". This is contradictory if the source *only* has those months. However, the note says "Source row count describes a training sample only". The evaluation input might have different months.
+    *   Standard mapping:
+        *   Dec, Jan, Feb -> Winter
+        *   Mar, Apr, May -> Spring
+        *   Jun, Jul, Aug -> Summer
+        *   Sep, Oct, Nov -> Fall
+    *   Since "Fall" is not in the target distinct values, but "Spring" is, and the source sample has Sep/Oct/Nov, it's possible Sep/Oct/Nov are mapped to "Winter" or "Spring"? Or perhaps the target distinct values list is incomplete in the prompt description? No, `distinct: 3`.
+    *   Let's look at the values.
+        *   Summer (Jul/Aug) usually has high cooling.
+        *   Winter (Jan/Dec) usually has high heating.
+        *   Spring (Mar/Apr/May) is mild.
+    *   If the source has Sep/Oct/Nov, and the target only has 3 seasons, maybe Sep/Oct/Nov are considered "Winter" (heating season) or "Spring" (cooling off)?
+    *   Actually, let's look at the `hvac` calculation. `hvac` is likely `electricity_heating_kwh` + `electricity_cooling_kwh` + fans/pumps related to HVAC.
+    *   Let's assume standard meteorological seasons but map Fall to Winter? Or maybe the prompt implies a specific mapping.
+    *   Let's look at the target sample again.
+        *   "Summer", 19
+        *   "Summer", 13
+        *   "Winter", 21
+        *   "Spring", 8
+    *   If I assume standard:
+        *   6,7,8 = Summer
+        *   12,1,2 = Winter
+        *   3,4,5 = Spring
+        *   9,10,11 = ?
+    *   If the target only has 3 distinct values, and the source has 9-11, one of the standard seasons must be merged or renamed.
+    *   However, without explicit instructions, I will use a standard mapping and assume the evaluation data might not have Fall, or Fall is mapped to Winter (common in energy billing for heating season). Let's try mapping 9,10,11 to Winter.
+    *   Alternatively, maybe the "Spring" in the target comes from data not in the sample.
+    *   Let's stick to:
+        *   12, 1, 2, 9, 10, 11 -> Winter (Heating season)
+        *   3, 4, 5 -> Spring
+        *   6, 7, 8 -> Summer
+    *   Wait, is it possible "Spring" is actually "Fall"? No, the string is "Spring".
+    *   Let's look at the `hvac` values.
+        *   Summer 19: 95M
+        *   Winter 21: 61M
+        *   Spring 8: 51M
+    *   This seems plausible.
+    *   I will map:
+        *   Month in [6,7,8] -> "Summer"
+        *   Month in [3,4,5] -> "Spring"
+        *   Month in [12,1,2,9,10,11] -> "Winter"
+
+3.  **Aggregate**: Group by `season` and `hour` (0-23).
+4.  **Calculate Metrics**:
+    *   `hvac`: Sum of `electricity_heating_kwh`, `electricity_cooling_kwh`, `electricity_fans_heating_kwh`, `electricity_fans_cooling_kwh`, `electricity_pumps_heating_kwh`, `electricity_central_system_pumps_heating_kwh`, `electricity_pumps_cooling_kwh`, `electricity_central_system_pumps_cooling_kwh`.
+    *   `water_heating`: Sum of `electricity_water_systems_kwh`.
+    *   `refrigerator`: Sum of `electricity_refrigerator_kwh`.
+    *   `clothes_washer`: Sum of `electricity_clothes_washer_kwh`.
+    *   `clothes_dryer`: Sum of `electricity_clothes_dryer_kwh`.
+    *   `dishwasher`: Sum of `electricity_dishwasher_kwh`.
+    *   `cooking_range`: Sum of `electricity_cooking_range_kwh`.
+    *   `pool_spa_pumps`: Sum of `electricity_pool_pump_kwh` + `electricity_hot_tub_pump_kwh`.
+    *   `interior_lighting`: Sum of `electricity_interior_lighting_kwh`.
+    *   `exterior_lighting`: Sum of `electricity_exterior_lighting_kwh`.
+    *   `lighting`: Sum of `interior_lighting` + `exterior_lighting`.
+    *   `plug`: Sum of `electricity_plug_loads_kwh`.
+    *   `pool_spa_heaters`: Sum of `electricity_pool_heater_kwh` + `electricity_hot_tub_heater_kwh`.
+
+5.  **Format Output**: Ensure column names match exactly. Sort by season and hour if necessary (though order isn't strictly enforced by schema, it's good practice). The target sample is not sorted by hour.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse time
+    source = source.copy()
+    source['time_dt'] = pd.to_datetime(source['time'])
+    source['hour'] = source['time_dt'].dt.hour
+    source['month'] = source['time_dt'].dt.month
+    
+    # Map to Season
+    # Assuming:
+    # Summer: 6, 7, 8
+    # Spring: 3, 4, 5
+    # Winter: 12, 1, 2, 9, 10, 11 (Grouping Fall into Winter as 'Fall' is not in target distincts)
+    def get_season(m):
+        if m in [6, 7, 8]:
+            return "Summer"
+        elif m in [3, 4, 5]:
+            return "Spring"
+        else:
+            return "Winter"
+            
+    source['season'] = source['month'].apply(get_season)
+    
+    # Define HVAC components
+    hvac_cols = [
+        'electricity_heating_kwh',
+        'electricity_cooling_kwh',
+        'electricity_fans_heating_kwh',
+        'electricity_fans_cooling_kwh',
+        'electricity_pumps_heating_kwh',
+        'electricity_central_system_pumps_heating_kwh',
+        'electricity_pumps_cooling_kwh',
+        'electricity_central_system_pumps_cooling_kwh'
+    ]
+    
+    # Calculate derived columns for aggregation
+    source['hvac'] = source[hvac_cols].sum(axis=1)
+    source['water_heating'] = source['electricity_water_systems_kwh']
+    source['refrigerator'] = source['electricity_refrigerator_kwh']
+    source['clothes_washer'] = source['electricity_clothes_washer_kwh']
+    source['clothes_dryer'] = source['electricity_clothes_dryer_kwh']
+    source['dishwasher'] = source['electricity_dishwasher_kwh']
+    source['cooking_range'] = source['electricity_cooking_range_kwh']
+    source['pool_spa_pumps'] = source['electricity_pool_pump_kwh'] + source['electricity_hot_tub_pump_kwh']
+    source['interior_lighting'] = source['electricity_interior_lighting_kwh']
+    source['exterior_lighting'] = source['electricity_exterior_lighting_kwh']
+    source['lighting'] = source['interior_lighting'] + source['exterior_lighting']
+    source['plug'] = source['electricity_plug_loads_kwh']
+    source['pool_spa_heaters'] = source['electricity_pool_heater_kwh'] + source['electricity_hot_tub_heater_kwh']
+    
+    # Aggregate
+    agg_cols = [
+        'hvac', 'water_heating', 'refrigerator', 'clothes_washer', 
+        'clothes_dryer', 'dishwasher', 'cooking_range', 'pool_spa_pumps',
+        'interior_lighting', 'exterior_lighting', 'lighting', 'plug', 
+        'pool_spa_heaters'
+    ]
+    
+    result = source.groupby(['season', 'hour'])[agg_cols].sum().reset_index()
+    
+    # Ensure correct column order and types
+    result = result[['season', 'hour', 'hvac', 'water_heating', 'refrigerator', 
+                     'clothes_washer', 'clothes_dryer', 'dishwasher', 'cooking_range', 
+                     'pool_spa_pumps', 'interior_lighting', 'exterior_lighting', 
+                     'lighting', 'plug', 'pool_spa_heaters']]
+    
+    return result
+```

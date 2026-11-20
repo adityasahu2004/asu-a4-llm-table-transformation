@@ -1,0 +1,206 @@
+Operator plan:
+1. Filter source rows to only "Weekday" and "All" day types (excluding "Weekend" as per typical load profile aggregation for weekdays/all-days, but given the target has 288 rows = 12 months * 24 hours, it implies a single aggregation per month/hour. The "All" day type likely represents the aggregate or the weekday/weekend split is handled by selecting specific rows. Looking at the target distinct values, `lighting` and `total` are 0. `hvac`, `domestic_water_heating`, `major_appliances`, `miscellaneous_plug_loads` are floats.
+2. The source has `End Use Category` and `End Use`. We need to map these to the target columns: `hvac`, `domestic_water_heating`, `major_appliances`, `lighting`, `miscellaneous_plug_loads`.
+   - `hvac`: Likely from "Remaining Load" or specific HVAC uses. In many end-use breakdowns, "Remaining Load" is HVAC. Let's check distinct values. Source `End Use Category` has "Remaining Load".
+   - `domestic_water_heating`: Likely "Water Heater" under "Miscellaneous" or "Kitchen"? Usually distinct. Let's look at `End Use` distinct values if available. The sample shows "Freezer", "Clothes Dryer", "Clothes Washer", "Primary TV", "Primary Desktop", "Misc Metered", "Pool Pump", "Lighting", "Remaining Load".
+   - Standard mapping for such datasets (like CAISO or similar residential load shapes):
+     - `hvac` <- "Remaining Load" (Category) or specific HVAC uses.
+     - `domestic_water_heating` <- "Water Heater" (End Use).
+     - `major_appliances` <- "Kitchen" (Category) + "Laundry" (Category)? Or specific appliances. "Freezer", "Clothes Dryer", "Clothes Washer" are major appliances.
+     - `lighting` <- "Lighting" (Category).
+     - `miscellaneous_plug_loads` <- "Miscellaneous" (Category) excluding water heater?
+3. The target has 288 rows (12 months * 24 hours). This implies we aggregate the `Average Demand Per Home With This End Use [kW]` by `Time Period` (month) and `Hour Ending`.
+4. We need to map month names to integers (January=1, ..., December=12).
+5. We need to handle the `Day Type`. Since the target has only one value per month/hour, and source has "Weekday", "Weekend", "All", we likely sum or average? Or perhaps "All" is the one to use? Or we sum "Weekday" and "Weekend"? Given "All" is present, it might be the aggregate. However, "All" often has different home counts. A common pattern is to use "Weekday" for weekdays and "Weekend" for weekends, but here we just have month/hour. If we look at the target `lighting` is 0, which is strange if lighting is present. Wait, the target sample shows `lighting` is 0. This suggests either the data for lighting is missing/null and filled with 0, or the mapping is different.
+6. Let's look at the target columns again: `hvac`, `domestic_water_heating`, `major_appliances`, `lighting`, `miscellaneous_plug_loads`, `total`. `total` is 0. This suggests `total` is not calculated as a sum, but perhaps a placeholder or specific column not derived from sum.
+7. Crucially, the target has `nulls: 0` for all columns. The source has `nulls: 70248` for `Average Demand...`. This means we must fill NaNs with 0.
+8. Mapping End Use to Target Columns:
+   - `hvac`: Category "Remaining Load" is often HVAC in these datasets.
+   - `domestic_water_heating`: End Use "Water Heater" (if present). If not in sample, maybe "Water Heating"?
+   - `major_appliances`: Categories "Kitchen" and "Laundry"? Or specific ends. "Freezer", "Clothes Dryer", "Clothes Washer".
+   - `lighting`: Category "Lighting".
+   - `miscellaneous_plug_loads`: Category "Miscellaneous".
+9. Aggregation: Group by `Time Period` and `Hour Ending`. Sum the `Average Demand...`.
+10. Day Type: The target has 288 rows. If we group by Month and Hour, we need to combine Weekday/Weekend/All. If "All" is available, it might be the sum of Weekday and Weekend. Or we just sum all rows for that Month/Hour regardless of Day Type? The prompt says "Infer a general transformation". Summing all available demands for that month/hour across all day types might double count if "All" is the sum. Usually, "All" is the average across all days. If we sum "Weekday" and "Weekend", we get the total load? No, these are "Average Demand Per Home".
+    Let's assume we filter for `Day Type` in ['Weekday', 'Weekend'] and sum them? Or just take 'All'?
+    Actually, looking at the distinct values of `Time Period` (14) vs Target `month` (12). The source has "March", "April", etc.
+    Let's try filtering for `Day Type` == 'Weekday' only? Or `Day Type` == 'All'?
+    If we look at the target sample: Month 10, Hour 9.
+    Let's assume the standard approach for these "load shape" datasets: Use the "Weekday" and "Weekend" profiles separately? But the target only has one row per month/hour.
+    Hypothesis: The target represents the "Weekday" profile? Or the "All" profile?
+    Let's look at the `lighting` column in target being 0. In the source sample, `Lighting` has values (0.094, 0.068). If `lighting` is 0 in target, maybe the mapping for `lighting` is not "Lighting" category? Or maybe the rows for Lighting are filtered out?
+    Wait, `lighting` in target is `int64` and distinct values `[0]`. `total` is `int64` and distinct values `[0]`.
+    This implies `lighting` and `total` are not populated from the source data, or they are always 0 in the target schema provided.
+    
+    Let's refine the mapping:
+    - `hvac`: Sum of `Average Demand` where `End Use Category` == 'Remaining Load'.
+    - `domestic_water_heating`: Sum of `Average Demand` where `End Use` == 'Water Heater' (or similar).
+    - `major_appliances`: Sum of `Average Demand` where `End Use Category` in ['Kitchen', 'Laundry'].
+    - `miscellaneous_plug_loads`: Sum of `Average Demand` where `End Use Category` == 'Miscellaneous'.
+    - `lighting`: 0.
+    - `total`: 0.
+
+    Aggregation Key: Month (from `Time Period`) and Hour (from `Hour Ending`).
+    Day Type: Since we need one value per month/hour, and source has multiple day types, we likely sum the demands for 'Weekday' and 'Weekend' if we want total daily energy? No, these are kW.
+    Commonly, "All" is the weighted average. If we just sum "Weekday" and "Weekend", we get 2x average?
+    Let's look at the row count. 258,420 rows. 12 months * 24 hours * 3 day types * ~5 categories * ~3 sub-uses?
+    12 * 24 * 3 = 864 combinations of Time/Day/Hour.
+    258420 / 864 ≈ 299 uses? That's a lot.
+    
+    Let's assume we filter for `Day Type` == 'Weekday' and `Day Type` == 'Weekend' and SUM them? No.
+    Let's assume we filter for `Day Type` == 'All'?
+    Or, more likely, we group by `Time Period` and `Hour Ending` and SUM the `Average Demand` for all rows, effectively aggregating all end uses and all day types?
+    If we sum Weekday and Weekend kW, we don't get a meaningful "Average Demand Per Home" for the month unless we weight by days.
+    However, often in these problems, if "All" is present, it might be the one to use. Or, we simply sum the contributions of each end-use category for the "Weekday" profile?
+    
+    Let's look at the target `hvac` value for Month 10, Hour 9: 331.3272.
+    Source sample doesn't have Month 10, Hour 9.
+    
+    Let's try this logic:
+    1. Map `Time Period` to `month` integer.
+    2. Filter `Day Type` to only 'Weekday' and 'Weekend'? Or just 'Weekday'?
+    3. Pivot/Aggregate `Average Demand Per Home With This End Use [kW]` by `month`, `hour`, and `End Use Category`/`End Use`.
+    4. Map categories to target columns.
+    5. Fill NaNs with 0.
+    
+    Since `lighting` and `total` are 0 in target, I will explicitly set them to 0.
+    
+    Mapping:
+    - `hvac`: Category 'Remaining Load'
+    - `domestic_water_heating`: End Use 'Water Heater' (Need to check if this exists. If not, maybe 'Water Heating'?)
+    - `major_appliances`: Categories 'Kitchen' and 'Laundry'
+    - `miscellaneous_plug_loads`: Category 'Miscellaneous'
+    
+    What about Day Type? If I sum Weekday and Weekend, I might be double counting if "All" is also present.
+    Let's filter for `Day Type` in ['Weekday', 'Weekend'].
+    Actually, if the target is a single profile, it might be the "Weekday" profile.
+    Let's try filtering for `Day Type` == 'Weekday'.
+    
+    Wait, `distinct_values` for `Day Type` are "Weekend", "All", "Weekday".
+    If I use "All", it might already be the aggregate.
+    Let's try using `Day Type` == 'Weekday' and `Day Type` == 'Weekend' and averaging? Or summing?
+    
+    Let's look at the `nulls` in source: 70248 nulls.
+    Target has 0 nulls.
+    
+    I will filter for `Day Type` == 'Weekday' and `Day Type` == 'Weekend' and SUM the demands? No, that doesn't make sense for "Average Demand".
+    I will filter for `Day Type` == 'All' if it exists for every month/hour?
+    
+    Let's assume the transformation aggregates all non-null demands for each Month/Hour/Category combination, ignoring Day Type (or summing across Day Types if they are disjoint components of a total? No, they are averages).
+    
+    Actually, a common pattern in these datasets is that "Weekday" and "Weekend" are separate profiles. The target has 288 rows. This matches 12 months * 24 hours. This implies a single profile.
+    If I have to choose one, "Weekday" is often the primary.
+    However, if I sum "Weekday" and "Weekend", I get 2x.
+    
+    Let's look at the `hvac` value: 331.3272.
+    
+    I will proceed with:
+    1. Filter `Day Type` to 'Weekday'. (If this doesn't match, 'All' is the next best guess).
+    2. Map Month names to numbers.
+    3. Group by `month`, `hour`, and `End Use Category` (and `End Use` for water heater).
+    4. Sum `Average Demand...`.
+    5. Map to columns.
+    6. Fill NaN with 0.
+
+    Mapping details:
+    - `hvac`: `End Use Category` == 'Remaining Load'
+    - `domestic_water_heating`: `End Use` == 'Water Heater' (If not found, check 'Water Heating')
+    - `major_appliances`: `End Use Category` in ['Kitchen', 'Laundry']
+    - `miscellaneous_plug_loads`: `End Use Category` == 'Miscellaneous'
+    - `lighting`: 0
+    - `total`: 0
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Map month names to integers
+    month_map = {
+        'January': 1, 'February': 2, 'March': 3, 'April': 4,
+        'May': 5, 'June': 6, 'July': 7, 'August': 8,
+        'September': 9, 'October': 10, 'November': 11, 'December': 12
+    }
+    
+    # Filter for Weekday only? Or All? 
+    # Given the target has 288 rows (12*24), and source has Day Type.
+    # We will filter for 'Weekday' as it's a common standard for load shapes.
+    # If 'All' is intended, the values would likely be different.
+    # We also need to handle 'Weekend' if 'Weekday' is not sufficient.
+    # Let's filter for 'Weekday' and 'Weekend' and average? 
+    # No, let's just use 'Weekday'.
+    
+    df = source[source['Day Type'] == 'Weekday'].copy()
+    
+    # If df is empty, try 'All', then 'Weekend'
+    if df.empty:
+        df = source[source['Day Type'] == 'All'].copy()
+    if df.empty:
+        df = source[source['Day Type'] == 'Weekend'].copy()
+        
+    # Create month integer column
+    df['month'] = df['Time Period'].map(month_map)
+    df['hour'] = df['Hour Ending']
+    
+    # Ensure numeric demand
+    df['demand'] = pd.to_numeric(df['Average Demand Per Home With This End Use [kW]'], errors='coerce')
+    
+    # Drop rows where demand is NaN
+    df = df.dropna(subset=['demand'])
+    
+    # Define mapping for categories/ends to target columns
+    # We will aggregate by month, hour, and end use type
+    
+    # Helper to map rows to target columns
+    def get_target_col(row):
+        cat = row['End Use Category']
+        end = row['End Use']
+        
+        if cat == 'Remaining Load':
+            return 'hvac'
+        elif end == 'Water Heater' or cat == 'Water Heating': # Assuming Water Heater is the end use
+            return 'domestic_water_heating'
+        elif cat in ['Kitchen', 'Laundry']:
+            return 'major_appliances'
+        elif cat == 'Miscellaneous':
+            return 'miscellaneous_plug_loads'
+        elif cat == 'Lighting':
+            return 'lighting'
+        else:
+            return None
+
+    df['target_col'] = df.apply(get_target_col, axis=1)
+    
+    # Filter out rows that don't map to our target columns (or map to lighting/total which are 0)
+    # Actually, we can just aggregate all and then set lighting/total to 0.
+    
+    # Group by month, hour, target_col and sum demand
+    grouped = df.groupby(['month', 'hour', 'target_col'])['demand'].sum().reset_index()
+    
+    # Pivot to get columns
+    pivoted = grouped.pivot_table(index=['month', 'hour'], columns='target_col', values='demand', fill_value=0).reset_index()
+    
+    # Ensure all target columns exist
+    target_cols = ['hvac', 'domestic_water_heating', 'major_appliances', 'lighting', 'miscellaneous_plug_loads']
+    for col in target_cols:
+        if col not in pivoted.columns:
+            pivoted[col] = 0
+            
+    # Set lighting and total to 0 as per target schema
+    pivoted['lighting'] = 0
+    pivoted['total'] = 0
+    
+    # Select and order columns
+    result = pivoted[['month', 'hour', 'hvac', 'domestic_water_heating', 'major_appliances', 'lighting', 'miscellaneous_plug_loads', 'total']]
+    
+    # Ensure types
+    result['month'] = result['month'].astype(int)
+    result['hour'] = result['hour'].astype(int)
+    result['lighting'] = result['lighting'].astype(int)
+    result['total'] = result['total'].astype(int)
+    
+    # Sort by month and hour
+    result = result.sort_values(['month', 'hour']).reset_index(drop=True)
+    
+    return result
+```

@@ -1,0 +1,46 @@
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse timestamps
+    df = source.copy()
+    df['dt'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    df['date_only'] = df['dt'].dt.date
+    df['hour'] = df['dt'].dt.hour
+
+    # Group by date and hour, taking the mean of the measurement
+    grouped = df.groupby(['date_only', 'hour'])['cerc_logger_1'].mean().reset_index()
+
+    # Pivot to wide format: rows are dates, columns are hours
+    pivoted = grouped.pivot_table(index='date_only', columns='hour', values='cerc_hourly', aggfunc='mean')
+
+    # Ensure all hours 0-23 are present
+    all_hours = range(24)
+    pivoted = pivoted.reindex(columns=all_hours, fill_value=0.0)
+
+    # Sort by date
+    pivoted = pivoted.sort_index()
+
+    # Prepare output dataframe
+    out = pd.DataFrame(index=pivoted.index)
+    
+    # Format dt_strata as MM/DD/YY
+    out['dt_strata'] = pivoted.index.strftime('%m/%d/%y')
+    
+    # Calculate dow: Monday=0, Sunday=6 based on distinct_values in target [0,1,2,3,4,5,6]
+    # Note: Target distinct_values are [1, 5, 4, 0, 2, 3, 6]. This matches pandas dayofweek (Mon=0, Sun=6).
+    out['dow'] = pivoted.index.dayofweek
+    
+    # Map hours 0-23 to columns pct_hourly_0100 ... pct_hourly_2400
+    # Hour 0 -> pct_hourly_0100
+    # Hour 1 -> pct_hourly_0200
+    # ...
+    # Hour 23 -> pct_hourly_2400
+    for h in range(24):
+        col_name = f'pct_hourly_{h+1:02d}00'
+        out[col_name] = pivoted[h]
+        
+    # Add the constant 25th hour column
+    out['pct_hourly_2500'] = 0
+    
+    return out.reset_index(drop=True)

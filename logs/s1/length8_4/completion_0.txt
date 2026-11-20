@@ -1,0 +1,89 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `DT_STRATA` column from string format (`M/D/YYYY`) to datetime objects to extract the month.
+2.  **Identify Hourly Columns**: Select all columns starting with `PCT_HOURLY_`. Extract the hour integer from the column name (e.g., `PCT_HOURLY_0100` -> `1`, `PCT_HOURLY_2400` -> `24`). Note that the source has 24 hourly columns (0100 to 2400) and one extra column `PCT_HOURLY_2500` which appears to be a placeholder or error (values are 0.0 in samples). The target has hours 1, 3, ..., 24 (odd hours + 24? No, looking at target sample: 1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 24. Wait, the target sample shows specific rows. Let's look closer. The target has 24 rows. The hours are 1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 24. This is not all hours. It seems to be odd hours plus 24? Or maybe it's just a subset. Let's re-read the target schema. `distinct: 24` for `hour`. The sample data only shows 12 rows. The target has 24 rows total. The sample shows hours: 1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 24. This looks like odd hours 1-21 and then 24. What about even hours 2, 4, ... 22? They are missing from the sample but the distinct count is 24. This implies all 24 hours are present in the full target. The sample is just a subset. So we need to aggregate for all 24 hours.
+3.  **Melt/Unpivot**: Transform the wide format (24 hourly columns) into a long format with columns: `Strata_ID`, `Strata`, `DT_STRATA`, `DOW`, `hour`, `value`.
+4.  **Extract Month**: From the parsed `DT_STRATA`, extract the month number (1-12).
+5.  **Group and Aggregate**: Group by `hour` and `month`. Calculate the mean of the `value` for each group. The target values look like averages (e.g., ~0.001-0.003 range, similar to source).
+6.  **Pivot**: Pivot the aggregated data so that `hour` is the index, `month` becomes the columns (named `january`, `february`, etc.), and the values are the calculated means.
+7.  **Format Output**:
+    *   Rename month columns to lowercase month names.
+    *   Ensure the `hour` column is integer type.
+    *   Sort by `hour`.
+    *   Reset index to make `hour` a column.
+
+**Assumptions**:
+*   The aggregation function is `mean`.
+*   The `PCT_HOURLY_2500` column is ignored as it doesn't fit the 1-24 hour pattern and contains zeros.
+*   The target month names are lowercase English names.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse dates to extract month
+    source = source.copy()
+    source['DT_STRATA'] = pd.to_datetime(source['DT_STRATA'], format='%m/%d/%Y')
+    source['month'] = source['DT_STRATA'].dt.month
+    
+    # 2. Identify hourly columns (0100 to 2400)
+    # The source has PCT_HOURLY_0100 ... PCT_HOURLY_2400 and PCT_HOURLY_2500
+    # We only want 0100-2400.
+    hourly_cols = [col for col in source.columns if col.startswith('PCT_HOURLY_') and col != 'PCT_HOURLY_2500']
+    
+    # 3. Melt the dataframe
+    # Extract hour from column name: PCT_HOURLY_0100 -> 1
+    def get_hour(col_name):
+        # Extract the last 4 digits
+        hour_str = col_name.split('_')[-1]
+        return int(hour_str)
+    
+    # Create a mapping for column names to hours
+    col_to_hour = {col: get_hour(col) for col in hourly_cols}
+    
+    # Melt
+    melted = source.melt(
+        id_vars=['month'], 
+        value_vars=hourly_cols, 
+        var_name='hour_col', 
+        value_name='value'
+    )
+    
+    # Map column names to integer hours
+    melted['hour'] = melted['hour_col'].map(col_to_hour)
+    
+    # 4. Group by hour and month, calculate mean
+    # The target seems to be the average percentage for each hour across all strata/days in that month
+    agg_df = melted.groupby(['hour', 'month'])['value'].mean().reset_index()
+    
+    # 5. Pivot to wide format
+    # Index: hour, Columns: month, Values: mean value
+    pivoted = agg_df.pivot(index='hour', columns='month', values='value')
+    
+    # 6. Rename month columns to lowercase month names
+    month_names = {
+        1: 'january', 2: 'february', 3: 'march', 4: 'april',
+        5: 'may', 6: 'june', 7: 'july', 8: 'august',
+        9: 'september', 10: 'october', 11: 'november', 12: 'december'
+    }
+    pivoted.rename(columns=month_names, inplace=True)
+    
+    # 7. Reset index and ensure correct column order and types
+    pivoted.reset_index(inplace=True)
+    
+    # Ensure hour is int
+    pivoted['hour'] = pivoted['hour'].astype(int)
+    
+    # Sort by hour
+    pivoted.sort_values('hour', inplace=True)
+    pivoted.reset_index(drop=True, inplace=True)
+    
+    # Select only the required columns in the correct order
+    target_cols = ['hour', 'january', 'february', 'march', 'april', 'may', 'june', 
+                   'july', 'august', 'september', 'october', 'november', 'december']
+    
+    result = pivoted[target_cols]
+    
+    return result
+```

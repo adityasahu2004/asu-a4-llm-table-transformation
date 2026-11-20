@@ -1,0 +1,102 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `date` column from string format (`%m/%d/%Y`) to pandas datetime objects.
+2.  **Generate Target Date Range**: The target dataset contains dates that are not present in the source (e.g., `1/1/2015` is in target but not source). The target dates appear to be a specific subset of dates (likely bi-weekly or specific reporting dates) spanning from `1/1/2015` to `7/2/2015` (based on the sample). However, looking at the source, it has 182 rows with distinct dates. The target has 183 rows. The target dates in the sample are `1/1/2015`, `1/17/2015`, `2/2/2015`, etc. These look like specific reporting dates.
+    *   *Correction/Refinement*: The prompt states "Compute the result only from the source DataFrame". However, the target has *different* dates than the source. The source dates are `7/3/2015` to `12/31/2015`. The target dates are `1/1/2015` to `7/2/2015`. This implies the transformation is not just a row-wise mapping of existing source rows, but likely involves generating a new date index or the source provided in the "sample" is just a subset of a larger context, or the "source" in the evaluation will contain the necessary dates.
+    *   *Re-reading constraints*: "The evaluation source contains different rows; never copy target rows... Compute the result only from the source DataFrame."
+    *   *Observation*: The source schema shows `date` as a string. The target has `dt_strata` (string) and `dow` (int). The target hourly columns `pct_hourly_XX00` correspond to source `Hour X`.
+    *   *Key Insight*: The target row count (183) is very close to the source row count (182). The dates in the target sample (`1/1/2015`...`7/2/2015`) are *before* the source sample dates (`7/3/2015`...`12/31/2015`). This suggests the "source" provided in the JSON is just a *sample* of the actual evaluation source, which likely contains the full range of dates needed. Or, more likely, the transformation is simply:
+        1.  Parse the `date` column.
+        2.  Create `dt_strata` by formatting the date as `%m/%d/%Y`.
+        3.  Create `dow` by extracting the day of the week (0=Monday, 6=Sunday).
+        4.  Rename `Hour 1`...`Hour 24` to `pct_hourly_0100`...`pct_hourly_2400`.
+        5.  Add a new column `pct_hourly_2500` filled with `NaN`.
+        6.  Sort by date? The target sample is sorted by date. The source sample is sorted by date.
+    *   *Wait*: The target has 183 rows, source has 182. The target dates in the sample are `1/1/2015` to `7/2/2015`. The source dates are `7/3/2015` to `12/31/2015`. These are disjoint sets. This implies the evaluation source will contain the dates that map to the target. The transformation logic must be generic: process whatever dates are in the source.
+    *   *Hypothesis*: The transformation is a direct row-wise transformation of the source DataFrame. The discrepancy in the sample dates is because the sample provided in the JSON is just a snippet, and the "evaluation source" will contain the rows that correspond to the target. I should not try to generate missing dates. I should transform the existing rows.
+    *   *Check*: Does the source have 182 rows and target 183? Yes. This is a slight mismatch. However, usually in these tasks, if the dates are disjoint, it might be a "shift" or the source sample is misleading. But looking at the values:
+        *   Source `Hour 1` is `0.0002398657`. Target `pct_hourly_0100` is `0.0002398657`.
+        *   Source `Hour 6` varies. Target `pct_hourly_0600` varies similarly.
+        *   The values match exactly.
+        *   Therefore, the operation is: **Rename columns, parse date, format date, extract day-of-week, add NaN column.**
+        *   Why the row count difference? 182 vs 183. Maybe the source has a header or index issue? Or maybe the target includes a date not in the source?
+        *   Let's look at the target `dt_strata` first/last: `1/1/2015` to `7/2/2015`.
+        *   Source `date` first/last: `7/3/2015` to `12/31/2015`.
+        *   This is extremely suspicious. The samples are completely different time periods.
+        *   *Alternative Interpretation*: Is it possible the source *is* the target but shifted? No, the values are identical.
+        *   *Standard Assumption*: In these "infer transformation" tasks, the "source" and "target" samples are often just illustrative of the *schema* and *value types*, not necessarily the exact same rows if the problem involves time-series generation. However, the instruction says "Compute the result only from the source DataFrame". If I only compute from the source, I can only produce rows for dates present in the source.
+        *   If the evaluation source contains the dates `1/1/2015`...`7/2/2015`, then my code will work. If the evaluation source contains `7/3/2015`...`12/31/2015`, my code will produce those dates. The target sample in the JSON is likely from a *different* run or a specific subset. I must trust the schema mapping.
+        *   Mapping:
+            *   `date` -> `dt_strata` (formatted as `%m/%d/%Y`)
+            *   `date` -> `dow` (0-6, Monday=0)
+            *   `Hour 1` -> `pct_hourly_0100`
+            *   ...
+            *   `Hour 24` -> `pct_hourly_2400`
+            *   New column `pct_hourly_2500` = NaN.
+
+3.  **Column Renaming**:
+    *   Map `Hour N` to `pct_hourly_{N:02d}00`.
+    *   Note: `Hour 1` -> `pct_hourly_0100`. `Hour 10` -> `pct_hourly_1000`.
+
+4.  **Date Processing**:
+    *   Parse `date` using `pd.to_datetime`.
+    *   Create `dt_strata` by formatting as `%m/%d/%Y`.
+    *   Create `dow` using `.dt.dayofweek`.
+
+5.  **New Column**:
+    *   Add `pct_hourly_2500` with `NaN` values.
+
+6.  **Sorting**:
+    *   The target sample is sorted by `dt_strata`. The source sample is sorted by `date`. It is safe to sort the result by `dt_strata` (or the underlying datetime) to ensure deterministic order.
+
+7.  **Final Selection**:
+    *   Select columns in the order: `dt_strata`, `dow`, `pct_hourly_0100` ... `pct_hourly_2500`.
+
+### Python Code
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse the date column
+    # The source date format is M/D/YYYY (e.g., "7/3/2015")
+    df = source.copy()
+    df['parsed_date'] = pd.to_datetime(df['date'], format='%m/%d/%Y')
+    
+    # 2. Create dt_strata column formatted as M/D/YYYY
+    # Using strftime to match the target string format exactly
+    df['dt_strata'] = df['parsed_date'].dt.strftime('%m/%d/%Y')
+    
+    # 3. Create dow column (0=Monday, ..., 6=Sunday)
+    df['dow'] = df['parsed_date'].dt.dayofweek.astype('int64')
+    
+    # 4. Rename Hour columns to pct_hourly_XX00
+    rename_map = {}
+    for i in range(1, 25):
+        old_col = f'Hour {i}'
+        new_col = f'pct_hourly_{i:02d}00'
+        rename_map[old_col] = new_col
+    
+    df = df.rename(columns=rename_map)
+    
+    # 5. Add the new column pct_hourly_2500 with NaN
+    df['pct_hourly_2500'] = np.nan
+    
+    # 6. Select and order columns
+    # Target order: dt_strata, dow, pct_hourly_0100 ... pct_hourly_2500
+    hourly_cols = [f'pct_hourly_{i:02d}00' for i in range(1, 26)]
+    final_cols = ['dt_strata', 'dow'] + hourly_cols
+    
+    df = df[final_cols]
+    
+    # 7. Sort by dt_strata to match target sample order (chronological)
+    # Since dt_strata is string M/D/YYYY, sorting lexicographically works for same-year dates.
+    # To be safe, sort by the parsed date then drop it.
+    df = df.sort_values(by='parsed_date').reset_index(drop=True)
+    
+    # Drop the helper column
+    df = df.drop(columns=['parsed_date'])
+    
+    return df
+```

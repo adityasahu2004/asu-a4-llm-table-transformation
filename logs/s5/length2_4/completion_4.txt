@@ -1,0 +1,209 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the source `Date` column (format `%m/%d/%Y`) to a pandas datetime object.
+2.  **Generate Sequence**: The target row count (183) is one greater than the source row count (182), and the target sample shows a sequence of bi-weekly dates starting from `1/1/2013` (which is 2 weeks prior to the first source date `7/3/2013` is not quite right, let's look closer).
+    *   Source first date: `7/3/2013` (Wednesday).
+    *   Source last date: `12/31/2013` (Tuesday).
+    *   Target first date: `1/1/2013` (Tuesday).
+    *   Target last date: `7/2/2013` (Tuesday).
+    *   Wait, the target sample data values correspond to the source data values?
+        *   Source `7/3/2013` Hour 1: `0.56`.
+        *   Target `7/2/2013` Hour 1: `0.66`.
+        *   Source `7/19/2013` Hour 1: `0.81`.
+        *   Target `7/2/2013` is the *last* row in the target sample? No, the target sample is sorted by date?
+        *   Let's check the mapping.
+        *   Source `12/31/2013` Hour 1: `0.94`.
+        *   Target `1/1/2013` Hour 1: `0.89`.
+        *   It seems the target dates are shifted by -2 weeks?
+        *   Source `7/3/2013` -> Target `6/19/2013`? No.
+        *   Let's look at the distinct counts. Source 182 rows. Target 183 rows.
+        *   The target dates range from `1/1/2013` to `7/2/2013`. This is exactly 183 days? No, 1/1 to 7/2 is roughly 6 months.
+        *   Actually, let's look at the frequency. Source dates are every 2 weeks (bi-weekly). `7/3`, `7/19`, `8/4`...
+        *   Target dates are also every 2 weeks. `1/1`, `1/17`, `2/3`...
+        *   The target sample shows `1/1/2013` as the first row. The source sample shows `7/3/2013` as the first row.
+        *   Is the target data *different* from the source data?
+        *   Source `7/3/2013` (Wed) values: `0.56, 0.51...`
+        *   Target `1/1/2013` (Tue) values: `0.89, 0.8...`
+        *   Target `7/2/2013` (Tue) values: `0.66, 0.61...`
+        *   Source `7/3/2013` is Wed. Source `7/19` is Fri.
+        *   It appears the Target DataFrame is constructed from a different time period or shifted. However, the instruction says "Compute the result only from the source DataFrame."
+        *   Hypothesis: The transformation involves generating a date range based on the source dates, potentially shifting them or expanding the range, and mapping the hourly data.
+        *   Let's look at the DOW.
+        *   Source `7/3/2013` is Wednesday. DOW in target for `1/1/2013` (Tuesday) is 2 (if Mon=0? No, `1/1/2013` is Tuesday. `dow`=2. If Mon=0, Tue=1. If Mon=1, Tue=2. So DOW is 1-based Mon=1... Sun=7).
+        *   Target `dow` for `1/1/2013` (Tue) is 2.
+        *   Target `dow` for `1/17/2013` (Thu) is 4.
+        *   Target `dow` for `2/3/2013` (Sun) is 0? Wait. `2/3/2013` is a Sunday. If Mon=1...Sun=7, Sun is 7. If Sun=0...Sat=6, Sun is 0.
+        *   Target `dow` for `2/3/2013` is 0.
+        *   Target `dow` for `6/15/2013` (Sat) is 6.
+        *   So `dow` is `weekday()` where Monday=0, Sunday=6.
+        *   
+        *   Now, how are the rows generated?
+        *   Source has 182 rows. Target has 183 rows.
+        *   Source dates: `7/3/2013` to `12/31/2013`.
+        *   Target dates: `1/1/2013` to `7/2/2013`.
+        *   These are disjoint time periods.
+        *   However, the problem states "Compute the result only from the source DataFrame."
+        *   This implies the source DataFrame *contains* the data for the target, or the transformation is purely structural on the existing rows, perhaps reordering or shifting indices?
+        *   But the values are different. Source `7/3` is `0.56`. Target `7/2` is `0.66`.
+        *   Wait, look at the target sample last row: `7/2/2013`.
+        *   Look at the source sample first row: `7/3/2013`.
+        *   Is it possible the target is just the source data, but the dates are shifted by -2 weeks?
+        *   If we shift Source `7/3/2013` back by 2 weeks, we get `6/19/2013`. Not `7/2`.
+        *   
+        *   Let's re-read the sample carefully.
+        *   Source Sample Row 1: `7/3/2013`. Values: `0.56...`
+        *   Target Sample Row 11 (Last): `7/2/2013`. Values: `0.66...`
+        *   
+        *   There is no obvious row-to-row mapping between the provided source sample and target sample values.
+        *   
+        *   **Correction**: In many of these "infer transformation" tasks, if the target data doesn't match the source data values directly, it might be an aggregation, a lookup, or a shift. But here, the schemas are identical in structure (hourly profiles).
+        *   
+        *   Let's look at the date sequence generation.
+        *   Target dates are every 2 weeks starting `1/1/2013`.
+        *   Source dates are every 2 weeks starting `7/3/2013`.
+        *   
+        *   If I assume the "Source" provided in the prompt is just a *sample* of the actual evaluation input, and the evaluation input might contain the dates `1/1/2013` to `7/2/2013`?
+        *   No, the prompt says "Source row count describes a training sample only".
+        *   
+        *   Let's look at the `dow` calculation again.
+        *   Target `dow` is `pd.to_datetime(dt).dt.weekday` (Mon=0, Sun=6).
+        *   
+        *   Let's look at the column mapping.
+        *   Source `1` -> Target `pct_hourly_0100`.
+        *   Source `2` -> Target `pct_hourly_0200`.
+        *   ...
+        *   Source `24` -> Target `pct_hourly_2400`.
+        *   Target has an extra column `pct_hourly_2500` which is all null.
+        *   
+        *   The critical part is the row generation.
+        *   If the source DataFrame *always* contains the specific dates needed for the target, I would just filter/sort.
+        *   But the source dates here are `7/3/2013` onwards. The target dates are `1/1/2013` onwards.
+        *   
+        *   Is it possible the transformation is: **Generate a date range from the min date of the source minus some offset, or simply generate a fixed date range?**
+        *   No, "Compute the result only from the source DataFrame."
+        *   
+        *   Let's look at the first target date `1/1/2013`.
+        *   Let's look at the last source date `12/31/2013`.
+        *   
+        *   Maybe the target is not derived from the *values* of the source rows in this specific sample, but the *schema* implies a transformation that *would* work if the source contained the right dates?
+        *   Or, is there a shift?
+        *   
+        *   Let's try to find a row in the source that matches `7/2/2013` in the target.
+        *   Target `7/2/2013` values: `0.66, 0.61, 0.58...`
+        *   Source `7/3/2013` values: `0.56, 0.51, 0.49...`
+        *   Source `7/19/2013` values: `0.81...`
+        *   
+        *   There is no match.
+        *   
+        *   **Alternative Theory**: The provided "Source" and "Target" samples are from *different* runs or the task is to map the *structure* assuming the source *will* contain the corresponding dates in the evaluation set?
+        *   
+        *   However, usually, the transformation is deterministic based on the provided source.
+        *   
+        *   Let's look at the date `1/1/2013`.
+        *   Let's look at the date `7/2/2013`.
+        *   
+        *   If I look at the source `Date` column, it has 182 distinct values.
+        *   The target `dt_strata` has 183 distinct values.
+        *   
+        *   Is it possible the target is generated by **shifting the source dates by -2 weeks**?
+        *   Source `7/3/2013` - 2 weeks = `6/19/2013`.
+        *   Target starts at `1/1/2013`.
+        *   
+        *   Let's look at the end.
+        *   Source `12/31/2013` - 2 weeks = `12/17/2013`.
+        *   Target ends at `7/2/2013`.
+        *   
+        *   This doesn't align.
+        *   
+        *   **Wait**, look at the Target Sample Data again.
+        *   Row 1: `1/1/2013`.
+        *   Row 11: `7/2/2013`.
+        *   
+        *   Look at Source Sample Data.
+        *   Row 1: `7/3/2013`.
+        *   Row 12: `12/31/2013`.
+        *   
+        *   There is a strong possibility that the **Source DataFrame in the evaluation will contain the dates found in the Target**. The sample provided might just be a mismatched snippet to test schema handling, OR the transformation involves generating the target dates from the source dates via a specific arithmetic operation.
+        *   
+        *   Let's check if `Target Date = Source Date - 6 months`?
+        *   `7/3/2013` - 6 months = `1/3/2013`. Close to `1/1/2013`.
+        *   `12/31/2013` - 6 months = `6/30/2013`. Close to `7/2/2013`.
+        *   
+        *   Let's check the DOW.
+        *   `1/3/2013` is Thursday. Target `1/1/2013` is Tuesday.
+        *   
+        *   Let's check if `Target Date = Source Date - 182 days`?
+        *   `7/3/2013` - 182 days = `1/3/2013`.
+        *   
+        *   Let's look at the distinct values again.
+        *   Source: 182 rows.
+        *   Target: 183 rows.
+        *   
+        *   If the transformation is simply:
+        *   1. Parse `Date`.
+        *   2. Create `dt_strata` as `MM/DD/YYYY`.
+        *   3. Create `dow` as `weekday` (Mon=0).
+        *   4. Map hours.
+        *   5. Add null column.
+        *   
+        *   And the *content* of the target sample is just an example of what the output *looks like* for a different input?
+        *   
+        *   The prompt says: "The evaluation source contains different rows; never copy target rows... Compute the result only from the source DataFrame."
+        *   
+        *   If I assume the standard transformation for this schema pattern (which appears in other problems):
+        *   1. Rename `Date` to `dt_strata` and format.
+        *   2. Calculate `dow` from `dt_strata`.
+        *   3. Rename `1`..`24` to `pct_hourly_0100`..`pct_hourly_2400`.
+        *   4. Add `pct_hourly_2500` as NaN.
+        *   
+        *   Why the row count difference (182 vs 183)?
+        *   Source: `7/3/2013` to `12/31/2013`.
+        *   Target: `1/1/2013` to `7/2/2013`.
+        *   
+        *   If the evaluation source *actually* contains the dates `1/1/2013` to `7/2/2013`, then the simple rename/format works.
+        *   If the evaluation source contains `7/3/2013` to `12/31/2013`, and I need to output `1/1/2013` to `7/2/2013`, I cannot do that without external knowledge or a shift.
+        *   
+        *   Given the constraint "Compute the result only from the source DataFrame", and the fact that `dow` and `dt_strata` are derived from the date, it is highly likely that **the evaluation source will contain the dates corresponding to the target**. The sample provided in the prompt might be misleading or from a different partition, but the *schema transformation* is the key.
+        *   
+        *   However, there is a row count difference. 182 vs 183.
+        *   If the source has 182 rows, and I just transform them, I get 182 rows.
+        *   The target has 183 rows.
+        *   
+        *   Is it possible the target includes an extra row? Or the source sample is missing one?
+        *   Source distinct: 182.
+        *   Target distinct: 183.
+        *   
+        *   Let's look at the dates again.
+        *   Target: `1/1/2013` (Tue) to `7/2/2013` (Tue).
+        *   Bi-weekly Tue-Wed?
+        *   `1/1` (Tue), `1/17` (Thu), `2/3` (Sun)... The DOWs are mixed.
+        *   
+        *   If I simply transform the source rows, preserving the count, and the evaluation source has 183 rows (matching the target), then the simple transformation is correct. The "Source rows: 182" in the JSON might be specific to that sample, but the "Target rows: 183" implies the evaluation target has 183. If the evaluation source also has 183, then `transform(source)` should return 183 rows.
+        *   
+        *   I will proceed with the assumption that the transformation is a direct structural mapping of the source rows to the target schema, assuming the source data in evaluation matches the target's temporal domain.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date
+    dt = pd.to_datetime(source['Date'], format='%m/%d/%Y')
+    
+    # Create the output dataframe
+    out = pd.DataFrame(index=source.index)
+    
+    # Format dt_strata as MM/DD/YYYY
+    out['dt_strata'] = dt.dt.strftime('%m/%d/%Y')
+    
+    # Calculate dow: Monday=0, Sunday=6
+    out['dow'] = dt.dt.weekday.astype(int)
+    
+    # Map hourly columns 1-24 to pct_hourly_0100-2400
+    for h in range(1, 25):
+        out[f'pct_hourly_{h:02d}00'] = source[str(h)]
+        
+    # Add the 25th hour column as NaN
+    out['pct_hourly_2500'] = np.nan
+    
+    return out.reset_index(drop=True)
+```

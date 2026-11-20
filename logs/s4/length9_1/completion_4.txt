@@ -1,0 +1,118 @@
+Operator plan:
+1. Derive `season` from `MONTH`: Winter (12,1,2), Spring (3,4,5), Summer (6,7,8), Fall (9,10,11).
+2. Derive `daytype` by constructing a date from `YEAR`, `MONTH`, `DAY` and checking if it's a weekend (Saturday/Sunday).
+3. Keep `hour` as `HOUR`.
+4. Compute `temperature_range` as `HIGH_1 - LOW_1`. The target shows a constant 100998.0, which corresponds to 99999 - (-999). Since `LOW_1` is always -999 and `HIGH_1` varies, but the target column is constant, I will verify if the target implies a fixed range or if I should use the specific `HIGH_1` and `LOW_1` of the row. Looking at the target sample, `temperature_range` is always `100998.0`. `low_end` is always `-999.0` and `high_end` is always `99999.0`. This suggests the target simplifies the data to a single global range for the "constant" and "coefficient" parameters, effectively ignoring the specific `NUMBER_OF_RANGES` and `LOW/HIGH` columns for the *values* of low/high in the output, but keeping the constant/coeff from the first range (which covers the whole spectrum in many cases, or perhaps the logic is just to output the global bounds).
+   - Wait, let's look closer. The source has `NUMBER_OF_RANGES` up to 4. The target has `low_end` and `high_end` as constants. The target `constant` and `coefficient` have many distinct values (2641). The source `CONSTANT` and `COEFF_1` also have many distinct values.
+   - The target row count (118274) is exactly source row count (118273) + 1? Or is it a rounding/display artifact? The note says "Source row count describes a training sample only". The target sample has 12 rows. The source sample has 12 rows.
+   - Let's check the mapping of `CONSTANT` and `COEFF_1`.
+   - Source row 0: MP1, 7/2/2013, Hour 1400. Constant: 381.43... Coeff: -1.66...
+   - Target row 0: SPRING, WEEKDAY, 100.0... This doesn't match the first source row directly in order. The target is sorted or aggregated?
+   - Actually, looking at the target `hour` values: 100, 2400, 2300... These are not 1-24. They seem to be the `HOUR` column from source (e.g., 1400, 1300, 1100...).
+   - The target `season` for `MONTH` 7 (July) should be SUMMER. But Target Row 0 is SPRING. Source Row 0 is July (SUMMER).
+   - Let's check if the target is a *different* dataset or a transformation.
+   - Source `PROFILE_CLASS` is dropped.
+   - The target `constant` and `coefficient` values in the sample:
+     - Target Row 0: 27.145...
+     - Source Row 0: 381.43...
+   - There is no obvious arithmetic link between the sample rows 1-to-1.
+   - However, the problem states "Infer the transformation". Usually this means column-wise operations or simple reshaping.
+   - Let's look at the distinct counts.
+   - Target `temperature_range` is constant 100998.0.
+   - Target `low_end` is constant -999.0.
+   - Target `high_end` is constant 99999.0.
+   - Target `hour` has 25 distinct values. Source `HOUR` has 25 distinct values.
+   - Target `season` has 4 values. Source `MONTH` has 12.
+   - Target `daytype` has 2 values.
+   - Target `constant` and `coefficient` have 2641 distinct values. Source `CONSTANT` has 2553. Source `COEFF_1` has 2553.
+   - The increase in distinct values for constant/coeff might be due to different combinations or perhaps the target includes all coefficients (COEFF_1..COEFF_4) unpivoted? No, the row count is roughly the same (118k vs 118k). If it were unpivoted, it would be 4x or 5x.
+   - Let's re-read the target schema. `rows: 118274`. Source `rows: 118273`. This is suspicious. Maybe one row is added? Or it's just noise in the count description.
+   - Let's assume a 1-to-1 row mapping for now, as is typical in these problems unless aggregation is obvious.
+   - If it's 1-to-1, why does the sample not align?
+     - Source Sample Row 0: July 2, 2013 (Sunday). Season: Summer. Daytype: Weekend. Hour: 1400.
+     - Target Sample Row 0: Spring, Weekday, Hour 100.
+     - Target Sample Row 1: Spring, Weekend, Hour 2400.
+     - Target Sample Row 5: Spring, Weekend, Hour 1900.
+     - Target Sample Row 10: Summer, Weekend, Hour 1300.
+   - The target sample rows are likely just a random subset or sorted differently. The prompt says "sample" data, not necessarily the first N rows in the same order.
+   - I will implement the logical derivation:
+     1. `season`: Map Month to Season.
+     2. `daytype`: Map Date to Weekday/Weekend.
+     3. `hour`: Copy `HOUR`.
+     4. `temperature_range`: Constant 100998.0 (or `HIGH_1 - LOW_1`? Source `LOW_1` is -999. `HIGH_1` varies. But target `high_end` is constant 99999. This implies the target ignores the specific `HIGH_1` bounds and uses a global range. The `temperature_range` is `99999 - (-999) = 100998`).
+     5. `constant`: Copy `CONSTANT`.
+     6. `coefficient`: Copy `COEFF_1`. (Why? It's the primary coefficient. The others are for sub-ranges. Since the output range is global, maybe only the first range's coeff is used? Or perhaps `COEFF_1` is the main one).
+     7. `low_end`: Constant -999.0.
+     8. `high_end`: Constant 99999.0.
+
+   Let's double check if `COEFF_1` is the right choice. The target has 2641 distinct coefficients. Source `COEFF_1` has 2553. The difference is small. It's plausible.
+
+   One detail: The target row count is 118274, source is 118273. This might be a typo in the spec or an artifact. I will preserve the source rows.
+
+   Season Mapping:
+   - Winter: 12, 1, 2
+   - Spring: 3, 4, 5
+   - Summer: 6, 7, 8
+   - Fall: 9, 10, 11
+
+   Daytype Mapping:
+   - Construct datetime from YEAR, MONTH, DAY.
+   - If weekday (0-4) -> WEEKDAY
+   - If weekend (5-6) -> WEEKEND
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Derive season from MONTH
+    def get_season(month):
+        if month in [12, 1, 2]:
+            return 'WINTER'
+        elif month in [3, 4, 5]:
+            return 'SPRING'
+        elif month in [6, 7, 8]:
+            return 'SUMMER'
+        elif month in [9, 10, 11]:
+            return 'FALL'
+        return 'UNKNOWN'
+    
+    source['season'] = source['MONTH'].astype(int).apply(get_season)
+    
+    # Derive daytype from YEAR, MONTH, DAY
+    # Create a datetime object
+    source['date_dt'] = pd.to_datetime(
+        source['YEAR'].astype(int).astype(str) + '-' + 
+        source['MONTH'].astype(int).astype(str).str.zfill(2) + '-' + 
+        source['DAY'].astype(int).astype(str).str.zfill(2)
+    )
+    
+    def get_daytype(dt):
+        # weekday() returns 0 (Mon) to 6 (Sun)
+        if dt.weekday() >= 5:
+            return 'WEEKEND'
+        else:
+            return 'WEEKDAY'
+            
+    source['daytype'] = source['date_dt'].apply(get_daytype)
+    
+    # Construct the output dataframe
+    out = pd.DataFrame()
+    out['season'] = source['season']
+    out['daytype'] = source['daytype']
+    out['hour'] = source['HOUR']
+    
+    # Temperature range is constant in target: 99999 - (-999) = 100998
+    out['temperature_range'] = 100998.0
+    
+    # Constant and Coefficient
+    # Assuming COEFF_1 is the primary coefficient
+    out['constant'] = source['CONSTANT']
+    out['coefficient'] = source['COEFF_1']
+    
+    # Low and High ends are constant in target
+    out['low_end'] = -999.0
+    out['high_end'] = 99999.0
+    
+    return out
+```

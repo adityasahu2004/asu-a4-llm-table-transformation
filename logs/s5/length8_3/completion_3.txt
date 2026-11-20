@@ -1,0 +1,244 @@
+**Operator Plan:**
+
+1.  **Parse Date**: Convert the `date` column strings into datetime objects.
+2.  **Extract Components**: Extract the `Month` (1-12) and `Hour` (0-23) from the datetime.
+3.  **Filter/Deduplicate**: The target output shows a sparse set of hours (0, 2, 4, ..., 20, 23) and specific months (Sep, Oct, Nov) populated with the value `73.0`. Other months are `NaN`. The source data contains multiple entries per month/hour potentially, or just sparse entries. Looking at the target, it seems to be a pivot table where rows are Hours and columns are Months. The values are the `zone_016_cooling_sp`.
+    *   Wait, the target has 24 rows. The sample data shows hours: 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 23. This is only 12 rows in the sample, but the schema says 24 rows. The sample data is just a subset. The target schema implies all 24 hours (0-23) are present.
+    *   The values in Sep, Oct, Nov are `73.0`. In the source, `zone_016_cooling_sp` is mostly `73.0` and some `84.0`. The `84.0` appears in Jan 2019. The target has `NaN` for January. This suggests we might need to filter out specific values or the `84.0` is an outlier/invalid for this specific view, OR the pivot averages them? No, distinct values in target Sep/Oct/Nov are exactly `73.0`.
+    *   Let's look at the source again.
+        *   Nov 2018: 73.0
+        *   Dec 2018: 73.0
+        *   Jan 2019: 84.0 (one entry), 73.0 (one entry).
+    *   The target has `NaN` for December and January.
+    *   The target has `73.0` for Sep, Oct, Nov.
+    *   This implies a filter: Keep rows where `zone_016_cooling_sp` is `73.0`? If we filter for 73.0, then Jan has one 73.0 row. Why is Jan NaN?
+    *   Maybe the target is based on a specific year or range? The source spans Nov 2018 to Jan 2019.
+    *   Let's look at the distinct hours in the target sample: 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 23. These are the hours present in the *source sample*. The source sample has:
+        *   21:45 -> Hour 21? No, target has 20, then 23.
+        *   16:15 -> Hour 16
+        *   10:45 -> Hour 10
+        *   5:15 -> Hour 5? Target has 4, 6.
+        *   23:45 -> Hour 23
+        *   18:15 -> Hour 18
+        *   12:50 -> Hour 12
+        *   7:20 -> Hour 7? Target has 6, 8.
+        *   1:50 -> Hour 1? Target has 0, 2.
+        *   20:20 -> Hour 20
+        *   8:45 -> Hour 8
+        *   3:20 -> Hour 3? Target has 2, 4.
+    *   The target hours (0, 2, 4...) do not match the source hours (1, 3, 5...) directly.
+    *   Hypothesis: The target `Hour` column is the *integer hour part* of the timestamp?
+        *   Source: 11/6/2018 21:45. Hour 21. Target row 0 is Hour 0.
+        *   Source: 11/11/2018 16:15. Hour 16. Target row 1 is Hour 2.
+    *   This doesn't align.
+
+    *   Alternative Hypothesis: The target is a **Pivot Table** of `zone_016_cooling_sp` by `Month` and `Hour`.
+    *   Why are specific hours 0, 2, 4... in the sample? The sample is just a snippet. The schema says 24 rows. It likely contains all hours 0-23.
+    *   Why are Sep, Oct, Nov 73.0?
+        *   In the source, Nov, Dec, Jan are present. Sep and Oct are NOT in the source sample provided, but might be in the full source.
+        *   If the full source has data for Sep/Oct/Nov with value 73.0, and we pivot, we get 73.0.
+        *   Why is Dec NaN? The source has Dec 2018 with 73.0. If Dec is NaN in target, maybe the target only includes data from a specific period or filters out Dec? Or maybe the `zone_016_cooling_sp` for Dec is considered invalid?
+        *   Actually, look at the target `distinct_values` for September, October, November: `[73.0]`.
+        *   Look at January: `NaN`.
+        *   Look at December: `NaN`.
+        *   The source has `73.0` for Nov, Dec, Jan (mostly).
+        *   Perhaps the transformation filters for `zone_016_cooling_sp == 73.0` AND excludes certain months? Or perhaps it's a moving average? No, "deterministic".
+        *   Let's look at the `Hour` column in the target again. `0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 23`.
+        *   These are the hours from the *source* sample if we take the integer part?
+            *   21:45 -> 21. Not in target sample list (0,2,4...).
+            *   16:15 -> 16. In target.
+            *   10:45 -> 10. In target.
+            *   5:15 -> 5. Not in target.
+            *   23:45 -> 23. In target.
+            *   18:15 -> 18. In target.
+            *   12:50 -> 12. In target.
+            *   7:20 -> 7. Not in target.
+            *   1:50 -> 1. Not in target.
+            *   20:20 -> 20. In target.
+            *   8:45 -> 8. In target.
+            *   3:20 -> 3. Not in target.
+        *   The target sample hours correspond to the **even hours** (plus 23) present in the source?
+        *   Source hours: 21, 16, 10, 5, 23, 18, 12, 7, 1, 20, 8, 3.
+        *   Even hours in source: 16, 10, 23(no), 18, 12, 20, 8.
+        *   Target sample hours: 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 23.
+        *   This looks like the target is **all** hours 0-23, but the sample just picked rows 0, 2, 4...? No, the sample data values for Hour are explicitly 0, 2, 4...
+        *   Wait, the target schema says `distinct: 24` for Hour. So all hours 0-23 exist.
+        *   The sample data provided for the target is a subset of rows.
+        *   The values for Sep/Oct/Nov are 73.0.
+        *   The values for Jan/Dec are NaN.
+        *   This implies that for the months Jan and Dec, there is either no data or the data is filtered out.
+        *   In the source, we have Nov, Dec, Jan.
+        *   If the target has NaN for Dec, but source has data for Dec, then Dec data is excluded.
+        *   If the target has NaN for Jan, but source has data for Jan, then Jan data is excluded.
+        *   Why exclude Dec and Jan?
+        *   Maybe the valid range is Sep, Oct, Nov?
+        *   Or maybe the filter is `zone_016_cooling_sp == 73.0`?
+            *   Nov: 73.0 -> Keep.
+            *   Dec: 73.0 -> Keep? But target is NaN.
+            *   Jan: 73.0 and 84.0. If we keep 73.0, Jan should have data. But target is NaN.
+        *   Perhaps the filter is on the **Date** range?
+        *   Source dates: Nov 2018 - Jan 2019.
+        *   Target months: Sep, Oct, Nov populated. Dec, Jan empty.
+        *   This is contradictory if the source only has Nov-Jan. Where do Sep and Oct come from? They must be in the full source.
+        *   Why are Dec and Jan empty if they are in the source?
+        *   Maybe the target represents a **seasonal profile** where only Sep-Nov are "cooling season"?
+        *   Or maybe the `zone_016_cooling_sp` value `73.0` is the "setpoint" and `84.0` is something else, and for Dec/Jan the setpoint is not 73.0? But source shows 73.0 for Dec.
+        *   Let's look closer at the source `zone_016_cooling_sp`.
+            *   Nov: 73.0
+            *   Dec: 73.0
+            *   Jan: 84.0, 73.0
+        *   If the target is a pivot of the *median* or *mean*, and Dec/Jan are NaN, it means no rows survived the filter for Dec/Jan.
+        *   What filter removes Dec and Jan but keeps Nov?
+        *   Maybe `date < '2019-01-01'`?
+            *   Nov 2018: Keep.
+            *   Dec 2018: Keep.
+            *   Jan 2019: Drop.
+            *   This would make Jan NaN. But Dec would still be 73.0. Target Dec is NaN.
+        *   Maybe `date < '2018-12-01'`?
+            *   Nov 2018: Keep.
+            *   Dec 2018: Drop.
+            *   Jan 2019: Drop.
+            *   This fits Nov=73, Dec=NaN, Jan=NaN.
+            *   Does it fit Sep/Oct? They are before Dec 2018, so they would be kept.
+            *   This seems plausible. The transformation filters for dates before December 1st, 2018 (or maybe a specific fiscal year?).
+            *   Let's check the distinct values in source `date`. `11/6/2018` to `1/18/2019`.
+            *   If we filter `dt < '2018-12-01'`, we keep Nov 2018. We drop Dec 2018 and Jan 2019.
+            *   This explains why Dec and Jan are NaN in the target.
+            *   This explains why Nov is 73.0.
+            *   This explains why Sep/Oct are 73.0 (assuming they exist in the full source and are before Dec 2018).
+
+    *   So the plan:
+        1.  Parse `date`.
+        2.  Filter rows where `date < '2018-12-01'` (or maybe `date < '2019-01-01'` and Dec is NaN for another reason? No, Dec 2018 is in source. If Dec is NaN, it must be filtered or the value is different. But source Dec is 73.0. So it must be filtered).
+        3.  Wait, is the cutoff date fixed? The prompt says "Infer a general transformation... Column names, unit factors, and date format strings are permitted literals." It doesn't explicitly ban date literals, but usually, we should avoid hardcoding years if possible. However, if the logic is "Keep data from the previous year" or "Keep data before Jan 1", it might be relative.
+        4.  But "Dec" is NaN. "Jan" is NaN. "Nov" is 73.
+        5.  If the cutoff was `Jan 1, 2019`, Dec would be included.
+        6.  If the cutoff was `Dec 1, 2018`, Dec would be excluded.
+        7.  Why `Dec 1, 2018`? Maybe the data is for "Cooling Season" which ends in Nov?
+        8.  Let's assume the filter is `dt < pd.Timestamp('2018-12-01')`. This is a bit specific.
+        9.  Is there another pattern?
+            *   Source `zone_016_cooling_sp` has `73.0` and `84.0`.
+            *   Target has `73.0`.
+            *   Maybe we filter for `zone_016_cooling_sp == 73.0`?
+                *   Nov: 73.0 -> Keep.
+                *   Dec: 73.0 -> Keep.
+                *   Jan: 73.0 -> Keep.
+                *   This would result in Jan/Dec having 73.0. But they are NaN.
+            *   So filtering by value alone doesn't explain Dec/Jan NaN.
+
+    *   Let's look at the `Hour` column again.
+        *   Target has 24 rows, Hours 0-23.
+        *   The values are aggregated (likely mean/median/mode) of `zone_016_cooling_sp` for that Hour and Month.
+        *   Since the value is constant 73.0 for the kept months, the aggregation doesn't change it.
+
+    *   What if the "Dec" and "Jan" NaNs are because there is **no data** for those hours in the filtered set?
+        *   If we filter for `date < '2018-12-01'`, we have Nov data.
+        *   Do we have data for all hours 0-23 in Nov?
+        *   The source sample has sparse hours. The full source might have all hours.
+        *   If the full source has all hours for Nov, Sep, Oct, then the pivot will fill them.
+        *   If the full source has NO data for Dec/Jan *after filtering*, they are NaN.
+
+    *   So the key is the filter. `date < '2018-12-01'` seems the most likely candidate given the data.
+    *   However, hardcoding `2018-12-01` is risky. Is there a relative way?
+    *   The source data spans 2018-2019.
+    *   Maybe the filter is `dt.month <= 11`?
+        *   Nov (11) -> Keep.
+        *   Dec (12) -> Drop.
+        *   Jan (1) -> Keep? No, Jan is NaN.
+        *   So `dt.month <= 11` would keep Jan.
+    *   Maybe `dt.month >= 9 and dt.month <= 11`?
+        *   Sep, Oct, Nov -> Keep.
+        *   Dec, Jan -> Drop.
+        *   This fits the target perfectly (Sep/Oct/Nov populated, others NaN).
+        *   This assumes the "Cooling Season" is Sep-Nov.
+
+    *   Let's try this logic:
+        1.  Parse `date`.
+        2.  Filter for months 9, 10, 11 (September, October, November).
+        3.  Extract `Hour` and `Month`.
+        4.  Pivot `zone_016_cooling_sp` with `Hour` as index, `Month` as columns.
+        5.  Rename columns to Month names.
+        6.  Reindex to ensure all 24 hours (0-23) are present.
+        7.  Ensure column order: Jan, Feb, ..., Dec.
+
+    *   Let's verify the "Month" names in the target.
+        *   `January`, `February`, ..., `December`.
+
+    *   Implementation details:
+        *   `pd.to_datetime(source['date'])`
+        *   Filter: `df[df['dt'].dt.month.isin([9, 10, 11])]`
+        *   Add `Hour` = `df['dt'].dt.hour`
+        *   Add `Month` = `df['dt'].dt.month`
+        *   Pivot: `pivot(index='Hour', columns='Month', values='zone_016_cooling_sp')`
+        *   The pivot will only have columns 9, 10, 11.
+        *   We need columns for all months.
+        *   Create a DataFrame with index 0-23 and columns for all months, initialized to NaN.
+        *   Fill in the pivoted data.
+        *   Rename columns 9->September, etc.
+
+    *   Wait, is it possible the filter is just `dt < '2019-01-01'` and the Dec data is missing from the *full* source for some hours?
+        *   If Dec data existed in the full source, and we didn't filter it, Dec would be populated.
+        *   The fact that Dec is *entirely* NaN (24 nulls) suggests no Dec data survived.
+        *   Given the source sample *has* Dec data, the filter must actively remove it.
+        *   The `month in [9, 10, 11]` filter is robust and explains the pattern.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse dates
+    df = source.copy()
+    df['dt'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract Hour and Month
+    df['Hour'] = df['dt'].dt.hour
+    df['Month'] = df['dt'].dt.month
+    
+    # Filter for Cooling Season (Sep, Oct, Nov)
+    # Based on target having data for Sep, Oct, Nov and NaN for others
+    df_filtered = df[df['Month'].isin([9, 10, 11])]
+    
+    # Pivot to get Hour x Month matrix
+    # Values are zone_016_cooling_sp
+    pivot_df = df_filtered.pivot_table(
+        index='Hour', 
+        columns='Month', 
+        values='zone_016_cooling_sp', 
+        aggfunc='mean' # Mean/Mode/Median all same for constant 73.0
+    )
+    
+    # Create a full index of 0-23
+    full_index = pd.RangeIndex(0, 24)
+    pivot_df = pivot_df.reindex(full_index)
+    
+    # Map month numbers to names
+    month_names = {
+        1: 'January', 2: 'February', 3: 'March', 4: 'April',
+        5: 'May', 6: 'June', 7: 'July', 8: 'August',
+        9: 'September', 10: 'October', 11: 'November', 12: 'December'
+    }
+    
+    # Rename columns
+    pivot_df = pivot_df.rename(columns=month_names)
+    
+    # Ensure all month columns exist (for NaN months)
+    for m in range(1, 13):
+        if month_names[m] not in pivot_df.columns:
+            pivot_df[month_names[m]] = np.nan
+            
+    # Sort columns by standard month order
+    ordered_cols = [month_names[m] for m in range(1, 13)]
+    pivot_df = pivot_df[ordered_cols]
+    
+    # Rename index to 'Hour'
+    pivot_df.index.name = 'Hour'
+    
+    # Reset index to make 'Hour' a column
+    result = pivot_df.reset_index()
+    
+    # Ensure Hour is int
+    result['Hour'] = result['Hour'].astype(int)
+    
+    return result
+```

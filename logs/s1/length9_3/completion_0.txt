@@ -1,0 +1,256 @@
+### Operator Plan
+
+1.  **Parse `SEASON DAY TYPE`**:
+    *   The source column `SEASON DAY TYPE` contains strings like "June WE", "July WD", etc.
+    *   Extract the month part to determine the `season`. Based on the target distinct values ("SPRING", "SUMMER") and typical meteorological definitions:
+        *   Spring: March, April, May, June (Note: June is often summer, but let's look at the data. The sample source has June, July, August, September, October, November, December. The target has SPRING and SUMMER. This implies a mapping. Let's look closer.
+        *   Actually, usually:
+            *   Spring: Mar, Apr, May
+            *   Summer: Jun, Jul, Aug
+            *   Fall: Sep, Oct, Nov
+            *   Winter: Dec, Jan, Feb
+        *   However, the target only has "SPRING" and "SUMMER". This suggests the source data might only contain months that map to these two, or there's a specific mapping.
+        *   Let's check the source sample months: June, July, August, September, October, November, December.
+        *   If June -> Summer, July -> Summer, August -> Summer.
+        *   September, October, November, December? These are usually Fall/Winter.
+        *   Wait, the target distinct values are ONLY "SPRING" and "SUMMER". This is strange if the source has Dec/Nov.
+        *   Let's re-read the distinct values in target: `["SPRING", "SUMMER"]`.
+        *   Let's look at the source sample again. It has "June WE", "July WD", "August WD", "September WD", "October WD", "November WD", "December WD".
+        *   Perhaps the mapping is different? Or maybe the "SPRING" label is applied to certain months?
+        *   Let's look at the `temperature_range` or other columns to see if there's a clue.
+        *   Actually, let's look at the `SEASON DAY TYPE` parsing more carefully.
+        *   "June WE" -> Month: June, Type: WE.
+        *   "July WD" -> Month: July, Type: WD.
+        *   Target `daytype`: "WEEKDAY" or "WEEKEND".
+            *   "WD" -> "WEEKDAY"
+            *   "WE" -> "WEEKEND"
+        *   Target `season`: "SPRING" or "SUMMER".
+        *   Let's assume standard meteorological seasons but mapped to the available labels? No, that doesn't make sense for Dec/Nov.
+        *   Maybe the source data in the *evaluation* set is different? The prompt says "Source row count describes a training sample only". The evaluation source might only contain Spring/Summer months.
+        *   However, I must write a general transformation.
+        *   Let's look at the mapping logic again.
+        *   If I map:
+            *   Mar, Apr, May -> SPRING
+            *   Jun, Jul, Aug -> SUMMER
+            *   Sep, Oct, Nov -> FALL (not in target)
+            *   Dec, Jan, Feb -> WINTER (not in target)
+        *   If the target *only* has SPRING and SUMMER, it implies the input data for evaluation will likely only contain months that map to these, OR there is a different mapping.
+        *   Let's look at the sample target data.
+            *   Row 0: SPRING, WEEKDAY, 1. Source row with Hour 1?
+            *   Source Row 4: "September WD", Hour 1.
+            *   If Source Row 4 maps to Target Row 0, then September -> SPRING? That's unusual.
+            *   Let's check other rows.
+            *   Target Row 1: SPRING, WEEKEND, 4. Source Row 5: "September WE", Hour 4. Matches.
+            *   Target Row 2: SPRING, WEEKDAY, 7. Source Row 6: "October WD", Hour 8? No, Hour 8. Target Hour 7.
+            *   Let's look for Hour 7 in source. Not in the first few rows.
+            *   Let's look at Target Row 6: SUMMER, WEEKDAY, 20. Source Row 10: "December WD", Hour 20.
+            *   If Source Row 10 (December) maps to Target Row 6 (SUMMER), then December -> SUMMER?
+            *   This implies a Southern Hemisphere mapping?
+                *   Southern Hemisphere:
+                    *   Summer: Dec, Jan, Feb
+                    *   Autumn: Mar, Apr, May
+                    *   Winter: Jun, Jul, Aug
+                    *   Spring: Sep, Oct, Nov
+            *   Let's test this hypothesis:
+                *   Source "September" (Sep) -> Spring. (Matches Target Row 0/1 from Source Row 4/5).
+                *   Source "December" (Dec) -> Summer. (Matches Target Row 6 from Source Row 10).
+                *   Source "June" (Jun) -> Winter? (Not in target labels).
+                *   Source "July" (Jul) -> Winter?
+                *   Source "August" (Aug) -> Winter?
+                *   Source "October" (Oct) -> Spring.
+                *   Source "November" (Nov) -> Spring.
+            *   This fits the "SPRING" and "SUMMER" labels perfectly if the data is Southern Hemisphere.
+            *   Mapping:
+                *   Sep, Oct, Nov -> SPRING
+                *   Dec, Jan, Feb -> SUMMER
+                *   (Mar, Apr, May -> AUTUMN - likely not present or ignored)
+                *   (Jun, Jul, Aug -> WINTER - likely not present or ignored)
+            *   The target only has SPRING and SUMMER. This strongly suggests the evaluation data will only contain months mapping to these two seasons, or we should only output rows that map to these?
+            *   The target row count is 300, same as source. So all rows are kept. This implies the source data in the evaluation set will *only* contain months that map to SPRING or SUMMER.
+            *   So, I will implement the Southern Hemisphere mapping:
+                *   `season`:
+                    *   If month in ['September', 'October', 'November'] -> 'SPRING'
+                    *   If month in ['December', 'January', 'February'] -> 'SUMMER'
+                    *   (Handle others if necessary, but likely not present in eval).
+
+2.  **Extract `daytype`**:
+    *   From `SEASON DAY TYPE`, extract the last two characters.
+    *   'WD' -> 'WEEKDAY'
+    *   'WE' -> 'WEEKEND'
+
+3.  **Extract `hour`**:
+    *   Directly from source column `HOUR`.
+
+4.  **Calculate `temperature_range`**:
+    *   Target dtype is `int64`.
+    *   Looking at source columns `T_MIN_1`, `T_MAX_1`, etc.
+    *   Target sample Row 0: `temperature_range` = 53.
+    *   Source Row 4 (mapped to Target Row 0): `T_MIN_1` = 41, `T_MAX_1` = 59.5. Range = 18.5? No.
+    *   Let's check `T_MIN_2`/`T_MAX_2`: 59.5 / 68.5. Range 9.
+    *   Let's check `T_MIN_3`/`T_MAX_3`: 68.5 / 76.0. Range 7.5.
+    *   Maybe it's `T_MAX - T_MIN` from a specific index?
+    *   Let's look at Target Row 6: `temperature_range` = 38.
+    *   Source Row 10 (mapped to Target Row 6): `T_MIN_1` = 21, `T_MAX_1` = 32.5. Range 11.5.
+    *   `T_MIN_2` = 32.5, `T_MAX_2` = 43.5. Range 11.
+    *   `T_MIN_3` = 43.5, `T_MAX_3` = 62.0. Range 18.5.
+    *   None of these are 38.
+    *   Let's look at `PROFILE_MIN` and `PROFILE_MAX`.
+    *   Source Row 4: `PROFILE_MIN` = 0.566, `PROFILE_MAX` = 2.891.
+    *   Source Row 10: `PROFILE_MIN` = 0.62, `PROFILE_MAX` = 2.526.
+    *   Let's look at the `low_end` and `high_end` columns in target.
+    *   Target Row 0: `low_end` = 9, `high_end` = 62.
+    *   Target Row 6: `low_end` = 40, `high_end` = 78.
+    *   Let's look at Source Row 4 again.
+        *   `T_MIN_1`=41, `T_MAX_1`=59.5
+        *   `T_MIN_2`=59.5, `T_MAX_2`=68.5
+        *   `T_MIN_3`=68.5, `T_MAX_3`=76.0
+    *   Target Row 0 `low_end`=9, `high_end`=62.
+    *   Target Row 6 `low_end`=40, `high_end`=78.
+    *   Let's look at Source Row 10 again.
+        *   `T_MIN_1`=21, `T_MAX_1`=32.5
+        *   `T_MIN_2`=32.5, `T_MAX_2`=43.5
+        *   `T_MIN_3`=43.5, `T_MAX_3`=62.0
+    *   Is `low_end` related to `T_MIN`?
+        *   Source Row 4 `T_MIN_1` = 41. Target `low_end` = 9.
+        *   Source Row 10 `T_MIN_1` = 21. Target `low_end` = 40.
+        *   No obvious direct mapping.
+    *   Let's look at `temperature_range` again.
+        *   Target Row 0: 53.
+        *   Target Row 6: 38.
+    *   Let's look at `CONSTANT_1`, `TEMP_1`, etc.
+    *   Maybe `temperature_range` is `T_MAX_1 - T_MIN_1`?
+        *   Row 4: 59.5 - 41 = 18.5.
+        *   Row 10: 32.5 - 21 = 11.5.
+    *   Maybe it's `T_MAX_3 - T_MIN_1`?
+        *   Row 4: 76.0 - 41 = 35.
+        *   Row 10: 62.0 - 21 = 41.
+    *   Maybe it's `PROFILE_MAX * something`?
+    *   Let's look at the `low_end` and `high_end` values in the target sample more closely.
+        *   Row 0: 9, 62.
+        *   Row 1: 0, 62.
+        *   Row 2: 7, 61.
+        *   Row 3: 13, 42.
+        *   Row 4: 29, 82.
+        *   Row 5: 29, 78.
+        *   Row 6: 40, 78.
+        *   Row 7: 40, 78.
+        *   Row 8: 42, 73.
+        *   Row 9: 50, 80.
+        *   Row 10: 60, 83.
+        *   Row 11: 67, 89.
+    *   Let's look at Source Row 4 (Target Row 0):
+        *   `T_MIN_1`=41, `T_MAX_1`=59.5
+        *   `T_MIN_2`=59.5, `T_MAX_2`=68.5
+        *   `T_MIN_3`=68.5, `T_MAX_3`=76.0
+        *   `PROFILE_MIN`=0.566, `PROFILE_MAX`=2.891
+    *   Let's look at Source Row 10 (Target Row 6):
+        *   `T_MIN_1`=21, `T_MAX_1`=32.5
+        *   `T_MIN_2`=32.5, `T_MAX_2`=43.5
+        *   `T_MIN_3`=43.5, `T_MAX_3`=62.0
+        *   `PROFILE_MIN`=0.62, `PROFILE_MAX`=2.526
+    *   Is `low_end` = `T_MIN_1` - something?
+        *   Row 4: 41 -> 9. Diff 32.
+        *   Row 10: 21 -> 40. Diff -19.
+    *   Is `high_end` = `T_MAX_3`?
+        *   Row 4: 76.0 -> 62. No.
+        *   Row 10: 62.0 -> 78. No.
+    *   Let's look at `temperature_range` = `high_end` - `low_end`?
+        *   Row 0: 62 - 9 = 53. Matches Target `temperature_range` 53.
+        *   Row 6: 78 - 40 = 38. Matches Target `temperature_range` 38.
+        *   Row 1: 62 - 0 = 62. Matches Target `temperature_range` 62.
+        *   Row 2: 61 - 7 = 54. Matches Target `temperature_range` 54.
+        *   Row 3: 42 - 13 = 29. Matches Target `temperature_range` 29.
+        *   Row 4: 82 - 29 = 53. Matches Target `temperature_range` 53.
+        *   Row 5: 78 - 29 = 49. Matches Target `temperature_range` 49.
+        *   Row 7: 78 - 40 = 38. Matches Target `temperature_range` 38.
+        *   Row 8: 73 - 42 = 31. Matches Target `temperature_range` 31.
+        *   Row 9: 80 - 50 = 30. Matches Target `temperature_range` 30.
+        *   Row 10: 83 - 60 = 23. Matches Target `temperature_range` 23.
+        *   Row 11: 89 - 67 = 22. Matches Target `temperature_range` 22.
+    *   So, `temperature_range` = `high_end` - `low_end`.
+    *   Now, how to derive `low_end` and `high_end` from source?
+    *   Let's look at Source Row 4 (Target Row 0): `low_end`=9, `high_end`=62.
+    *   Source Row 10 (Target Row 6): `low_end`=40, `high_end`=78.
+    *   Source Row 5 (Target Row 1): `low_end`=0, `high_end`=62.
+        *   Source Row 5: `T_MIN_1`=39, `T_MAX_1`=57.5, `T_MIN_2`=57.5, `T_MAX_2`=69.0, `T_MIN_3`=69.0, `T_MAX_3`=76.0.
+    *   Source Row 6 (Target Row 2): `low_end`=7, `high_end`=61.
+        *   Source Row 6: `T_MIN_1`=30, `T_MAX_1`=44.5, `T_MIN_2`=44.5, `T_MAX_2`=56.0, `T_MIN_3`=56.0, `T_MAX_3`=69.0.
+    *   Source Row 7 (Target Row 3): `low_end`=13, `high_end`=42.
+        *   Source Row 7: `T_MIN_1`=44, `T_MAX_1`=61.0, `T_MIN_2`=61.0, `T_MAX_2`=57.0, `T_MIN_3`=57.0, `T_MAX_3`=76.0.
+    *   Source Row 8 (Target Row 4): `low_end`=29, `high_end`=82.
+        *   Source Row 8: `T_MIN_1`=20, `T_MAX_1`=38.0, `T_MIN_2`=38.0, `T_MAX_2`=57.0, `T_MIN_3`=57.0, `T_MAX_3`=76.0.
+    *   Source Row 9 (Target Row 5): `low_end`=29, `high_end`=78.
+        *   Source Row 9: `T_MIN_1`=25, `T_MAX_1`=42.0, `T_MIN_2`=42.0, `T_MAX_2`=55.0, `T_MIN_3`=55.0, `T_MAX_3`=68.0.
+    *   Source Row 11 (Target Row 7): `low_end`=40, `high_end`=78.
+        *   Source Row 11: `T_MIN_1`=19, `T_MAX_1`=35.0, `T_MIN_2`=35.0, `T_MAX_2`=47.5, `T_MIN_3`=47.5, `T_MAX_3`=64.0.
+    *   Source Row 12 (Target Row 8): `low_end`=42, `high_end`=73.
+        *   Source Row 12: `T_MIN_1`=19, `T_MAX_1`=35.0, `T_MIN_2`=35.0, `T_MAX_2`=47.5, `T_MIN_3`=47.5, `T_MAX_3`=64.0. (Wait, Row 11 and 12 in source sample are Dec WD and Dec WE. Target Row 7 and 8 are Summer WE 23 and Summer WE 2.
+        *   Let's re-verify the row mapping.
+        *   Source Sample Rows:
+            0: June WE, 13
+            1: July WD, 16
+            2: July WE, 19
+            3: August WD, 22
+            4: September WD, 1
+            5: September WE, 4
+            6: October WD, 8
+            7: October WE, 11
+            8: November WD, 14
+            9: November WE, 17
+            10: December WD, 20
+            11: December WE, 24
+        *   Target Sample Rows:
+            0: SPRING, WEEKDAY, 1  <- Source 4 (Sep WD, 1)
+            1: SPRING, WEEKEND, 4  <- Source 5 (Sep WE, 4)
+            2: SPRING, WEEKDAY, 7  <- Source ? (Oct WD is 8, Oct WE is 11). Maybe Source 6 is Oct WD 8? No, Target is 7.
+            3: SPRING, WEEKEND, 10 <- Source ?
+            4: SPRING, WEEKDAY, 13 <- Source 0 (June WE, 13)? But June is Summer in SH? No, June is Winter.
+            5: SPRING, WEEKEND, 16 <- Source 1 (July WD, 16)? July is Winter.
+            6: SUMMER, WEEKDAY, 20 <- Source 10 (Dec WD, 20)
+            7: SUMMER, WEEKEND, 23 <- Source 11 (Dec WE, 24)? Close.
+            8: SUMMER, WEEKEND, 2  <- Source ?
+            9: SUMMER, WEEKEND, 5  <- Source ?
+            10: SUMMER, WEEKDAY, 8 <- Source 6 (Oct WD, 8)? Oct is Spring.
+            11: SUMMER, WEEKEND, 12 <- Source ?
+
+    *   There seems to be a mismatch in my row mapping assumption. The target sample is not necessarily the first N rows of the transformed source sample. It's just a sample of the target.
+    *   However, the logic `temperature_range` = `high_end` - `low_end` is very strong.
+    *   How to get `low_end` and `high_end`?
+    *   Let's look at `low_end` values: 9, 0, 7, 13, 29, 29, 40, 40, 42, 50, 60, 67.
+    *   Let's look at `high_end` values: 62, 62, 61, 42, 82, 78, 78, 78, 73, 80, 83, 89.
+    *   Let's look at Source `T_MIN_1` and `T_MAX_1` for the corresponding rows.
+        *   Target 0 (Source 4): `T_MIN_1`=41, `T_MAX_1`=59.5. `low`=9, `high`=62.
+        *   Target 1 (Source 5): `T_MIN_1`=39, `T_MAX_1`=57.5. `low`=0, `high`=62.
+        *   Target 6 (Source 10): `T_MIN_1`=21, `T_MAX_1`=32.5. `low`=40, `high`=78.
+        *   Target 7 (Source 11): `T_MIN_1`=19, `T_MAX_1`=35.0. `low`=40, `high`=78.
+    *   Is `low_end` = `T_MIN_1` - 32?
+        *   41 - 32 = 9. (Match)
+        *   39 - 32 = 7. (Target 0). No.
+    *   Is `low_end` = `T_MIN_1` - `CONSTANT_1`?
+        *   Source 4: 41 - (-2.27) = 43.27. No.
+    *   Is `low_end` = `T_MIN_1` - `PROFILE_MIN` * 100?
+        *   Source 4: 41 - 56.6 = -15.6. No.
+    *   Let's look at `high_end`.
+        *   Source 4: 62. `T_MAX_1`=59.5. `T_MAX_2`=68.5. `T_MAX_3`=76.0.
+        *   Source 10: 78. `T_MAX_1`=32.5. `T_MAX_2`=43.5. `T_MAX_3`=62.0.
+    *   Maybe `low_end` and `high_end` are derived from `PROFILE_MIN` and `PROFILE_MAX`?
+        *   Source 4: `PROFILE_MIN`=0.566, `PROFILE_MAX`=2.891.
+        *   Source 10: `PROFILE_MIN`=0.62, `PROFILE_MAX`=2.526.
+    *   Let's look at `TEMP_1`, `RH_1`, `WIND_1`.
+    *   Let's look at `CONSTANT_1`, `TEMP_1`.
+    *   Maybe `low_end` = `T_MIN_1` - `T_MIN_1` * `PROFILE_MIN`?
+    *   Let's try to find a linear relationship.
+    *   `low_end` vs `T_MIN_1`:
+        *   (41, 9), (39, 0), (21, 40), (19, 40).
+        *   Slope between 41 and 39: (9-0)/(41-39) = 4.5.
+        *   Slope between 21 and 19: (40-40)/(21-19) = 0.
+        *   Not linear.
+    *   `low_end` vs `T_MAX_1`:
+        *   (59.5, 9), (57.5, 0), (32.5, 40), (35.0, 40).
+    *   `low_end` vs `T_MIN_2`:
+        *   Source 4: 59.5 -> 9.
+        *   Source 5: 57.5 -> 0.
+        *   Source 10: 32.5 -> 40.
+        *   Source 11: 35.0 -> 40.
+    *   `low_end` vs `T_MAX_2`:
+        *  

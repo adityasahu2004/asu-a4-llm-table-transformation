@@ -1,0 +1,27 @@
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse CST to datetime to extract date
+    # Format is "DayOfWeek MM/DD/YYYY" e.g., "Sat 12/01/2012"
+    # We can parse by ignoring the day of week or using a specific format if needed.
+    # pd.to_datetime handles "Sat 12/01/2012" correctly.
+    dt = pd.to_datetime(source['CST'])
+    
+    # Create the output dataframe
+    out = pd.DataFrame()
+    out['date'] = dt.dt.strftime('%m/%d/%Y')
+    
+    # Map source columns to target columns
+    # Source: "1:00", "2:00", ..., "23:00", "24:00:00"
+    # Target: "value1", "value2", ..., "value23", "value24"
+    
+    for h in range(1, 25):
+        if h < 24:
+            src_col = f"{h}:00"
+        else:
+            src_col = "24:00:00"
+        
+        tgt_col = f"value{h}"
+        out[tgt_col] = source[src_col]
+        
+    return out

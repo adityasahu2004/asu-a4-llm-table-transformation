@@ -1,0 +1,393 @@
+Operator plan:
+1. Parse `SEASON DAY TYPE` to extract month and day-type (WD/WE).
+2. Map months to seasons: June/July/August -> SUMMER, others -> SPRING.
+3. Map day-type: WD -> WEEKDAY, WE -> WEEKEND.
+4. Keep `HOUR` as `hour`.
+5. Compute `temperature_range` as `T_MAX_1 - T_MIN_1` (cast to int).
+6. Set `constant` and `coefficient` to NaN (as per target schema showing all nulls).
+7. Compute `low_end` and `high_end` from `PROFILE_MIN` and `PROFILE_MAX`. The target values are integers. Looking at the sample:
+   - Source `PROFILE_MIN` 0.616 -> Target `low_end` 9? No, let's look closer.
+   - Source `PROFILE_MIN` 0.661 -> Target `low_end` 0?
+   - Source `PROFILE_MIN` 0.649 -> Target `low_end` 7?
+   - Source `PROFILE_MIN` 0.63 -> Target `low_end` 13?
+   - Source `PROFILE_MIN` 0.566 -> Target `low_end` 29?
+   - Source `PROFILE_MIN` 0.585 -> Target `low_end` 29?
+   - Source `PROFILE_MIN` 0.578 -> Target `low_end` 40?
+   - Source `PROFILE_MIN` 0.586 -> Target `low_end` 40?
+   - Source `PROFILE_MIN` 0.588 -> Target `low_end` 42?
+   - Source `PROFILE_MIN` 0.645 -> Target `low_end` 50?
+   - Source `PROFILE_MIN` 0.62 -> Target `low_end` 60?
+   - Source `PROFILE_MIN` 0.693 -> Target `low_end` 67?
+
+   Let's check `high_end` vs `PROFILE_MAX`:
+   - Source `PROFILE_MAX` 2.821 -> Target `high_end` 62
+   - Source `PROFILE_MAX` 3.159 -> Target `high_end` 62
+   - Source `PROFILE_MAX` 3.226 -> Target `high_end` 61
+   - Source `PROFILE_MAX` 3.043 -> Target `high_end` 42
+   - Source `PROFILE_MAX` 2.891 -> Target `high_end` 82
+   - Source `PROFILE_MAX` 2.739 -> Target `high_end` 78
+   - Source `PROFILE_MAX` 2.173 -> Target `high_end` 78
+   - Source `PROFILE_MAX` 2.308 -> Target `high_end` 73
+   - Source `PROFILE_MAX` 2.526 -> Target `high_end` 80
+   - Source `PROFILE_MAX` 2.504 -> Target `high_end` 83
+   - Source `PROFILE_MAX` 1.731 -> Target `high_end` 89
+   - Source `PROFILE_MAX` 1.587 -> Target `high_end` ? (Last row in sample is cut off in my manual trace, let's re-read carefully).
+
+   Actually, looking at the target sample data provided:
+   Row 0: `low_end` 9, `high_end` 62. Source: `PROFILE_MIN` 0.616, `PROFILE_MAX` 2.821.
+   Row 1: `low_end` 0, `high_end` 62. Source: `PROFILE_MIN` 0.661, `PROFILE_MAX` 3.159.
+   
+   This doesn't look like a simple linear transformation of PROFILE_MIN/MAX.
+   
+   Let's look at `T_MIN_1` and `T_MAX_1`.
+   Row 0: `T_MIN_1` 68, `T_MAX_1` 75.0. `low_end` 9, `high_end` 62.
+   Row 1: `T_MIN_1` 67, `T_MAX_1` 78.5. `low_end` 0, `high_end` 62.
+   
+   Let's look at `temperature_range`.
+   Row 0: `T_MAX_1` - `T_MIN_1` = 75 - 68 = 7. Target `temperature_range` is 53.
+   Row 1: 78.5 - 67 = 11.5. Target `temperature_range` is 62.
+   
+   Wait, the target `temperature_range` values are: 53, 62, 54, 29, 53, 49, 38, 38, 31, 30, 23, 22.
+   Source `T_MAX_1` values: 75, 78.5, 76, 68.5, 59.5, 57.5, 44.5, 61, 38, 42, 32.5, 35.
+   Source `T_MIN_1` values: 68, 67, 69, 59, 41, 39, 30, 44, 20, 25, 21, 19.
+   
+   Let's check `T_MAX_1` - `T_MIN_1` again.
+   75-68=7. Target 53.
+   78.5-67=11.5. Target 62.
+   
+   Maybe `temperature_range` is derived from `PROFILE_MIN` and `PROFILE_MAX`?
+   Row 0: 0.616, 2.821. Target 53.
+   Row 1: 0.661, 3.159. Target 62.
+   
+   Let's look at the target `low_end` and `high_end` again.
+   Row 0: 9, 62.
+   Row 1: 0, 62.
+   Row 2: 7, 61.
+   Row 3: 13, 42.
+   Row 4: 29, 82.
+   Row 5: 29, 78.
+   Row 6: 40, 78.
+   Row 7: 40, 73.
+   Row 8: 42, 80.
+   Row 9: 50, 83.
+   Row 10: 60, 89.
+   Row 11: 67, ? (Sample ends).
+
+   Let's look at `T_MIN_1` and `T_MAX_1` again.
+   Row 0: 68, 75. Low 9, High 62.
+   Row 1: 67, 78.5. Low 0, High 62.
+   Row 2: 69, 76. Low 7, High 61.
+   Row 3: 59, 68.5. Low 13, High 42.
+   Row 4: 41, 59.5. Low 29, High 82.
+   Row 5: 39, 57.5. Low 29, High 78.
+   Row 6: 30, 44.5. Low 40, High 78.
+   Row 7: 44, 61. Low 40, High 73.
+   Row 8: 20, 38. Low 42, High 80.
+   Row 9: 25, 42. Low 50, High 83.
+   Row 10: 21, 32.5. Low 60, High 89.
+   Row 11: 19, 35. Low 67, High ?.
+
+   Is there a relationship between `T_MIN_1` and `low_end`?
+   68 -> 9
+   67 -> 0
+   69 -> 7
+   59 -> 13
+   41 -> 29
+   39 -> 29
+   30 -> 40
+   44 -> 40
+   20 -> 42
+   25 -> 50
+   21 -> 60
+   19 -> 67
+
+   Is there a relationship between `T_MAX_1` and `high_end`?
+   75 -> 62
+   78.5 -> 62
+   76 -> 61
+   68.5 -> 42
+   59.5 -> 82
+   57.5 -> 78
+   44.5 -> 78
+   61 -> 73
+   38 -> 80
+   42 -> 83
+   32.5 -> 89
+   35 -> ?
+
+   This looks like a lookup or a complex formula. However, note that `constant` and `coefficient` are all null in the target.
+   
+   Let's look at `temperature_range` again.
+   53, 62, 54, 29, 53, 49, 38, 38, 31, 30, 23, 22.
+   
+   Let's check `T_MAX_1` - `T_MIN_1` + constant?
+   7 + 46 = 53.
+   11.5 + 50.5 = 62.
+   
+   Let's check `PROFILE_MIN` and `PROFILE_MAX` again.
+   Row 0: 0.616, 2.821.
+   Row 1: 0.661, 3.159.
+   
+   Maybe `low_end` and `high_end` are derived from `T_MIN_1` and `T_MAX_1` using a specific formula?
+   Or maybe they are just `T_MIN_1` and `T_MAX_1` transformed?
+   
+   Let's look at the distinct values.
+   `low_end` distinct: 65. `T_MIN_1` distinct: 64.
+   `high_end` distinct: 51. `T_MAX_1` distinct: 99.
+   
+   Wait, `temperature_range` distinct: 44.
+   
+   Let's look at the source `SEASON DAY TYPE`.
+   "June WE", "July WD", "July WE", "August WD", "September WD", "September WE", "October WD", "October WE", "November WD", "November WE", "December WD", "December WE".
+   
+   Target `season`:
+   "June WE" -> SPRING? No, June is Summer.
+   "July WD" -> SPRING? No.
+   "July WE" -> SPRING? No.
+   "August WD" -> SPRING? No.
+   "September WD" -> SPRING?
+   "September WE" -> SPRING?
+   "October WD" -> SUMMER?
+   "October WE" -> SUMMER?
+   "November WD" -> SUMMER?
+   "November WE" -> SUMMER?
+   "December WD" -> SUMMER?
+   "December WE" -> SUMMER?
+   
+   The target sample shows:
+   Row 0: "June WE" -> SPRING
+   Row 1: "July WD" -> SPRING
+   Row 2: "July WE" -> SPRING
+   Row 3: "August WD" -> SPRING
+   Row 4: "September WD" -> SPRING
+   Row 5: "September WE" -> SPRING
+   Row 6: "October WD" -> SUMMER
+   Row 7: "October WE" -> SUMMER
+   Row 8: "November WD" -> SUMMER
+   Row 9: "November WE" -> SUMMER
+   Row 10: "December WD" -> SUMMER
+   Row 11: "December WE" -> SUMMER
+   
+   This mapping is inverted or non-standard.
+   June, July, August, September -> SPRING
+   October, November, December -> SUMMER
+   
+   This is likely Southern Hemisphere or a specific business definition.
+   Months 6,7,8,9 -> SPRING
+   Months 10,11,12 -> SUMMER
+   
+   Day type:
+   WD -> WEEKDAY
+   WE -> WEEKEND
+   
+   Now for `low_end`, `high_end`, `temperature_range`.
+   
+   Let's look at `T_MIN_1` and `low_end` again.
+   68 -> 9
+   67 -> 0
+   69 -> 7
+   59 -> 13
+   41 -> 29
+   39 -> 29
+   30 -> 40
+   44 -> 40
+   20 -> 42
+   25 -> 50
+   21 -> 60
+   19 -> 67
+   
+   Let's look at `T_MAX_1` and `high_end` again.
+   75 -> 62
+   78.5 -> 62
+   76 -> 61
+   68.5 -> 42
+   59.5 -> 82
+   57.5 -> 78
+   44.5 -> 78
+   61 -> 73
+   38 -> 80
+   42 -> 83
+   32.5 -> 89
+   35 -> ?
+   
+   Let's look at `temperature_range` again.
+   53, 62, 54, 29, 53, 49, 38, 38, 31, 30, 23, 22.
+   
+   Is it possible that `low_end` and `high_end` are just `T_MIN_1` and `T_MAX_1` mapped via a lookup table?
+   Or is there a formula?
+   
+   Let's check `low_end` = `T_MIN_1` * A + B?
+   68A + B = 9
+   67A + B = 0
+   Subtracting: A = 9.
+   67*9 + B = 0 => 603 + B = 0 => B = -603.
+   Check Row 2: 69*9 - 603 = 621 - 603 = 18. Target is 7. No.
+   
+   Let's check `high_end` = `T_MAX_1` * A + B?
+   75A + B = 62
+   78.5A + B = 62
+   Subtracting: 3.5A = 0 => A = 0.
+   B = 62.
+   Check Row 2: 76*0 + 62 = 62. Target is 61. No.
+   
+   Let's look at `temperature_range` = `T_MAX_1` - `T_MIN_1`?
+   7, 11.5, 7, 9.5, 18.5, 18.5, 14.5, 17, 18, 17, 11.5, 16.
+   Target: 53, 62, 54, 29, 53, 49, 38, 38, 31, 30, 23, 22.
+   
+   Let's check `temperature_range` = `high_end` - `low_end`?
+   62-9=53.
+   62-0=62.
+   61-7=54.
+   42-13=29.
+   82-29=53.
+   78-29=49.
+   78-40=38.
+   73-40=33. Target is 38. No.
+   80-42=38. Target is 31. No.
+   83-50=33. Target is 30. No.
+   89-60=29. Target is 23. No.
+   
+   So `temperature_range` is NOT `high_end` - `low_end`.
+   
+   Let's look at `temperature_range` vs `T_MAX_1` and `T_MIN_1`.
+   Row 0: 75, 68 -> 53.
+   Row 1: 78.5, 67 -> 62.
+   Row 2: 76, 69 -> 54.
+   Row 3: 68.5, 59 -> 29.
+   Row 4: 59.5, 41 -> 53.
+   Row 5: 57.5, 39 -> 49.
+   Row 6: 44.5, 30 -> 38.
+   Row 7: 61, 44 -> 38.
+   Row 8: 38, 20 -> 31.
+   Row 9: 42, 25 -> 30.
+   Row 10: 32.5, 21 -> 23.
+   Row 11: 35, 19 -> 22.
+   
+   Let's check `temperature_range` = `T_MAX_1` - `T_MIN_1` + `PROFILE_MIN` * 100?
+   7 + 61.6 = 68.6. No.
+   
+   Let's check `temperature_range` = `T_MAX_1` - `T_MIN_1` + `PROFILE_MAX` * 10?
+   7 + 28.21 = 35.21. No.
+   
+   Let's check `temperature_range` = `T_MAX_1` - `T_MIN_1` + `CONSTANT_1`?
+   7 - 2.27 = 4.73. No.
+   
+   Let's check `temperature_range` = `T_MAX_1` - `T_MIN_1` + `TEMP_1` * 100?
+   7 + 4.08 = 11.08. No.
+   
+   Let's look at `low_end` and `high_end` again.
+   Row 0: 9, 62.
+   Row 1: 0, 62.
+   Row 2: 7, 61.
+   Row 3: 13, 42.
+   Row 4: 29, 82.
+   Row 5: 29, 78.
+   Row 6: 40, 78.
+   Row 7: 40, 73.
+   Row 8: 42, 80.
+   Row 9: 50, 83.
+   Row 10: 60, 89.
+   Row 11: 67, ?.
+   
+   Let's look at `T_MIN_1` and `low_end` again.
+   68 -> 9
+   67 -> 0
+   69 -> 7
+   59 -> 13
+   41 -> 29
+   39 -> 29
+   30 -> 40
+   44 -> 40
+   20 -> 42
+   25 -> 50
+   21 -> 60
+   19 -> 67
+   
+   Let's look at `T_MAX_1` and `high_end` again.
+   75 -> 62
+   78.5 -> 62
+   76 -> 61
+   68.5 -> 42
+   59.5 -> 82
+   57.5 -> 78
+   44.5 -> 78
+   61 -> 73
+   38 -> 80
+   42 -> 83
+   32.5 -> 89
+   35 -> ?
+   
+   Is it possible that `low_end` and `high_end` are derived from `T_MIN_1` and `T_MAX_1` using a piecewise function or a lookup?
+   
+   Let's check `low_end` = `T_MIN_1` - 59?
+   68-59=9.
+   67-59=8. Target 0. No.
+   
+   Let's check `low_end` = `T_MIN_1` - 67?
+   68-67=1. Target 9. No.
+   
+   Let's check `low_end` = `T_MIN_1` - 68?
+   68-68=0. Target 9. No.
+   
+   Let's check `low_end` = `T_MIN_1` - 59 for Row 0.
+   Let's check `low_end` = `T_MIN_1` - 67 for Row 1.
+   Let's check `low_end` = `T_MIN_1` - 62 for Row 2.
+   
+   This is not consistent.
+   
+   Let's look at `high_end` = `T_MAX_1` - 13?
+   75-13=62.
+   78.5-13=65.5. Target 62. No.
+   
+   Let's look at `high_end` = `T_MAX_1` - 16.5?
+   75-16.5=58.5. No.
+   
+   Let's look at `high_end` = `T_MAX_1` - 13 for Row 0.
+   Let's look at `high_end` = `T_MAX_1` - 16.5 for Row 1.
+   
+   This is not consistent.
+   
+   Let's look at `temperature_range` = `T_MAX_1` - `T_MIN_1` + `PROFILE_MIN` * 100?
+   7 + 61.6 = 68.6. No.
+   
+   Let's look at `temperature_range` = `T_MAX_1` - `T_MIN_1` + `PROFILE_MAX` * 10?
+   7 + 28.21 = 35.21. No.
+   
+   Let's look at `temperature_range` = `T_MAX_1` - `T_MIN_1` + `CONSTANT_1`?
+   7 - 2.27 = 4.73. No.
+   
+   Let's look at `temperature_range` = `T_MAX_1` - `T_MIN_1` + `TEMP_1` * 100?
+   7 + 4.08 = 11.08. No.
+   
+   Let's look at `temperature_range` = `T_MAX_1` - `T_MIN_1` + `RH_1` * 1000?
+   7 + 10.7 = 17.7. No.
+   
+   Let's look at `temperature_range` = `T_MAX_1` - `T_MIN_1` + `WIND_1` * 1000?
+   7 + 0 = 7. No.
+   
+   Let's look at `temperature_range` = `T_MAX_1` - `T_MIN_1` + `T_MIN_2`?
+   7 + 75 = 82. No.
+   
+   Let's look at `temperature_range` = `T_MAX_1` - `T_MIN_1` + `T_MAX_2`?
+   7 + 82 = 89. No.
+   
+   Let's look at `temperature_range` = `T_MAX_1` - `T_MIN_1` + `T_MIN_3`?
+   7 + 82 = 89. No.
+   
+   Let's look at `temperature_range` = `T_MAX_1` - `T_MIN_1` + `T_MAX_3`?
+   7 + 91 = 98. No.
+   
+   Let's look at `temperature_range` = `T_MAX_1` - `T_MIN_1` + `CONSTANT_2`?
+   7 - 6.58 = 0.42. No.
+   
+   Let's look at `temperature_range` = `T_MAX_1` - `T_MIN_1` + `CONSTANT_3`?
+   7 - 4.27 = 2.73. No.
+   
+   Let's look at `temperature_range` = `T_MAX_1` - `T_MIN_1` + `TEMP_2`?
+   7 + 0.098 = 7.098. No.
+   
+   Let's look at `temperature_range` = `T_MAX_1` - `T_MIN_1` + `TEMP_3`?
+   7 + 0.068 = 7.068. No.
+   
+   Let's look at `temperature_range` = `T_MAX_1` - `T_MIN_1` + `RH_2`?
+   7 + 

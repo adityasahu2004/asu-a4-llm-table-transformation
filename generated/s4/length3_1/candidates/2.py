@@ -1,0 +1,22 @@
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Select relevant columns
+    df = source[['DT_STRATA'] + [f'PCT_HOURLY_{h:02d}00' for h in range(1, 25)]].copy()
+    
+    # Format date to MM/DD/YYYY
+    # The source format is M/D/YYYY or MM/DD/YYYY. pd.to_datetime handles this.
+    df['date'] = pd.to_datetime(df['DT_STRATA']).dt.strftime('%m/%d/%Y')
+    
+    # Drop the original date column
+    df = df.drop(columns=['DT_STRATA'])
+    
+    # Rename hourly columns
+    rename_map = {f'PCT_HOURLY_{h:02d}00': f'Hour {h}' for h in range(1, 25)}
+    df = df.rename(columns=rename_map)
+    
+    # Ensure column order: date, then Hour 1 to Hour 24
+    cols = ['date'] + [f'Hour {h}' for h in range(1, 25)]
+    df = df[cols]
+    
+    return df.reset_index(drop=True)

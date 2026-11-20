@@ -1,0 +1,183 @@
+Operator plan:
+1. Parse `Time Period` into a numeric month (e.g., "January" -> 1) using a mapping.
+2. Derive `season` from the month: Dec-Feb -> Winter, Mar-May -> Spring, Jun-Aug -> Summer, Sep-Nov -> Fall.
+3. Map `End Use Category` and `End Use` to target columns (`hvac`, `domestic_water_heating`, `major_appliances`, `lighting`, `miscellaneous_plug_loads`). Based on the target schema and typical end-use disaggregation:
+    - `hvac`: Likely corresponds to "Remaining Load" or specific HVAC end uses if present. Looking at the source distinct values for `End Use Category`: "Kitchen", "Laundry", "Miscellaneous", "Lighting", "Remaining Load". "Remaining Load" often contains HVAC in these datasets. Let's assume `Remaining Load` maps to `hvac`.
+    - `domestic_water_heating`: Not explicitly in the category list. It might be part of "Kitchen" or "Miscellaneous". However, looking at the target values, `domestic_water_heating` is non-zero. In many such datasets, Water Heating is a separate category or lumped. Given the source categories, it's ambiguous. Let's look closer. The source has `End Use` distinct=15. Common end uses: Freezer, Dryer, Washer, TV, Computer, Pool Pump, Lighting. Water Heating is missing from the sample `End Use` list but might be in the full data. If not, it might be derived or zero. However, the target has non-zero `domestic_water_heating`. Let's assume there is an End Use or Category mapping.
+    - Actually, usually in these specific "RECS" or similar datasets:
+        - `hvac` <- `Remaining Load`
+        - `domestic_water_heating` <- Often a specific end use like "Water Heating". If not in source categories, it might be 0? But target is non-zero. Let's check if `End Use` contains "Water Heater". The sample doesn't show it.
+        - `major_appliances` <- `Kitchen` + `Laundry`
+        - `lighting` <- `Lighting`
+        - `miscellaneous_plug_loads` <- `Miscellaneous`
+    - Let's refine:
+        - `hvac`: Sum of `Remaining Load`?
+        - `domestic_water_heating`: Is there a "Water Heating" end use? If not, maybe it's part of `Remaining Load`? No, `hvac` is separate.
+        - Let's look at the target values. `hvac` is large. `domestic_water_heating` is medium. `major_appliances` is medium.
+        - Hypothesis:
+            - `hvac` = `Remaining Load`
+            - `domestic_water_heating` = ? Maybe `End Use` == "Water Heating"?
+            - `major_appliances` = `Kitchen` + `Laundry`
+            - `lighting` = `Lighting` (Target is 0, which is strange if source has Lighting data. Wait, target `lighting` is int64 0. This implies lighting is dropped or set to 0? Or maybe the mapping is different.)
+            - `miscellaneous_plug_loads` = `Miscellaneous`
+
+    Let's re-read the target sample. `lighting` is 0. `total` is 0. This suggests `lighting` and `total` are not calculated from source or are placeholders.
+    
+    Let's look at the aggregation. The target has 120 rows. 24 hours * 5 seasons? No, 4 seasons + null? 4 * 24 = 96. 120 rows.
+    Source `Day Type`: Weekend, Weekday, All.
+    Target `season`: Fall, Spring, Summer, Winter, null.
+    
+    If we group by `season` and `hour`:
+    Seasons: 4. Hours: 24. 4*24 = 96 rows.
+    Where do the other 24 rows come from? The null season.
+    So we have 5 groups: Winter, Spring, Summer, Fall, and "All" (or null season).
+    
+    How to get `season`? From `Time Period`.
+    How to get the null season rows? From `Day Type` == "All"? Or perhaps `Time Period` is not mapped to a season?
+    Actually, `Time Period` is Month.
+    Winter: Dec, Jan, Feb.
+    Spring: Mar, Apr, May.
+    Summer: Jun, Jul, Aug.
+    Fall: Sep, Oct, Nov.
+    
+    If `Day Type` is "All", maybe it's not assigned a season? Or maybe the "All" rows are aggregated separately?
+    The target has `season` null for some rows.
+    
+    Let's assume:
+    1. Map Month to Season.
+    2. If `Day Type` is "All", set Season to null? Or maybe `Day Type` "All" rows are excluded?
+    3. The target has 120 rows. 5 * 24 = 120.
+    4. So there are 5 distinct "Season" groups. 4 real seasons + 1 "All" group (mapped to null).
+    
+    Mapping End Uses to Targets:
+    - `hvac`: `Remaining Load`
+    - `domestic_water_heating`: This is the tricky one. In many RECS datasets, "Water Heating" is an end use. If it's not in the `End Use Category` list, it might be in `End Use`. Let's assume `End Use` == "Water Heating" maps to `domestic_water_heating`. If not present, it might be 0. But target is non-zero.
+    - `major_appliances`: `Kitchen` + `Laundry`
+    - `lighting`: `Lighting` (Target is 0, so maybe we ignore it or it's not in the source sample shown but exists in full data? Or maybe `Lighting` maps to 0?)
+    - `miscellaneous_plug_loads`: `Miscellaneous`
+
+    Wait, look at the target `lighting` column. It is `int64` and all 0s.
+    Look at `total`. It is `int64` and all 0s.
+    
+    This suggests `lighting` and `total` are not derived from the source values in a summing way, or are explicitly zeroed.
+    
+    Let's construct the pivot.
+    Group by: `season` (derived), `hour` (`Hour Ending`).
+    
+    For each group, sum the `Average Demand Per Home With This End Use [kW]`.
+    
+    Mapping:
+    - `hvac`: Sum where `End Use Category` == "Remaining Load"
+    - `domestic_water_heating`: Sum where `End Use` == "Water Heating" (Assuming this exists in full data) OR `End Use Category` == "Water Heating"? The source schema says `End Use Category` distinct=5. The values are Kitchen, Laundry, Misc, Lighting, Remaining Load. So "Water Heating" is NOT a category. It must be an `End Use`.
+    - `major_appliances`: Sum where `End Use Category` in ["Kitchen", "Laundry"]
+    - `lighting`: Sum where `End Use Category` == "Lighting" -> But target is 0. Maybe we set this to 0 explicitly?
+    - `miscellaneous_plug_loads`: Sum where `End Use Category` == "Miscellaneous"
+
+    Let's check the null season.
+    If `Day Type` == "All", we might set `season` to null.
+    
+    Steps:
+    1. Create `season` column from `Time Period`.
+    2. Filter or handle `Day Type`. If `Day Type` == "All", `season` becomes null?
+    3. Group by `season` and `Hour Ending`.
+    4. Sum the demand for each category.
+    5. Map categories to target columns.
+    6. Fill missing `domestic_water_heating` if "Water Heating" end use is not found? (It likely is in the full data).
+
+    One detail: `Number of Homes...` is a string. We only use `Average Demand...`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Map month names to numbers
+    month_map = {
+        'January': 1, 'February': 2, 'March': 3, 'April': 4,
+        'May': 5, 'June': 6, 'July': 7, 'August': 8,
+        'September': 9, 'October': 10, 'November': 11, 'December': 12
+    }
+    
+    # Create a copy to avoid SettingWithCopyWarning
+    df = source.copy()
+    
+    # Map Time Period to Month
+    df['Month'] = df['Time Period'].map(month_map)
+    
+    # Derive Season
+    def get_season(month, day_type):
+        if day_type == 'All':
+            return None
+        if month in [12, 1, 2]:
+            return 'Winter'
+        elif month in [3, 4, 5]:
+            return 'Spring'
+        elif month in [6, 7, 8]:
+            return 'Summer'
+        elif month in [9, 10, 11]:
+            return 'Fall'
+        return None
+        
+    df['season'] = df.apply(lambda row: get_season(row['Month'], row['Day Type']), axis=1)
+    
+    # Filter out rows where season is None if they don't map to the 'All' group?
+    # The target has null seasons. This likely corresponds to the 'All' day type rows.
+    # However, if 'Day Type' is 'All', the season is null.
+    # We need to ensure we group by season (including null) and Hour Ending.
+    
+    # Ensure numeric demand
+    df['Demand'] = pd.to_numeric(df['Average Demand Per Home With This End Use [kW]'], errors='coerce')
+    
+    # Map End Use Category to Target Columns
+    # We will pivot or groupby.
+    
+    # Identify which rows contribute to which target column
+    # hvac: Remaining Load
+    # domestic_water_heating: End Use == "Water Heating" (Assuming this exists)
+    # major_appliances: Kitchen or Laundry
+    # lighting: Lighting (Target is 0, so we might ignore or set to 0)
+    # miscellaneous_plug_loads: Miscellaneous
+    
+    # Let's create helper columns for summing
+    df['is_hvac'] = (df['End Use Category'] == 'Remaining Load').astype(int)
+    df['is_dwh'] = (df['End Use'] == 'Water Heating').astype(int) # Check if this end use exists
+    # If 'Water Heating' is not an End Use, maybe it's part of Remaining Load? 
+    # But target has separate values. Let's assume 'Water Heating' is an End Use.
+    # If it's not in the data, this column will be 0, resulting in 0 sum.
+    
+    df['is_major'] = (df['End Use Category'].isin(['Kitchen', 'Laundry'])).astype(int)
+    df['is_misc'] = (df['End Use Category'] == 'Miscellaneous').astype(int)
+    
+    # We don't need lighting for the sum as target is 0, but we can calculate it if needed.
+    
+    # Group by season and Hour Ending
+    # Note: 'season' can be None (NaN)
+    
+    agg_df = df.groupby(['season', 'Hour Ending']).agg(
+        hvac=('Demand', lambda x: (x * df.loc[x.index, 'is_hvac']).sum()),
+        domestic_water_heating=('Demand', lambda x: (x * df.loc[x.index, 'is_dwh']).sum()),
+        major_appliances=('Demand', lambda x: (x * df.loc[x.index, 'is_major']).sum()),
+        miscellaneous_plug_loads=('Demand', lambda x: (x * df.loc[x.index, 'is_misc']).sum())
+    ).reset_index()
+    
+    # Rename Hour Ending to hour
+    agg_df = agg_df.rename(columns={'Hour Ending': 'hour'})
+    
+    # Add constant columns
+    agg_df['lighting'] = 0
+    agg_df['total'] = 0
+    
+    # Select and order columns
+    result = agg_df[['season', 'hour', 'hvac', 'domestic_water_heating', 'major_appliances', 'lighting', 'miscellaneous_plug_loads', 'total']]
+    
+    # Ensure types
+    result['hour'] = result['hour'].astype(int)
+    result['lighting'] = result['lighting'].astype(int)
+    result['total'] = result['total'].astype(int)
+    
+    # Sort to match typical output order (optional, but good for determinism)
+    # The target sample is not sorted by season/hour strictly.
+    # We will just return the grouped result.
+    
+    return result
+```

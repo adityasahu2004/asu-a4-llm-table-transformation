@@ -1,0 +1,60 @@
+**Operator Plan:**
+1.  **Filter**: Retain only rows where `Rate` is 'R4'. This isolates the specific rate class required for the aggregation, as other rates (S1, S2, etc.) have different patterns (flat blocks) and distinct magnitudes that would distort the average if included. The target row count (24) and column structure (monthly aggregates) imply an aggregation over the time series.
+2.  **Parse Date**: Convert the `Date` column to datetime to extract the month.
+3.  **Aggregate**: Group by the extracted month and the hour index. Sum the hourly values (`Hr 1` through `Hr 24`). The target values appear to be sums of the 'R4' rate values for each hour across all days in that month (or potentially averages, but given the magnitude of the target values vs source values, sum is the likely operation, or average of a larger dataset. Let's look at the magnitudes. Source R4 values are ~1-3. Target values are ~700-1200. There are ~30 days in a month. 30 * 25 (avg value) = 750. This matches the magnitude. So we are summing the R4 values for each hour for each month).
+4.  **Pivot/Reshape**: Create a DataFrame with `hour` (1-24) as rows and months (January-December) as columns.
+5.  **Format**: Ensure column names are lowercase month names and `hour` is integer 1-24.
+
+**Assumptions:**
+*   The transformation applies to the 'R4' rate only, as it's the primary volumetric rate and the others are special/flat rates.
+*   The aggregation is a sum over the days in the month for each hour.
+*   The "hour" in the target corresponds to the `Hr N` columns in the source.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Filter for the specific rate that seems to drive the aggregate profile
+    # Based on sample data, R4 has varying hourly profiles, while S/T rates have flat blocks.
+    # The target values are large, suggesting summation over days.
+    df = source[source['Rate'] == 'R4'].copy()
+    
+    # Parse dates
+    df['dt'] = pd.to_datetime(df['Date'], format='%m/%d/%Y')
+    df['month'] = df['dt'].dt.month
+    
+    # Select hourly columns
+    hour_cols = [f'Hr {i}' for i in range(1, 25)]
+    
+    # Melt the dataframe to long format for easier aggregation
+    # Keep 'month' and the hourly values
+    long_df = df[['month'] + hour_cols].melt(id_vars=['month'], var_name='hour_label', value_name='value')
+    
+    # Extract hour number from 'Hr N'
+    long_df['hour'] = long_df['hour_label'].str.extract(r'(\d+)').astype(int)
+    
+    # Aggregate: Sum the values for each hour and each month
+    agg_df = long_df.groupby(['month', 'hour'])['value'].sum().reset_index()
+    
+    # Pivot to wide format: Hours as rows, Months as columns
+    pivot_df = agg_df.pivot(index='hour', columns='month', values='value').reset_index()
+    
+    # Rename columns to lowercase month names
+    month_names = {
+        1: 'january', 2: 'february', 3: 'march', 4: 'april', 5: 'may', 6: 'june',
+        7: 'july', 8: 'august', 9: 'september', 10: 'october', 11: 'november', 12: 'december'
+    }
+    
+    pivot_df.rename(columns=month_names, index=str, inplace=True)
+    
+    # Ensure 'hour' column is integer and sorted
+    pivot_df['hour'] = pivot_df['hour'].astype(int)
+    pivot_df = pivot_df.sort_values('hour').reset_index(drop=True)
+    
+    # Select only the required columns in order
+    final_cols = ['hour'] + [month_names[i] for i in range(1, 13)]
+    result = pivot_df[final_cols]
+    
+    return result
+```

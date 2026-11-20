@@ -1,0 +1,43 @@
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date to extract month
+    dt = pd.to_datetime(source['DT_STRATA'], format='%m/%d/%Y')
+    
+    # Format month as left-padded 10-char string (e.g., "January  ")
+    # %B gives full month name. We pad/trim to 10 chars to match target distinct values.
+    month_names = dt.dt.strftime('%B')
+    # The target values show 10 char width. "September" is 9 chars + 1 space? 
+    # "January  " is 7 chars + 3 spaces.
+    # Let's check the distinct values provided:
+    # "January  ", "February ", "March    ", "April    ", "May      ", 
+    # "June     ", "July     ", "August   ", "September", "October  ", "November ", "December "
+    # It seems to be left-aligned or right-aligned?
+    # January (7) -> 3 spaces
+    # February (8) -> 2 spaces
+    # March (5) -> 5 spaces
+    # April (5) -> 5 spaces
+    # May (3) -> 7 spaces
+    # June (4) -> 6 spaces
+    # July (4) -> 6 spaces
+    # August (6) -> 4 spaces
+    # September (9) -> 1 space? Or 0? The sample says "September". Wait, distinct_values list says "September".
+    # October (7) -> 3 spaces
+    # November (8) -> 2 spaces
+    # December (8) -> 2 spaces
+    
+    # It looks like it is left-aligned within a 10-character field, except September which is 9 chars.
+    # Let's just pad with spaces to length 10 on the right.
+    month_col = month_names.str.ljust(10)
+    
+    out = pd.DataFrame()
+    out['month'] = month_col
+    out['daytype'] = 'weekday'
+    
+    # Map hours 1-24
+    for h in range(1, 25):
+        src_col = f'PCT_HOURLY_{h:02d}00'
+        tgt_col = f'hr{h}'
+        out[tgt_col] = source[src_col]
+        
+    return out

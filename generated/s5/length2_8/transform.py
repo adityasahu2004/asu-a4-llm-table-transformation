@@ -1,0 +1,55 @@
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date
+    df = source.copy()
+    df['dt'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract components
+    df['dt_strata'] = df['dt'].dt.strftime('%m/%d/%y')
+    df['dow'] = df['dt'].dt.dayofweek # Monday=0, Sunday=6
+    df['hour'] = df['dt'].dt.hour
+    
+    # Pivot to create hourly columns
+    # We want columns pct_hourly_0100 to pct_hourly_2400
+    # Mapping: hour 0 -> 0100, hour 1 -> 0200, ..., hour 23 -> 2400
+    df['hour_label'] = df['hour'].apply(lambda h: f'pct_hourly_{h+1:02d}00')
+    
+    # Pivot table
+    pivot = df.pivot_table(
+        index='dt_strata', 
+        columns='hour_label', 
+        values='cerc_logger_1', 
+        aggfunc='mean' # If multiple readings per hour, take mean. If unique, just the value.
+    ).reset_index()
+    
+    # Ensure all 24 hour columns exist and are in order
+    hour_cols = [f'pct_hourly_{h:02d}00' for h in range(1, 25)]
+    
+    # Reindex columns to ensure all hours are present, filling NaN with 0
+    for col in hour_cols:
+        if col not in pivot.columns:
+            pivot[col] = 0.0
+            
+    # Select only the desired hour columns in correct order
+    pivot = pivot[[c for c in ['dt_strata'] + hour_cols if c in pivot.columns]]
+    
+    # Fill any remaining NaNs with 0.0
+    pivot[hour_cols] = pivot[hour_cols].fillna(0.0)
+    
+    # Add dow
+    # Since pivot aggregated by dt_strata, we need to get dow for each date.
+    # dt_strata is unique per row in pivot (since it's the index).
+    # We can map dow from the original df based on dt_strata.
+    # Create a mapping from dt_strata to dow
+    dow_map = df.drop_duplicates(subset=['dt_strata'])[['dt_strata', 'dow']].set_index('dt_strata')['dow']
+    pivot['dow'] = pivot['dt_strata'].map(dow_map).astype(int)
+    
+    # Add pct_hourly_2500
+    pivot['pct_hourly_2500'] = 0
+    
+    # Reorder columns to match target schema
+    final_cols = ['dt_strata', 'dow'] + hour_cols + ['pct_hourly_2500']
+    
+    return pivot[final_cols].reset_index(drop=True)

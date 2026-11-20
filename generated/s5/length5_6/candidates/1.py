@@ -1,0 +1,47 @@
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    dates = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    
+    # Define the mapping from source columns to target chronological order
+    # Source columns: 1AM, 2AM, ..., 11AM, 12AM, 1PM, ..., 11PM, 12PM
+    # Target columns: value1 (1AM), ..., value11 (11AM), value12 (12AM/Midnight), value13 (1PM), ..., value24 (12PM/Noon)
+    
+    col_map = {
+        '1:00 AM': 'value1',
+        '2:00 AM': 'value2',
+        '3:00 AM': 'value3',
+        '4:00 AM': 'value4',
+        '5:00 AM': 'value5',
+        '6:00 AM': 'value6',
+        '7:00 AM': 'value7',
+        '8:00 AM': 'value8',
+        '9:00 AM': 'value9',
+        '10:00 AM': 'value10',
+        '11:00 AM': 'value11',
+        '12:00 AM': 'value12',
+        '1:00 PM': 'value13',
+        '2:00 PM': 'value14',
+        '3:00 PM': 'value15',
+        '4:00 PM': 'value16',
+        '5:00 PM': 'value17',
+        '6:00 PM': 'value18',
+        '7:00 PM': 'value19',
+        '8:00 PM': 'value20',
+        '9:00 PM': 'value21',
+        '10:00 PM': 'value22',
+        '11:00 PM': 'value23',
+        '12:00 PM': 'value24'
+    }
+    
+    # Create the output dataframe
+    out = pd.DataFrame()
+    out['date'] = dates.dt.strftime('%Y-%m-%d 00:00:00')
+    
+    # Map the columns in the correct order
+    for src_col, tgt_col in col_map.items():
+        out[tgt_col] = source[src_col]
+        
+    return out.reset_index(drop=True)

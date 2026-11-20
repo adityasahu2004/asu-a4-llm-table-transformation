@@ -1,0 +1,95 @@
+Operator plan:
+1. Derive `season` from `MONTH`: 12/1/2 -> WINTER, 3/4/5 -> SPRING, 6/7/8 -> SUMMER, 9/10/11 -> FALL.
+2. Derive `daytype` from the date components. Since `DOW` is not explicitly provided in the source schema for this specific block (unlike previous ones), but `YEAR`, `MONTH`, `DAY` are present, we can construct the date and determine if it is a weekday or weekend. However, looking at the target `daytype` values ("WEEKDAY", "WEEKEND"), and the source having `YEAR`, `MONTH`, `DAY`, we can use `pd.to_datetime` to create a date and check `.dt.dayofweek`. 0-4 are WEEKDAY, 5-6 are WEEKEND.
+3. Keep `hour` from source `HOUR`.
+4. `temperature_range` is constant 100998.0 in the target.
+5. `constant` comes from source `CONSTANT`.
+6. `coefficient` comes from source `COEFF_1`. Note: The source has `COEFF_1` through `COEFF_4` and `NUMBER_OF_RANGES`. The target only has one `coefficient`. Looking at the sample data:
+   - Source row 1: `NUMBER_OF_RANGES`=2, `COEFF_1`=-1.66..., `COEFF_2`=3.46...
+   - Target sample rows don't directly map 1-to-1 with source sample rows in the prompt's `sample` section because the target sample has different data.
+   - However, usually in these "range" tables, if `NUMBER_OF_RANGES` is 1, only `COEFF_1` is used. If 2, `COEFF_1` and `COEFF_2` are used for different ranges.
+   - The target has `low_end` = -999 and `high_end` = 99999. This corresponds to the first range (LOW_1=-999, HIGH_1=99999 when ranges=1).
+   - If the target only has one row per source row (which it seems to, given row counts are nearly identical: 118273 vs 118274, likely just a sort order or minor difference), and the target columns are `constant`, `coefficient`, `low_end`, `high_end`, it implies we are extracting the parameters for the *first* range (or the only range if NUMBER_OF_RANGES=1).
+   - Let's look at the target `low_end` and `high_end`. They are constantly -999.0 and 99999.0. This matches `LOW_1` and `HIGH_1` when `NUMBER_OF_RANGES`=1. When `NUMBER_OF_RANGES`=2, `HIGH_1` is not 99999.
+   - Wait, the target `high_end` is *always* 99999.0 in the sample. And `low_end` is *always* -999.0.
+   - This suggests the target might be filtering or selecting only rows where the range is the full range? Or perhaps it's selecting `COEFF_1` and treating the range as -999 to 99999 regardless?
+   - Let's re-read the source. `LOW_1` is always -999. `HIGH_1` varies.
+   - If the target `high_end` is always 99999, it might be that the transformation is selecting rows where `NUMBER_OF_RANGES` == 1?
+   - Let's check the distinct values. Source `NUMBER_OF_RANGES` has 1, 2, 3, 4.
+   - If we filter for `NUMBER_OF_RANGES` == 1, then `HIGH_1` is 99999. `LOW_1` is -999. `COEFF_2` is null.
+   - The target `coefficient` corresponds to `COEFF_1`.
+   - The target `constant` corresponds to `CONSTANT`.
+   - The target row count (118274) is very close to source (118273). It's unlikely we are filtering out 50% of the data (ranges 2,3,4).
+   - Alternative interpretation: The target represents the *first* segment of the piecewise function for *all* rows, but the `high_end` in the target is hardcoded to 99999? No, that would be incorrect for ranges > 1.
+   - Let's look at the target sample again. `temperature_range` is 100998.0. This is `99999 - (-999)`.
+   - If the target is just extracting the first coefficient and the global bounds (-999, 99999), then `low_end` and `high_end` are constants.
+   - However, `high_end` in source `HIGH_1` is not always 99999.
+   - Let's assume the task is to extract the parameters for the *first* range, but the target schema forces `low_end` and `high_end` to be the global min/max? Or perhaps the target *is* filtering for single-range profiles?
+   - Let's look at the row counts again. Source: 118273. Target: 118274. The counts are almost identical. This strongly implies no heavy filtering.
+   - If no filtering, and `high_end` is always 99999 in the target, then `high_end` is likely a constant derived from the max possible value, not `HIGH_1`.
+   - Similarly `low_end` is -999.
+   - So, `low_end` = -999.0, `high_end` = 99999.0.
+   - `coefficient` = `COEFF_1`.
+   - `constant` = `CONSTANT`.
+   - `hour` = `HOUR`.
+   - `season` and `daytype` derived from date.
+
+   Let's verify `daytype`. We need to construct the date from YEAR, MONTH, DAY.
+   `pd.to_datetime({'year': source['YEAR'], 'month': source['MONTH'], 'day': source['DAY']})`
+   Then check if weekday.
+
+   One detail: `temperature_range` is 100998.0. `99999 - (-999) = 100998`. This confirms the bounds are the global ones.
+
+   So the plan is:
+   1. Create date from YEAR, MONTH, DAY.
+   2. Map month to season.
+   3. Map weekday to daytype.
+   4. Select HOUR.
+   5. Set temperature_range to 100998.0.
+   6. Select CONSTANT as constant.
+   7. Select COEFF_1 as coefficient.
+   8. Set low_end to -999.0.
+   9. Set high_end to 99999.0.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Construct date for dayofweek calculation
+    dates = pd.to_datetime({
+        'year': source['YEAR'].astype(int),
+        'month': source['MONTH'].astype(int),
+        'day': source['DAY'].astype(int)
+    })
+    
+    # Determine season
+    months = source['MONTH'].astype(int)
+    season = np.where(
+        months.isin([12, 1, 2]), 'WINTER',
+        np.where(
+            months.isin([3, 4, 5]), 'SPRING',
+            np.where(
+                months.isin([6, 7, 8]), 'SUMMER',
+                'FALL'
+            )
+        )
+    )
+    
+    # Determine daytype
+    # dayofweek: 0=Monday, ..., 4=Friday, 5=Saturday, 6=Sunday
+    dayofweek = dates.dt.dayofweek
+    daytype = np.where(dayofweek < 5, 'WEEKDAY', 'WEEKEND')
+    
+    out = pd.DataFrame()
+    out['season'] = season
+    out['daytype'] = daytype
+    out['hour'] = source['HOUR']
+    out['temperature_range'] = 100998.0
+    out['constant'] = source['CONSTANT']
+    out['coefficient'] = source['COEFF_1']
+    out['low_end'] = -999.0
+    out['high_end'] = 99999.0
+    
+    return out
+```

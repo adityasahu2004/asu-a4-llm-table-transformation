@@ -1,0 +1,86 @@
+**Operator Plan:**
+
+1.  **Parse Date**: Convert the `date` column from string format (`M/D/YYYY H:MM`) to a pandas datetime object.
+2.  **Extract Components**:
+    *   Extract the date part and format it as `MM/DD/YYYY` for the new `date` column.
+    *   Extract the hour (0-23) from the datetime.
+3.  **Map Hour to Label**: Create a mapping from the 24-hour integer hour to the target 12-hour AM/PM string labels (e.g., 0 -> "12:00 AM", 1 -> "1:00 AM", ..., 12 -> "12:00 PM", ..., 23 -> "11:00 PM").
+4.  **Pivot**: Pivot the dataframe so that:
+    *   The index is the formatted `date`.
+    *   The columns are the mapped hour labels.
+    *   The values are `zone_016_cooling_sp`.
+5.  **Reorder Columns**: Ensure the columns appear in chronological order starting from "1:00 AM" through "12:00 AM" (midnight of the next day, which corresponds to hour 0 of the current day in standard 24h, but here the target shows "12:00 AM" at the end. Let's look closely at the target sample.
+    *   Target columns: `1:00 AM` ... `12:00 PM` ... `11:00 PM`, `12:00 AM`.
+    *   Standard 24h: 1, 2, ..., 11, 12, 13, ..., 23, 0.
+    *   Wait, the target sample has `12:00 AM` as the *last* column.
+    *   Let's check the source data. Source has times like `21:45`, `16:15`.
+    *   The target represents a daily profile. Usually, a day starts at 12:00 AM (00:00). However, the target column order is `1:00 AM` to `11:00 PM` then `12:00 AM`. This is a specific ordering.
+    *   Let's map:
+        *   Hour 1 -> "1:00 AM"
+        *   ...
+        *   Hour 11 -> "11:00 AM"
+        *   Hour 12 -> "12:00 PM"
+        *   Hour 13 -> "1:00 PM"
+        *   ...
+        *   Hour 23 -> "11:00 PM"
+        *   Hour 0 -> "12:00 AM"
+    *   The target column list in the schema is: `1:00 AM`, `2:00 AM`, ..., `12:00 PM`, ..., `11:00 PM`, `12:00 AM`.
+    *   So we need to pivot and then reorder the columns to match this specific sequence.
+6.  **Reset Index**: Convert the date index back to a column.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    df = source.copy()
+    df['datetime'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract date string for the index
+    df['date_str'] = df['datetime'].dt.strftime('%m/%d/%Y')
+    
+    # Extract hour
+    df['hour'] = df['datetime'].dt.hour
+    
+    # Map hour to target label
+    def map_hour(h):
+        if h == 0:
+            return "12:00 AM"
+        elif h < 12:
+            return f"{h}:00 AM"
+        elif h == 12:
+            return "12:00 PM"
+        else:
+            return f"{h-12}:00 PM"
+            
+    df['hour_label'] = df['hour'].apply(map_hour)
+    
+    # Pivot the table
+    # Index: date_str, Columns: hour_label, Values: zone_016_cooling_sp
+    pivoted = df.pivot_table(index='date_str', columns='hour_label', values='zone_016_cooling_sp', aggfunc='first')
+    
+    # Define the specific column order required by the target
+    # 1:00 AM to 11:00 AM
+    cols_am = [f"{h}:00 AM" for h in range(1, 12)]
+    # 12:00 PM
+    cols_pm = ["12:00 PM"]
+    # 1:00 PM to 11:00 PM
+    cols_pm_rest = [f"{h}:00 PM" for h in range(1, 12)]
+    # 12:00 AM (Hour 0)
+    cols_midnight = ["12:00 AM"]
+    
+    final_cols = cols_am + cols_pm + cols_pm_rest + cols_midnight
+    
+    # Reorder columns, filling NaNs if a specific hour is missing for a day (though pivot usually handles this)
+    # The target shows nulls for some hours, so we just select the columns.
+    # If a column is missing from the pivot (e.g. no data for 12:00 AM on a specific day), it will be NaN.
+    
+    result = pivoted.reindex(columns=final_cols)
+    
+    # Reset index to make 'date' a column
+    result = result.reset_index()
+    result.rename(columns={'date_str': 'date'}, inplace=True)
+    
+    return result
+```

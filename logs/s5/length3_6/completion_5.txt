@@ -1,0 +1,79 @@
+Operator plan:
+1. Parse the `date` column from `M/D/YYYY` format to datetime.
+2. Format the datetime to `YYYY-MM-DD 00:00:00` for the target `date` column.
+3. Map the 24 hourly columns from the source (named with AM/PM suffixes) to the target columns `Hour 1` through `Hour 24`. The mapping follows chronological order:
+   - `1:00 AM` -> `Hour 1`
+   - `2:00 AM` -> `Hour 2`
+   - ...
+   - `11:00 AM` -> `Hour 11`
+   - `12:00 PM` -> `Hour 12` (Note: Source has `12:00 AM` and `12:00 PM`. Chronologically, 12:00 PM is noon, which is the 12th hour. 12:00 AM is midnight, which is the 24th hour or 0th hour. Let's verify with standard 24h clock mapping.
+     - Hour 1: 01:00 (1:00 AM)
+     - Hour 2: 02:00 (2:00 AM)
+     - ...
+     - Hour 11: 11:00 (11:00 AM)
+     - Hour 12: 12:00 (12:00 PM)
+     - Hour 13: 13:00 (1:00 PM)
+     - ...
+     - Hour 23: 23:00 (11:00 PM)
+     - Hour 24: 00:00 (12:00 AM)
+   - Let's check the source columns again: `1:00 AM`, `2:00 AM`, ..., `11:00 AM`, `12:00 AM`, `1:00 PM`, ..., `11:00 PM`, `12:00 PM`.
+   - Wait, the source list is: `1:00 AM`, `2:00 AM`, `3:00 AM`, `4:00 AM`, `5:00 AM`, `6:00 AM`, `7:00 AM`, `8:00 AM`, `9:00 AM`, `10:00 AM`, `11:00 AM`, `12:00 AM`, `1:00 PM`, `2:00 PM`, `3:00 PM`, `4:00 PM`, `5:00 PM`, `6:00 PM`, `7:00 PM`, `8:00 PM`, `9:00 PM`, `10:00 PM`, `11:00 PM`, `12:00 PM`.
+   - This order is not strictly chronological in the source dataframe columns. I need to map them correctly to `Hour 1`...`Hour 24`.
+   - Hour 1 (01:00) = `1:00 AM`
+   - Hour 2 (02:00) = `2:00 AM`
+   - Hour 3 (03:00) = `3:00 AM`
+   - Hour 4 (04:00) = `4:00 AM`
+   - Hour 5 (05:00) = `5:00 AM`
+   - Hour 6 (06:00) = `6:00 AM`
+   - Hour 7 (07:00) = `7:00 AM`
+   - Hour 8 (08:00) = `8:00 AM`
+   - Hour 9 (09:00) = `9:00 AM`
+   - Hour 10 (10:00) = `10:00 AM`
+   - Hour 11 (11:00) = `11:00 AM`
+   - Hour 12 (12:00) = `12:00 PM`
+   - Hour 13 (13:00) = `1:00 PM`
+   - Hour 14 (14:00) = `2:00 PM`
+   - Hour 15 (15:00) = `3:00 PM`
+   - Hour 16 (16:00) = `4:00 PM`
+   - Hour 17 (17:00) = `5:00 PM`
+   - Hour 18 (18:00) = `6:00 PM`
+   - Hour 19 (19:00) = `7:00 PM`
+   - Hour 20 (20:00) = `8:00 PM`
+   - Hour 21 (21:00) = `9:00 PM`
+   - Hour 22 (22:00) = `10:00 PM`
+   - Hour 23 (23:00) = `11:00 PM`
+   - Hour 24 (00:00) = `12:00 AM`
+
+4. Construct the new DataFrame with these mapped columns.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date
+    dt = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    
+    # Create output dataframe
+    out = pd.DataFrame(index=source.index)
+    
+    # Format date as YYYY-MM-DD 00:00:00
+    out['date'] = dt.dt.strftime('%Y-%m-%d 00:00:00')
+    
+    # Map hours
+    # Hour 1-11: 1:00 AM - 11:00 AM
+    for h in range(1, 12):
+        out[f'Hour {h}'] = source[f'{h}:00 AM']
+        
+    # Hour 12: 12:00 PM
+    out['Hour 12'] = source['12:00 PM']
+    
+    # Hour 13-23: 1:00 PM - 11:00 PM
+    for h in range(13, 24):
+        pm_hour = h - 12
+        out[f'Hour {h}'] = source[f'{pm_hour}:00 PM']
+        
+    # Hour 24: 12:00 AM
+    out['Hour 24'] = source['12:00 AM']
+    
+    return out.reset_index(drop=True)
+```

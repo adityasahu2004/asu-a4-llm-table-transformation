@@ -1,0 +1,70 @@
+{
+  "candidate_count": 6,
+  "selected_index": 3,
+  "baseline_index": 3,
+  "selection_reason": "SC winner retained: no strict constraint improvement",
+  "constraints": {
+    "columns": [
+      "dt_strata",
+      "dow",
+      "pct_hourly_0100",
+      "pct_hourly_0200",
+      "pct_hourly_0300",
+      "pct_hourly_0400",
+      "pct_hourly_0500",
+      "pct_hourly_0600",
+      "pct_hourly_0700",
+      "pct_hourly_0800",
+      "pct_hourly_0900",
+      "pct_hourly_1000",
+      "pct_hourly_1100",
+      "pct_hourly_1200",
+      "pct_hourly_1300",
+      "pct_hourly_1400",
+      "pct_hourly_1500",
+      "pct_hourly_1600",
+      "pct_hourly_1700",
+      "pct_hourly_1800",
+      "pct_hourly_1900",
+      "pct_hourly_2000",
+      "pct_hourly_2100",
+      "pct_hourly_2200",
+      "pct_hourly_2300",
+      "pct_hourly_2400",
+      "pct_hourly_2500"
+    ],
+    "relations": []
+  },
+  "policy": {
+    "version": "schema-weekday-v1",
+    "pool": "five few-shot SC samples + one greedy few-shot sample",
+    "constraints": [
+      "exact target schema",
+      "uniquely identified date-to-weekday relation"
+    ],
+    "target_rows": "the same 12-row prompt sample as the baselines",
+    "output_rows": "up to 128 evenly spaced training-output rows",
+    "selection": "strictly lower lexicographic constraint loss; preserve SC winner on ties",
+    "forbidden_inputs": [
+      "test_0.csv",
+      "validator results",
+      "case-specific rules",
+      "target row counts"
+    ]
+  },
+  "usage": {
+    "prompt_tokens": 84110,
+    "completion_tokens": 26664,
+    "total_tokens": 110774
+  },
+  "api_attempts": 2,
+  "marginal_api_attempts": 0,
+  "latency_seconds": 328.08049745899916,
+  "inherited_api_seconds": 328.08049745899916,
+  "clusters": {
+    "19fe8ecdc782c0f8e3d51cebb8d7aafc77675cb3a981edfddeb54f7942884ff5": [
+      3
+    ]
+  },
+  "cost_basis": "standalone logical pool cost; reused requests have zero marginal API cost"
+}

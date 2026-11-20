@@ -1,0 +1,114 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `DT_STRATA` column from string format (`M/D/YYYY`) to datetime objects to enable date-based grouping and sorting.
+2.  **Group and Aggregate**: Group the data by the parsed date. For each group, calculate the mean of all `PCT_HOURLY_*` columns. This aggregates the multiple strata/rows per day into a single daily profile.
+3.  **Map Columns**: Rename the hourly percentage columns (`PCT_HOURLY_0100` through `PCT_HOURLY_2400`) to the target format (`1:00 AM` through `12:00 PM`).
+    *   Note on Mapping Logic:
+        *   `0100` -> `1:00 AM`
+        *   `0200` -> `2:00 AM`
+        *   ...
+        *   `1100` -> `11:00 AM`
+        *   `1200` -> `12:00 AM` (Noon is often represented as 12:00 AM in some 12-hour clock conventions or specific datasets, but looking at the target sample, `12:00 AM` is the 13th column. Let's verify standard 12-hour clock. Usually 12:00 PM is Noon. However, the target column order is: 1AM, 2AM... 11AM, **12:00 AM**, 1PM... 12PM.
+        *   Let's check the source column order: `0100`...`1100`, `1200`, `1300`...`2400`.
+        *   Target column order: `1:00 AM`...`11:00 AM`, `12:00 AM`, `1:00 PM`...`12:00 PM`.
+        *   This implies a direct positional mapping or a specific clock convention where 12:00 AM corresponds to 12:00 (noon) and 12:00 PM corresponds to 24:00 (midnight).
+        *   Let's look at the values. In the source, `PCT_HOURLY_1200` is typically high (noon traffic). In the target, the column `12:00 AM` is in the position of the 12th hour. The column `12:00 PM` is the last column (24th hour).
+        *   Standard 12-hour clock: 12:00 PM is Noon. 12:00 AM is Midnight.
+        *   However, the target schema lists `12:00 AM` *before* `1:00 PM`. This suggests the label `12:00 AM` is being used for Noon (12:00) and `12:00 PM` is being used for Midnight (24:00/00:00). This is a non-standard labeling but consistent with the positional mapping:
+            *   Source `1200` (Noon) -> Target `12:00 AM`
+            *   Source `2400` (Midnight) -> Target `12:00 PM`
+        *   We will map based on this positional/label correspondence observed in the target schema structure.
+4.  **Format Date**: Convert the grouped date index back to string format `MM/DD/YYYY`.
+5.  **Sort and Reset**: Sort by date to ensure chronological order (as seen in target sample `01/01/2016` to `07/01/2016`) and reset the index.
+6.  **Select Columns**: Ensure the final DataFrame contains only the required columns in the correct order.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    """
+    Transforms the source DataFrame by aggregating hourly percentages by date
+    and renaming columns to match the target schema.
+    """
+    # 1. Parse the date column
+    df = source.copy()
+    df['DT_STRATA'] = pd.to_datetime(df['DT_STRATA'], format='%m/%d/%Y')
+    
+    # 2. Identify hourly columns
+    hourly_cols = [col for col in df.columns if col.startswith('PCT_HOURLY_')]
+    
+    # 3. Group by date and calculate the mean for each hourly column
+    # We group by the parsed date. Since we want one row per date, we aggregate.
+    # The target has 366 distinct dates, matching the distinct dates in source.
+    # We assume the transformation is an average across all strata/rows for that day.
+    grouped = df.groupby('DT_STRATA')[hourly_cols].mean()
+    
+    # 4. Define the mapping from source column names to target column names
+    # Source: PCT_HOURLY_0100 ... PCT_HOURLY_2400
+    # Target: 1:00 AM ... 12:00 PM
+    
+    # Mapping logic based on target column order:
+    # 0100 -> 1:00 AM
+    # 0200 -> 2:00 AM
+    # ...
+    # 1100 -> 11:00 AM
+    # 1200 -> 12:00 AM  (Note: Target uses 12:00 AM for Noon position)
+    # 1300 -> 1:00 PM
+    # ...
+    # 2300 -> 11:00 PM
+    # 2400 -> 12:00 PM  (Note: Target uses 12:00 PM for Midnight position)
+    
+    col_mapping = {}
+    for h in range(1, 25):
+        src_col = f"PCT_HOURLY_{h:04d}"
+        if h == 12:
+            tgt_col = "12:00 AM"
+        elif h == 24:
+            tgt_col = "12:00 PM"
+        elif h < 12:
+            tgt_col = f"{h}:00 AM"
+        else:
+            tgt_col = f"{h-12}:00 PM"
+        col_mapping[src_col] = tgt_col
+        
+    # Rename columns
+    grouped = grouped.rename(columns=col_mapping)
+    
+    # 5. Format the date index to string MM/DD/YYYY
+    grouped.index = grouped.index.strftime('%m/%d/%Y')
+    
+    # 6. Reset index to make date a column
+    result = grouped.reset_index()
+    
+    # 7. Rename the date column to 'date'
+    result = result.rename(columns={'DT_STRATA': 'date'})
+    
+    # 8. Sort by date to match target sample order (chronological)
+    # Convert to datetime for sorting, then back to string if necessary, 
+    # but since we formatted as MM/DD/YYYY, string sort might not work perfectly for all years,
+    # but here all are 2016. To be safe, sort by the original datetime logic or just rely on the fact
+    # that the target sample is sorted. The target distinct values start 01/01/2016.
+    # Let's sort by the date string assuming YYYY is constant or parse again for sort.
+    # Actually, simpler: sort by the index before resetting if we kept it as datetime.
+    # We already reset. Let's sort by 'date' column.
+    # Since format is MM/DD/YYYY, lexicographical sort works if year is same.
+    # If years differ, we should parse.
+    result['date_dt'] = pd.to_datetime(result['date'], format='%m/%d/%Y')
+    result = result.sort_values('date_dt').drop(columns=['date_dt']).reset_index(drop=True)
+    
+    # 9. Select and order columns exactly as target
+    target_cols = ['date'] + [f"{h}:00 {'AM' if h < 12 or h == 12 else 'PM'}" for h in range(1, 25)]
+    # Wait, the list comprehension above is tricky for 12. Let's use the explicit list from target schema.
+    target_cols = [
+        'date',
+        '1:00 AM', '2:00 AM', '3:00 AM', '4:00 AM', '5:00 AM', '6:00 AM', '7:00 AM', '8:00 AM', '9:00 AM', '10:00 AM', '11:00 AM',
+        '12:00 AM',
+        '1:00 PM', '2:00 PM', '3:00 PM', '4:00 PM', '5:00 PM', '6:00 PM', '7:00 PM', '8:00 PM', '9:00 PM', '10:00 PM', '11:00 PM',
+        '12:00 PM'
+    ]
+    
+    result = result[target_cols]
+    
+    return result
+```

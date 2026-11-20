@@ -1,0 +1,249 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `Date` column from string format (`M/D/YYYY`) to pandas datetime objects.
+2.  **Shift Dates**: The target dates appear to be shifted by +16 days relative to the source dates (e.g., Source `7/3/2013` -> Target `7/19/2013` is not a match, but looking at the sample:
+    *   Source `7/3/2013` (Wed) -> Target `Tue 01/01/2013`? No.
+    *   Let's look at the distinct counts and values.
+    *   Source has 182 rows. Target has 183 rows.
+    *   Source dates range from `7/3/2013` to `12/31/2013`.
+    *   Target dates range from `Tue 01/01/2013` to `Tue 07/02/2013`.
+    *   This implies a temporal shift or a different time period entirely. Let's look closer at the values.
+    *   Source Row 0: `7/3/2013`, Values `[0.56, 0.51, ...]`
+    *   Target Row 0: `Tue 01/01/2013`, Values `[0.89, 0.8, ...]`
+    *   Target Row 11: `Tue 07/02/2013`, Values `[0.66, 0.61, ...]`
+    *   Source Row 0: `7/3/2013`. Target Row 11 is `7/2/2013`.
+    *   Source Row 1: `7/19/2013`.
+    *   Let's check if the data is simply shifted in time.
+    *   Target `Tue 01/01/2013` is a Tuesday.
+    *   Source `7/3/2013` is a Wednesday.
+    *   The target dates are all Tuesdays?
+        *   `Tue 01/01/2013`
+        *   `Thu 01/17/2013` -> No, Thursday.
+        *   `Sun 02/03/2013` -> Sunday.
+    *   Let's look at the frequency.
+    *   Source: `7/3`, `7/19`, `8/4`, `8/21`... roughly bi-weekly?
+        *   7/3 to 7/19: 16 days.
+        *   7/19 to 8/4: 16 days.
+        *   8/4 to 8/21: 17 days.
+        *   8/21 to 9/6: 16 days.
+        *   9/6 to 9/23: 17 days.
+        *   It seems to be every ~16-17 days.
+    *   Target: `01/01`, `01/17`, `02/03`, `02/19`...
+        *   01/01 to 01/17: 16 days.
+        *   01/17 to 02/03: 17 days.
+        *   02/03 to 02/19: 16 days.
+    *   The intervals match.
+    *   Let's align them.
+    *   Source Start: `7/3/2013`. Target Start: `1/1/2013`.
+    *   Source End: `12/31/2013`. Target End: `7/2/2013`? No, target sample ends at `7/2/2013` but has 183 rows.
+    *   If Source has 182 rows and Target has 183 rows, and the intervals are similar, maybe the Target covers a similar duration but shifted back by 6 months?
+    *   `7/3/2013` - 6 months = `1/3/2013`. Target starts `1/1/2013`. Close.
+    *   `12/31/2013` - 6 months = `6/30/2013`. Target ends `7/2/2013` (in sample).
+    *   Let's check the values.
+    *   Source `7/3/2013` (Row 0): `0.56, 0.51...`
+    *   Target `1/1/2013` (Row 0): `0.89, 0.8...` -> Different values.
+    *   Target `7/2/2013` (Row 11 in sample): `0.66, 0.61...`
+    *   Source `7/3/2013` (Row 0): `0.56, 0.51...` -> Different values.
+    *   Is it possible the rows are reversed? Or sorted differently?
+    *   Let's look at Source `12/31/2013` (Last Row): `0.94, 0.9, 0.89...`
+    *   Target `1/1/2013` (First Row): `0.89, 0.8...`
+    *   Target `7/2/2013` (Last Row in Sample): `0.66, 0.61...`
+    *   Let's look for a match for Source `7/3/2013` values `[0.56, 0.51, 0.49, 0.48, 0.5, 0.55, 0.65, 0.73, 0.79, 0.81, 0.83, 0.82, 0.85, 0.88, 0.91, 0.95, 1.04, 1.15, 1.22, 1.23, 1.25, 1.25, 1.14, 0.96]` in the Target data.
+    *   Scanning Target sample...
+    *   Target Row 5 (`Sun 03/24/2013`): `0.71, 0.67...` No.
+    *   Target Row 6 (`Wed 04/10/2013`): `0.5, 0.48, 0.47, 0.48, 0.51, 0.59, 0.73, 0.74, 0.69...` No.
+    *   Target Row 7 (`Fri 04/26/2013`): `0.47, 0.45...` No.
+    *   Target Row 8 (`Mon 05/13/2013`): `0.44, 0.41...` No.
+    *   Target Row 9 (`Wed 05/29/2013`): `0.44, 0.41, 0.39, 0.4, 0.42, 0.5, 0.63...` No.
+    *   Target Row 10 (`Sat 06/15/2013`): `0.52, 0.47, 0.44, 0.43, 0.43, 0.47, 0.55, 0.67, 0.76...` No.
+    *   Target Row 11 (`Tue 07/02/2013`): `0.66, 0.61, 0.58, 0.57, 0.58, 0.64, 0.73, 0.8, 0.86...` No.
+
+    Wait, look at the Target Column Names: `1:00`, `2:00`, ... `24:00`.
+    Source Column Names: `1`, `2`, ... `24`.
+    The values in Target `1:00` correspond to Source `1`.
+    
+    Let's re-examine the date mapping.
+    Source: 182 rows. Target: 183 rows.
+    Source Dates: `7/3/2013` to `12/31/2013`.
+    Target Dates: `1/1/2013` to `7/2/2013` (sample end).
+    
+    Hypothesis: The Target data is the Source data shifted by -6 months (approx).
+    If we subtract 6 months from Source `7/3/2013`, we get `1/3/2013`.
+    Target starts `1/1/2013`.
+    
+    Let's look at the values again.
+    Source `7/3/2013`: `[0.56, 0.51, ...]`
+    Target `1/1/2013`: `[0.89, 0.8, ...]`
+    
+    Is it possible the Target is just a different dataset that follows the same schema?
+    The prompt asks to "Infer the transformation". Usually, this means mapping Source -> Target.
+    If the values don't match, maybe the transformation involves calculation?
+    But the values are very specific (e.g., 0.56 vs 0.89). Unlikely to be a simple linear transform.
+    
+    Let's look at the Target Sample Row 11: `Tue 07/02/2013`.
+    Values: `0.66, 0.61, 0.58, 0.57, 0.58, 0.64, 0.73, 0.8, 0.86, 0.88, 0.88, 0.86, 0.85, 0.83, 0.81, 0.81, 0.87, 0.96, 1.02, 1.04, 1.01, 0.94, 0.8, 0.66`
+    
+    Source Row 0 (`7/3/2013`): `0.56, 0.51, 0.49, 0.48, 0.5, 0.55, 0.65, 0.73, 0.79, 0.81, 0.83, 0.82, 0.85, 0.88, 0.91, 0.95, 1.04, 1.15, 1.22, 1.23, 1.25, 1.25, 1.14, 0.96`
+    
+    They are NOT the same.
+    
+    However, look at the Target Date `Tue 07/02/2013`.
+    Look at Source Date `7/3/2013`.
+    
+    Is it possible the Target is the Source data from the *previous* year?
+    Or is the Target data actually derived from the Source data by some operation?
+    
+    Let's check if Target Row 11 matches any Source Row.
+    Target Row 11 values: `0.66, 0.61...`
+    Source Row 1 (`7/19/2013`): `0.81...`
+    Source Row 2 (`8/4/2013`): `0.57...`
+    Source Row 3 (`8/21/2013`): `0.57...`
+    Source Row 4 (`9/6/2013`): `0.48...`
+    Source Row 5 (`9/23/2013`): `0.46...`
+    Source Row 6 (`10/9/2013`): `0.5...`
+    Source Row 7 (`10/26/2013`): `0.63...`
+    Source Row 8 (`11/11/2013`): `0.58...`
+    Source Row 9 (`11/28/2013`): `0.66, 0.62, 0.6, 0.6, 0.62, 0.68, 0.79, 0.96, 1.13...` -> Close start, but diverges.
+    Source Row 10 (`12/14/2013`): `0.99...`
+    Source Row 11 (`12/31/2013`): `0.94...`
+    
+    None of the Source rows match Target Row 11 exactly.
+    
+    Let's look at the Target Date column format: `Tue 01/01/2013`.
+    Format: `%a %m/%d/%Y`.
+    
+    Let's look at the row count difference. 182 vs 183.
+    Source: 182 rows.
+    Target: 183 rows.
+    
+    Maybe the Target includes an extra row? Or the Source is a subset?
+    
+    Let's reconsider the "Transformation".
+    Often in these problems, the "Target" is just the Source with renamed columns and formatted dates.
+    If the values don't match, I might be misinterpreting the alignment.
+    
+    Let's check if the Target data is simply the Source data shifted by 16 days?
+    Source `7/3/2013` + 16 days = `7/19/2013`.
+    Target `1/1/2013` + 16 days = `1/17/2013`.
+    
+    Let's check if Target Row 0 (`1/1/2013`) values match Source Row X.
+    Target Row 0: `0.89, 0.8, 0.74, 0.72, 0.71, 0.72, 0.76, 0.87, 1.02, 1.13, 1.16, 1.16, 1.14, 1.11, 1.08, 1.1, 1.26, 1.4, 1.39, 1.34, 1.26, 1.14, 1.02, 0.9`
+    
+    Search for `0.89` in Source Column 1.
+    Source Row 0: 0.56
+    Source Row 1: 0.81
+    Source Row 2: 0.57
+    Source Row 3: 0.57
+    Source Row 4: 0.48
+    Source Row 5: 0.46
+    Source Row 6: 0.5
+    Source Row 7: 0.63
+    Source Row 8: 0.58
+    Source Row 9: 0.66
+    Source Row 10: 0.99
+    Source Row 11: 0.94
+    
+    None match `0.89`.
+    
+    Is it possible the Target data is from a different source entirely, and the "Transformation" is just formatting the columns?
+    The prompt says: "Infer the transformation from this schema/sample block".
+    And: "Compute the result only from the source DataFrame."
+    
+    This is a contradiction if the values are different.
+    Unless... the Source DataFrame provided in the "evaluation" will have different values, but the *structure* and *logic* (column renaming, date formatting) is what needs to be inferred.
+    
+    The key instruction: **"The evaluation source contains different rows; never copy target rows, observed data values, row offsets, or row counts into the program."**
+    
+    This implies that the specific values in the sample are NOT to be used to derive a value-mapping function (like "add 0.3 to all values"). Instead, I should infer the *structural* transformation.
+    
+    Structural changes:
+    1.  **Column Renaming**:
+        *   `Date` -> `cst`
+        *   `1` -> `1:00`
+        *   `2` -> `2:00`
+        *   ...
+        *   `24` -> `24:00`
+        *   `Class` column is dropped?
+            *   Source has `Class`. Target does NOT have `Class`.
+            *   Target columns: `cst`, `1:00`...`24:00`.
+            *   So `Class` is removed.
+    
+    2.  **Date Formatting**:
+        *   Source `Date`: `7/3/2013` (M/D/YYYY)
+        *   Target `cst`: `Tue 01/01/2013` (%a %m/%d/%Y)
+        *   Note: The sample target dates (`1/1/2013`) do NOT match the sample source dates (`7/3/2013`).
+        *   However, the instruction says "Compute the result only from the source DataFrame".
+        *   This means I must format the `Date` column from the Source into the target format. I cannot shift the dates to match the sample target dates because those dates are likely from a different evaluation instance or the sample target is illustrative of the *format* only.
+        *   The sample target *values* are also different. This confirms that the transformation is structural (schema/formatting), not value-based.
+    
+    3.  **Row Count**:
+        *   Source: 182. Target: 183.
+        *   If I just transform the Source, I will get 182 rows.
+        *   Why does the target have 183?
+        *   Maybe the evaluation source will have 183 rows?
+        *   Or maybe there is an index reset or an extra row added?
+        *   Given "never copy ... row counts", I should just transform the source rows as they are. If the evaluation source has N rows, the output should have N rows. The discrepancy in the sample (182 vs 183) might be due to the sample target including a header or an extra synthetic row, or simply being from a different dataset slice. I will assume a 1-to-1 row mapping.
+    
+    **Plan:**
+    1.  Drop the `Class` column.
+    2.  Rename the numeric columns `1` through `24` to `1:00` through `24:00`.
+    3.  Rename the `Date` column to `cst`.
+    4.  Parse the `Date` column to datetime.
+    5.  Format the datetime to `%a %m/%d/%Y` (e.g., `Tue 01/01/2013`).
+    6.  Ensure the column order matches the target: `cst`, then `1:00` to `24:00`.
+    
+    **Assumptions:**
+    *   The date shift seen in the sample is an artifact of the sample data selection (different time periods) and not part of the transformation logic. The transformation logic is purely formatting.
+    *   The `Class` column is irrelevant to the target.
+    *   The row count difference is due to sample mismatch, not a required row insertion/deletion operation.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Create a copy to avoid modifying the original
+    df = source.copy()
+    
+    # 1. Drop the 'Class' column as it is not in the target
+    if 'Class' in df.columns:
+        df = df.drop(columns=['Class'])
+    
+    # 2. Rename the 'Date' column to 'cst'
+    df = df.rename(columns={'Date': 'cst'})
+    
+    # 3. Rename numeric columns 1-24 to '1:00'-'24:00'
+    rename_map = {}
+    for col in df.columns:
+        if col != 'cst':
+            # Check if column is a number (int or float) representing 1-24
+            try:
+                col_int = int(col)
+                if 1 <= col_int <= 24:
+                    rename_map[col] = f"{col_int}:00"
+            except (ValueError, TypeError):
+                pass
+    
+    df = df.rename(columns=rename_map)
+    
+    # 4. Format the 'cst' column
+    # Parse dates assuming format M/D/YYYY
+    df['cst'] = pd.to_datetime(df['cst'], format='%m/%d/%Y')
+    # Format to 'Tue 01/01/2013' -> %a %m/%d/%Y
+    df['cst'] = df['cst'].dt.strftime('%a %m/%d/%Y')
+    
+    # 5. Ensure column order: 'cst' first, then 1:00 to 24:00
+    # Construct the expected column list
+    expected_cols = ['cst'] + [f"{i}:00" for i in range(1, 25)]
+    
+    # Filter to only include columns that exist in the dataframe (in case some hours are missing)
+    final_cols = [col for col in expected_cols if col in df.columns]
+    
+    # Reorder columns
+    df = df[final_cols]
+    
+    # Reset index to ensure clean integer index
+    df = df.reset_index(drop=True)
+    
+    return df
+```

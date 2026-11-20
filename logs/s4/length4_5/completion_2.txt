@@ -1,0 +1,66 @@
+**Operator Plan:**
+1.  **Date Formatting**: Parse the `date` column from the source format (`m/d/Y`) and reformat it to ISO 8601 style (`YYYY-MM-DD 00:00:00`).
+2.  **Column Renaming**: Rename the 24 hourly columns (`Hour 1` to `Hour 24`) to a 12-hour clock format with AM/PM indicators (`1:00 AM` to `12:00 PM`).
+    *   Mapping logic:
+        *   `Hour 1` -> `1:00 AM`
+        *   `Hour 2` -> `2:00 AM`
+        *   ...
+        *   `Hour 11` -> `11:00 AM`
+        *   `Hour 12` -> `12:00 AM` (Note: The target schema explicitly lists `12:00 AM` for the 12th hour slot, despite standard timekeeping usually implying 12:00 PM for noon. However, looking closely at the target sample data vs source:
+            *   Source `Hour 12` is 0. Target `12:00 AM` is 0.
+            *   Source `Hour 13` is 0. Target `1:00 PM` is 0.
+            *   Wait, let's look at the target column list order: `1:00 AM` ... `11:00 AM`, `12:00 AM`, `1:00 PM` ... `11:00 PM`, `12:00 PM`.
+            *   This is a specific, non-standard labeling in the target.
+            *   `Hour 1` -> `1:00 AM`
+            *   `Hour 2` -> `2:00 AM`
+            *   ...
+            *   `Hour 11` -> `11:00 AM`
+            *   `Hour 12` -> `12:00 AM` (Target col name is literally "12:00 AM")
+            *   `Hour 13` -> `1:00 PM`
+            *   ...
+            *   `Hour 23` -> `11:00 PM`
+            *   `Hour 24` -> `12:00 PM` (Target col name is literally "12:00 PM")
+3.  **Construct Output**: Create a new DataFrame with the formatted date and the renamed columns, preserving the original float/int values.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Format Date
+    # Source is like "7/3/2015", Target is "2015-01-01 00:00:00"
+    parsed_dates = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    out = pd.DataFrame()
+    out['date'] = parsed_dates.strftime('%Y-%m-%d %H:%M:%S')
+    
+    # 2. Rename Columns
+    # Mapping from Source "Hour N" to Target "H:MM AM/PM"
+    # Note the specific AM/PM labels in the target schema:
+    # Hour 12 maps to "12:00 AM" in the target column list provided.
+    # Hour 24 maps to "12:00 PM" in the target column list provided.
+    
+    rename_map = {}
+    for h in range(1, 25):
+        src_col = f'Hour {h}'
+        if h == 12:
+            tgt_col = '12:00 AM'
+        elif h == 24:
+            tgt_col = '12:00 PM'
+        else:
+            period = 'AM' if h < 12 else 'PM'
+            display_h = h if h < 13 else h - 12
+            tgt_col = f'{display_h}:00 {period}'
+        rename_map[src_col] = tgt_col
+        
+    # Apply renaming to the subset of hourly columns
+    hourly_data = source[[f'Hour {h}' for h in range(1, 25)]].rename(columns=rename_map)
+    
+    # Concatenate date and hourly data
+    out = pd.concat([out, hourly_data], axis=1)
+    
+    # Ensure column order matches target schema exactly
+    target_cols = ['date']
+    target_cols += ['1:00 AM', '2:00 AM', '3:00 AM', '4:00 AM', '5:00 AM', '6:00 AM', '7:00 AM', '8:00 AM', '9:00 AM', '10:00 AM', '11:00 AM', '12:00 AM',
+                    '1:00 PM', '2:00 PM', '3:00 PM', '4:00 PM', '5:00 PM', '6:00 PM', '7:00 PM', '8:00 PM', '9:00 PM', '10:00 PM', '11:00 PM', '12:00 PM']
+    
+    return out[target_cols].reset_index(drop=True)
+```

@@ -1,0 +1,116 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `date` column from string format (`%m/%d/%Y`) to pandas datetime objects.
+2.  **Map Hour Columns**: The source has 24 columns representing hours in 12-hour format (e.g., `1:00 AM`, `12:00 PM`). We need to map these to 24-hour format indices (1-24) for the target columns `1:00` through `24:00`.
+    *   `12:00 AM` -> 1:00 (Index 1)
+    *   `1:00 AM` - `11:00 AM` -> 2:00 - 12:00 (Indices 2-12)
+    *   `12:00 PM` -> 13:00 (Index 13)
+    *   `1:00 PM` - `11:00 PM` -> 14:00 - 24:00 (Indices 14-24)
+3.  **Melt/Unpivot**: Transform the wide table into a long format with columns: `date`, `hour_index`, `value`. This involves renaming the hour columns according to the mapping above and then stacking them.
+4.  **Sort and Aggregate**: Sort by `date` and `hour_index`. Since the source appears to have one row per day (based on distinct counts matching row counts for most columns), we can group by `date` and `hour_index` to ensure correctness, then pivot back to wide format.
+5.  **Construct Target Columns**:
+    *   Create the `cst` column by formatting the sorted unique dates as `'%a %m/%d/%Y'` (e.g., `Wed 01/01/2014`).
+    *   Create numeric columns `1:00` through `24:00` from the pivoted values.
+6.  **Reindex Dates**: The target has 183 rows while the source sample has 182. The target date range starts at `01/01/2014` and ends at `07/02/2014`. The source sample starts at `07/03/2014`. This suggests the source data provided in the sample is just a slice, but the transformation logic must handle the full date range present in the *actual* evaluation source. However, looking closely at the target sample, it contains dates like `Wed 01/01/2014`. The source sample contains `7/3/2014`. The note says "Source row count describes a training sample only". The transformation must be general.
+    *   *Correction*: The target schema shows `cst` with distinct values starting `Wed 01/01/2014`. The source `date` column has distinct values. It is highly likely that the source DataFrame contains all the necessary dates to produce the target. The sample just shows a subset. I will assume the source `date` column contains the exact dates needed for the target rows, potentially in a different order or subset.
+    *   Wait, the target has 183 rows. The source has 182 rows in the sample. The target dates are weekly? `01/01`, `01/17`, `02/03`... These are every 2 weeks? No, `01/01` to `01/17` is 16 days. `01/17` to `02/03` is 17 days.
+    *   Actually, let's look at the source sample dates: `7/3`, `7/19`, `8/4`, `8/21`... These are also roughly 2-week intervals.
+    *   The transformation is likely:
+        1. Parse source dates.
+        2. Melt the hourly data.
+        3. Pivot to get 24-hour columns.
+        4. Format the date column to `cst`.
+        5. Sort by date.
+    *   The target columns are `1:00` to `24:00`.
+    *   Let's verify the mapping again.
+        *   Source `12:00 AM` is midnight start of day. Target `1:00` is the first column.
+        *   Source `1:00 AM` is 1am. Target `2:00` is the second column.
+        *   ...
+        *   Source `11:00 AM` is 11am. Target `12:00` is the 12th column.
+        *   Source `12:00 PM` is noon. Target `13:00` is the 13th column.
+        *   ...
+        *   Source `11:00 PM` is 11pm. Target `24:00` is the 24th column.
+    *   This implies a shift: `Hour_Target = Hour_Source_24h + 1`?
+        *   12 AM (0h) -> 1:00. (0+1=1).
+        *   1 AM (1h) -> 2:00. (1+1=2).
+        *   11 AM (11h) -> 12:00. (11+1=12).
+        *   12 PM (12h) -> 13:00. (12+1=13).
+        *   11 PM (23h) -> 24:00. (23+1=24).
+    *   Yes, the target column `H:00` corresponds to the source hour `H-1` in 24-hour time.
+
+7.  **Final Assembly**:
+    *   Create a mapping dict for source column names to target column names.
+    *   Rename columns.
+    *   Format `date` to `cst`.
+    *   Sort by `cst` (or underlying date) to ensure correct order if needed, though the target sample seems sorted by date.
+
+### Python Code
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse the date column
+    df = source.copy()
+    df['parsed_date'] = pd.to_datetime(df['date'], format='%m/%d/%Y')
+    
+    # 2. Define mapping from source hour columns to target hour columns
+    # Source: 12:00 AM, 1:00 AM, ..., 11:00 AM, 12:00 PM, ..., 11:00 PM
+    # Target: 1:00,      2:00,      ..., 12:00,      13:00,     ..., 24:00
+    
+    mapping = {
+        '12:00 AM': '1:00',
+        '1:00 AM': '2:00',
+        '2:00 AM': '3:00',
+        '3:00 AM': '4:00',
+        '4:00 AM': '5:00',
+        '5:00 AM': '6:00',
+        '6:00 AM': '7:00',
+        '7:00 AM': '8:00',
+        '8:00 AM': '9:00',
+        '9:00 AM': '10:00',
+        '10:00 AM': '11:00',
+        '11:00 AM': '12:00',
+        '12:00 PM': '13:00',
+        '1:00 PM': '14:00',
+        '2:00 PM': '15:00',
+        '3:00 PM': '16:00',
+        '4:00 PM': '17:00',
+        '5:00 PM': '18:00',
+        '6:00 PM': '19:00',
+        '7:00 PM': '20:00',
+        '8:00 PM': '21:00',
+        '9:00 PM': '22:00',
+        '10:00 PM': '23:00',
+        '11:00 PM': '24:00'
+    }
+    
+    # 3. Select and rename the hour columns
+    hour_cols = [col for col in mapping.keys() if col in df.columns]
+    df_renamed = df[['parsed_date'] + hour_cols].copy()
+    df_renamed.rename(columns=mapping, inplace=True)
+    
+    # 4. Format the date column to match target 'cst' format
+    # Target format: "Wed 01/01/2014" -> %a %m/%d/%Y
+    df_renamed['cst'] = df_renamed['parsed_date'].dt.strftime('%a %m/%d/%Y')
+    
+    # 5. Select final columns in the correct order
+    # Target columns: cst, 1:00, 2:00, ..., 24:00
+    target_hour_cols = [f'{h}:00' for h in range(1, 25)]
+    final_cols = ['cst'] + target_hour_cols
+    
+    result = df_renamed[final_cols].copy()
+    
+    # 6. Ensure numeric types for hour columns
+    for col in target_hour_cols:
+        result[col] = pd.to_numeric(result[col], errors='coerce')
+        
+    # 7. Sort by date to match the likely order in target (ascending date)
+    # We sort by the parsed date to ensure chronological order, then drop the helper column
+    result['parsed_date'] = df_renamed['parsed_date'].values
+    result = result.sort_values('parsed_date').reset_index(drop=True)
+    result = result.drop(columns=['parsed_date'])
+    
+    return result
+```

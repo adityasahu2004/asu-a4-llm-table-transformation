@@ -1,0 +1,61 @@
+Operator plan:
+1. Parse the `date` column into a datetime object.
+2. Extract the calendar date (YYYY-MM-DD) and the hour of the day.
+3. The source data appears to have irregular timestamps (e.g., 0:11, 2:22). The target has 24 hourly buckets ("Hr 1" to "Hr 24").
+4. "Hr 1" corresponds to the first hour of the day (00:00-00:59), "Hr 2" to 01:00-01:59, ..., "Hr 24" to 23:00-23:59.
+5. Map the source hour to the target bucket: `Bucket = Hour + 1`.
+6. Group by the calendar date.
+7. Pivot the data so that each date is a row, and each bucket (1-24) is a column.
+8. Since the source might have multiple entries per bucket or sparse data, we need an aggregation. Looking at the sample:
+   - Source `1/2/2018 0:11` -> Date `01/02/2018`, Hour 0 -> Bucket 1. Value 67.9.
+   - Source `1/2/2018 2:22` -> Date `01/02/2018`, Hour 2 -> Bucket 3. Value 67.9.
+   - The target for `01/02/2018` has `Hr 1` = 67.9 and all others null. This implies that for `01/02/2018`, only the first record (or the one falling in bucket 1) was present/valid, or subsequent buckets were empty/null in the source for that specific day in the sample snippet.
+   - The target for `01/01/2018` has values for all 24 hours. This implies the full day's data was aggregated.
+   - Aggregation strategy: For each (Date, Bucket), take the mean or first non-null value. Given the distinct values in target are singletons, `mean` or `first` works. `mean` is safer if multiple samples exist for the same bucket.
+9. Rename columns to "Hr 1", "Hr 2", ..., "Hr 24".
+10. Format the date column as "MM/DD/YYYY".
+11. Sort the result by Date descending (as seen in target sample: 01/02 before 01/01).
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date
+    df = source.copy()
+    df['datetime'] = pd.to_datetime(df['date'])
+    
+    # Extract date and hour
+    df['cal_date'] = df['datetime'].dt.date
+    df['hour'] = df['datetime'].dt.hour
+    
+    # Map hour to bucket 1-24
+    # Hour 0 -> Hr 1
+    # Hour 23 -> Hr 24
+    df['bucket'] = df['hour'] + 1
+    
+    # Group by date and bucket, aggregate the value
+    # Use mean to handle potential duplicates, or first if unique
+    # The target shows single values, suggesting one value per bucket per day or averaging
+    grouped = df.groupby(['cal_date', 'bucket'])['zone_016'].mean().reset_index()
+    
+    # Pivot
+    pivoted = grouped.pivot(index='cal_date', columns='bucket', values='zone_016')
+    
+    # Ensure all buckets 1-24 are present
+    all_buckets = range(1, 25)
+    pivoted = pivoted.reindex(columns=all_buckets)
+    
+    # Rename columns to "Hr 1", "Hr 2", etc.
+    pivoted.columns = [f'Hr {i}' for i in all_buckets]
+    
+    # Format date column
+    pivoted.index = pivoted.index.strftime('%m/%d/%Y')
+    pivoted = pivoted.reset_index()
+    pivoted = pivoted.rename(columns={'cal_date': 'Date'})
+    
+    # Sort by Date descending as per target sample
+    pivoted = pivoted.sort_values(by='Date', ascending=False).reset_index(drop=True)
+    
+    return pivoted
+```

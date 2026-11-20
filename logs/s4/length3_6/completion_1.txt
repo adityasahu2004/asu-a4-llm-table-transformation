@@ -1,0 +1,133 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `date` column (format `M/D/YYYY`) to a pandas datetime object.
+2.  **Format Date**: Convert the datetime to the target string format `YYYY-MM-DD 00:00:00`.
+3.  **Map Hourly Columns**: The source has 24 columns representing hours in 12-hour AM/PM format (e.g., `1:00 AM`, `12:00 PM`). We need to map these to `Hour 1` through `Hour 24`.
+    *   `1:00 AM` -> Hour 1
+    *   `2:00 AM` -> Hour 2
+    *   ...
+    *   `11:00 AM` -> Hour 11
+    *   `12:00 PM` -> Hour 12 (Note: Source has `12:00 PM` which is noon, typically Hour 12 in 24h clock if 1:00 AM is 1. However, standard 24h clock has 12:00 PM as 12:00. Let's verify the sequence.
+        *   Source order: `1:00 AM` ... `11:00 AM`, `12:00 AM` (Midnight? No, likely typo for 12:00 PM or 12:00 AM is midnight). Let's look at the sample data.
+        *   Sample Row 1: `1:00 AM`=1.03, `12:00 AM`=0.32, `1:00 PM`=0.17.
+        *   Usually 1:00 AM is 1:00. 12:00 AM is 0:00 (Midnight). 12:00 PM is 12:00 (Noon).
+        *   The target columns are `Hour 1` to `Hour 24`.
+        *   Let's assume the standard mapping where `Hour 1` corresponds to the first hour of the day (00:00-01:00 or 01:00-02:00?).
+        *   Looking at previous examples, `PCT_HOURLY_0100` mapped to `1:00` or `Hour 1`. In 24-hour notation, 01:00 is the first hour (1 AM). 00:00 is midnight (12 AM).
+        *   If `Hour 1` is 1:00 AM, then `Hour 12` is 12:00 PM (Noon). `Hour 24` is 12:00 AM (Midnight end of day)? Or is `Hour 1` midnight?
+        *   Let's check the distinct counts or values.
+        *   In the first example provided in the prompt history (not shown here but implied by context of "PCT_HOURLY_0100" -> "1:00"), 0100 was 1:00.
+        *   Here, we have explicit AM/PM labels.
+        *   Let's map based on 24-hour clock equivalents:
+            *   1:00 AM = 01:00 -> Hour 1
+            *   2:00 AM = 02:00 -> Hour 2
+            *   ...
+            *   11:00 AM = 11:00 -> Hour 11
+            *   12:00 PM = 12:00 -> Hour 12
+            *   1:00 PM = 13:00 -> Hour 13
+            *   ...
+            *   11:00 PM = 23:00 -> Hour 23
+            *   12:00 AM = 00:00 (Midnight) -> Hour 24? Or Hour 0?
+            *   Wait, the target has `Hour 1` to `Hour 24`.
+            *   If 1:00 AM is Hour 1, then 12:00 AM (Midnight) is usually Hour 24 (the last hour of the previous day) or Hour 0. Given the range 1-24, it's likely 1:00 AM is Hour 1, ..., 11:00 AM is Hour 11, 12:00 PM is Hour 12, ..., 11:00 PM is Hour 23, and 12:00 AM is Hour 24.
+            *   Let's verify this hypothesis.
+            *   Source columns: `1:00 AM`, `2:00 AM`, `3:00 AM`, `4:00 AM`, `5:00 AM`, `6:00 AM`, `7:00 AM`, `8:00 AM`, `9:00 AM`, `10:00 AM`, `11:00 AM`, `12:00 AM`, `1:00 PM`, `2:00 PM`, `3:00 PM`, `4:00 PM`, `5:00 PM`, `6:00 PM`, `7:00 PM`, `8:00 PM`, `9:00 PM`, `10:00 PM`, `11:00 PM`, `12:00 PM`.
+            *   Wait, the source list in the schema is: `1:00 AM` ... `11:00 AM`, `12:00 AM`, `1:00 PM` ... `12:00 PM`.
+            *   This ordering is weird. `12:00 AM` is between `11:00 AM` and `1:00 PM`? No, `12:00 AM` is midnight. `12:00 PM` is noon.
+            *   The schema lists: `1:00 AM`, `2:00 AM`, `3:00 AM`, `4:00 AM`, `5:00 AM`, `6:00 AM`, `7:00 AM`, `8:00 AM`, `9:00 AM`, `10:00 AM`, `11:00 AM`, `12:00 AM`, `1:00 PM`, `2:00 PM`, `3:00 PM`, `4:00 PM`, `5:00 PM`, `6:00 PM`, `7:00 PM`, `8:00 PM`, `9:00 PM`, `10:00 PM`, `11:00 PM`, `12:00 PM`.
+            *   This looks like a specific order. Let's map them to 24-hour indices:
+                *   1:00 AM -> 1
+                *   2:00 AM -> 2
+                *   ...
+                *   11:00 AM -> 11
+                *   12:00 PM -> 12 (Noon)
+                *   1:00 PM -> 13
+                *   ...
+                *   11:00 PM -> 23
+                *   12:00 AM -> 24 (Midnight, end of day)
+            *   Let's check the source column names again.
+                *   `1:00 AM`
+                *   `2:00 AM`
+                *   `3:00 AM`
+                *   `4:00 AM`
+                *   `5:00 AM`
+                *   `6:00 AM`
+                *   `7:00 AM`
+                *   `8:00 AM`
+                *   `9:00 AM`
+                *   `10:00 AM`
+                *   `11:00 AM`
+                *   `12:00 AM`  <-- This is listed here. Is it Midnight? Yes. But why is it here?
+                *   `1:00 PM`
+                *   `2:00 PM`
+                *   `3:00 PM`
+                *   `4:00 PM`
+                *   `5:00 PM`
+                *   `6:00 PM`
+                *   `7:00 PM`
+                *   `8:00 PM`
+                *   `9:00 PM`
+                *   `10:00 PM`
+                *   `11:00 PM`
+                *   `12:00 PM` <-- This is listed last. Is it Noon? Yes.
+            *   This column order in the source schema is: 1AM, 2AM, ..., 11AM, 12AM, 1PM, ..., 11PM, 12PM.
+            *   This is not chronological.
+            *   However, the target columns are `Hour 1` to `Hour 24`.
+            *   We need to assign the correct source column to each target `Hour N`.
+            *   Standard 24-hour clock:
+                *   Hour 1: 01:00 - 02:00 (1:00 AM)
+                *   Hour 2: 02:00 - 03:00 (2:00 AM)
+                *   ...
+                *   Hour 11: 11:00 - 12:00 (11:00 AM)
+                *   Hour 12: 12:00 - 13:00 (12:00 PM)
+                *   Hour 13: 13:00 - 14:00 (1:00 PM)
+                *   ...
+                *   Hour 23: 23:00 - 00:00 (11:00 PM)
+                *   Hour 24: 00:00 - 01:00 (12:00 AM)
+            *   So:
+                *   `Hour 1` <- `1:00 AM`
+                *   `Hour 2` <- `2:00 AM`
+                *   ...
+                *   `Hour 11` <- `11:00 AM`
+                *   `Hour 12` <- `12:00 PM`
+                *   `Hour 13` <- `1:00 PM`
+                *   ...
+                *   `Hour 23` <- `11:00 PM`
+                *   `Hour 24` <- `12:00 AM`
+
+4.  **Construct DataFrame**: Create the new DataFrame with the formatted date and the mapped hourly columns.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date
+    dt = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    
+    # Format the date as required
+    date_str = dt.dt.strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Map source columns to target Hour columns
+    # Hour 1-11: 1:00 AM - 11:00 AM
+    # Hour 12: 12:00 PM
+    # Hour 13-23: 1:00 PM - 11:00 PM
+    # Hour 24: 12:00 AM
+    
+    out = pd.DataFrame(index=source.index)
+    out['date'] = date_str
+    
+    # 1:00 AM to 11:00 AM -> Hour 1 to Hour 11
+    for h in range(1, 12):
+        out[f'Hour {h}'] = source[f'{h}:00 AM']
+        
+    # 12:00 PM -> Hour 12
+    out['Hour 12'] = source['12:00 PM']
+    
+    # 1:00 PM to 11:00 PM -> Hour 13 to Hour 23
+    for h in range(1, 12):
+        out[f'Hour {h + 12}'] = source[f'{h}:00 PM']
+        
+    # 12:00 AM -> Hour 24
+    out['Hour 24'] = source['12:00 AM']
+    
+    return out.reset_index(drop=True)
+```

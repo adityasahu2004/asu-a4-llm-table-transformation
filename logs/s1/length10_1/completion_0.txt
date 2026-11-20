@@ -1,0 +1,227 @@
+To infer the transformation, we analyze the mapping between source columns and target columns, as well as the derived columns.
+
+1.  **`datetime`**: The source `time` column is a string in format `YYYY-MM-DD HH:MM:SS.000`. The target `datetime` is a string in format `YYYY-MM-DD HH:MM:SS`. We parse the source time and format it to remove milliseconds.
+2.  **`hvac`**: This appears to be the sum of all HVAC-related electricity usage. Looking at the source columns, these are:
+    *   `electricity_heating_kwh`
+    *   `electricity_central_system_heating_kwh`
+    *   `electricity_cooling_kwh`
+    *   `electricity_central_system_cooling_kwh`
+    *   `electricity_fans_heating_kwh`
+    *   `electricity_fans_cooling_kwh`
+    *   `electricity_pumps_heating_kwh`
+    *   `electricity_central_system_pumps_heating_kwh`
+    *   `electricity_pumps_cooling_kwh`
+    *   `electricity_central_system_pumps_cooling_kwh`
+    *   `electricity_water_systems_kwh` (Often considered part of HVAC/plumbing systems in energy models, let's verify with sample data if possible, or assume standard aggregation. Given the name "water_systems", it might be separate, but often grouped. Let's look at `water_heating` target. `water_heating` is likely `electricity_water_systems_kwh`? No, `water_heating` usually implies heating water. Let's look at the sample values.
+        *   Source Row 1 (index 17568 in source, but let's look at the last sample row provided in source which corresponds to `2012-07-02 00:15:00`? No, the target sample starts with `2012-01-01`. The source sample starts with `2012-07-02`. The rows are different.
+        *   Let's check the distinct values or logic.
+        *   Target `water_heating`: Source has `electricity_water_systems_kwh`. Let's assume `water_heating` = `electricity_water_systems_kwh`.
+        *   Target `hvac`: Sum of heating, cooling, fans, pumps.
+        *   Let's check the first target row: `2012-01-01 00:15:00`. We don't have this row in the source sample.
+        *   However, standard energy breakdowns usually group:
+            *   HVAC: Heating + Cooling + Fans + Pumps.
+            *   Water Heating: Water systems.
+            *   Lighting: Interior + Exterior.
+            *   Appliances: Refrigerator, Washer, Dryer, Dishwasher, Cooking Range.
+            *   Plug Loads: Plug loads.
+            *   Pool/Spa: Pool/Spa heaters and pumps.
+    *   Let's refine `hvac`. It likely includes:
+        *   `electricity_heating_kwh`
+        *   `electricity_central_system_heating_kwh`
+        *   `electricity_cooling_kwh`
+        *   `electricity_central_system_cooling_kwh`
+        *   `electricity_fans_heating_kwh`
+        *   `electricity_fans_cooling_kwh`
+        *   `electricity_pumps_heating_kwh`
+        *   `electricity_central_system_pumps_heating_kwh`
+        *   `electricity_pumps_cooling_kwh`
+        *   `electricity_central_system_pumps_cooling_kwh`
+    *   Does it include `electricity_water_systems_kwh`? Usually no, that's water heating.
+    *   Does it include `electricity_house_fan_kwh`? Source has `electricity_house_fan_kwh` (all 0.0 in sample). Target doesn't have a specific house fan column. It might be part of HVAC or Plug. Given "house fan" is often ventilation, it might be HVAC. But since it's 0.0 in the sample, it's hard to tell. However, `electricity_fans_heating_kwh` and `electricity_fans_cooling_kwh` are explicitly HVAC fans. `electricity_house_fan_kwh` is likely general ventilation. Let's look at `plug`.
+    *   Target `plug`: Source `electricity_plug_loads_kwh`.
+    *   Target `lighting`: Sum of `electricity_interior_lighting_kwh` and `electricity_exterior_lighting_kwh`.
+    *   Target `interior_lighting`: Source `electricity_interior_lighting_kwh`.
+    *   Target `exterior_lighting`: Source `electricity_exterior_lighting_kwh`.
+    *   Target `refrigerator`: Source `electricity_refrigerator_kwh`.
+    *   Target `clothes_washer`: Source `electricity_clothes_washer_kwh`.
+    *   Target `clothes_dryer`: Source `electricity_clothes_dryer_kwh`.
+    *   Target `dishwasher`: Source `electricity_dishwasher_kwh`.
+    *   Target `cooking_range`: Source `electricity_cooking_range_kwh`.
+    *   Target `pool_spa_pumps`: Sum of `electricity_pool_pump_kwh` and `electricity_hot_tub_pump_kwh`.
+    *   Target `pool_spa_heater`: Sum of `electricity_pool_heater_kwh` and `electricity_hot_tub_heater_kwh`.
+    *   Target `water_heating`: Source `electricity_water_systems_kwh`.
+
+    Let's double check `hvac`.
+    Source columns related to HVAC:
+    - `electricity_heating_kwh`
+    - `electricity_central_system_heating_kwh`
+    - `electricity_cooling_kwh`
+    - `electricity_central_system_cooling_kwh`
+    - `electricity_fans_heating_kwh`
+    - `electricity_fans_cooling_kwh`
+    - `electricity_pumps_heating_kwh`
+    - `electricity_central_system_pumps_heating_kwh`
+    - `electricity_pumps_cooling_kwh`
+    - `electricity_central_system_pumps_cooling_kwh`
+    
+    What about `electricity_house_fan_kwh`? It is 0.0 in the sample. If it's not 0 in other rows, where does it go? Often "House Fan" is considered part of HVAC (ventilation) or Plug. Given the explicit "fans_heating" and "fans_cooling", "house_fan" is likely general ventilation. In many BEP (Building Energy Performance) schemas, house fans are part of HVAC. Let's include it in HVAC.
+    
+    What about `electricity_range_fan_kwh`, `electricity_bath_fan_kwh`, `electricity_ceiling_fan_kwh`?
+    - `range_fan`: Kitchen exhaust. Often Plug or Cooking.
+    - `bath_fan`: Bathroom exhaust. Often Plug or Lighting/HVAC?
+    - `ceiling_fan`: Often Plug.
+    
+    Let's look at the target columns again.
+    `hvac`, `water_heating`, `refrigerator`, `clothes_washer`, `clothes_dryer`, `dishwasher`, `cooking_range`, `pool_spa_pumps`, `interior_lighting`, `exterior_lighting`, `lighting`, `plug`, `pool_spa_heater`.
+    
+    There is no specific column for "fans" other than HVAC.
+    There is no specific column for "range_fan", "bath_fan", "ceiling_fan".
+    These must be aggregated into one of the existing buckets.
+    - `plug` is a strong candidate for miscellaneous fans (ceiling, bath, range) and other small loads.
+    - `hvac` is a strong candidate for house fans (ventilation).
+    
+    Let's assume:
+    - `hvac` = Sum of heating, cooling, central heating, central cooling, fans_heating, fans_cooling, pumps_heating, central_pumps_heating, pumps_cooling, central_pumps_cooling, house_fan.
+    - `plug` = `electricity_plug_loads_kwh` + `electricity_range_fan_kwh` + `electricity_bath_fan_kwh` + `electricity_ceiling_fan_kwh`.
+    
+    Let's verify this hypothesis with the sample data if possible.
+    Target Row 1: `2012-01-01 00:15:00`.
+    We don't have this row in source sample.
+    
+    Let's look at the last source row: `2013-01-01 00:00:00.000`.
+    Source values:
+    - heating: 197541.8097170739
+    - central_heating: 13892.5569739444
+    - cooling: 7648.408761381
+    - central_cooling: 28.5421719289
+    - fans_heating: 103788.6239033672
+    - fans_cooling: 1947.57886647
+    - pumps_heating: 21.3228615048
+    - central_pumps_heating: 351.2026764464
+    - pumps_cooling: 0.0
+    - central_pumps_cooling: 32.926067159
+    - house_fan: 0.0
+    
+    Sum HVAC = 197541.81 + 13892.56 + 7648.41 + 28.54 + 103788.62 + 1947.58 + 21.32 + 351.20 + 0 + 32.93 = 325252.97 approx.
+    
+    Source `plug_loads`: 307759.1058656951
+    Source `range_fan`: 169.5248655478
+    Source `bath_fan`: 1366.5317601803
+    Source `ceiling_fan`: 18390.5514302297
+    Sum Plug = 307759.11 + 169.52 + 1366.53 + 18390.55 = 327685.71 approx.
+    
+    We don't have the target row for `2013-01-01` to verify.
+    
+    However, the structure is quite standard.
+    
+    **Mapping Plan:**
+    1.  **`datetime`**: Parse `time` and format as `YYYY-MM-DD HH:MM:SS`.
+    2.  **`hvac`**: Sum of `electricity_heating_kwh`, `electricity_central_system_heating_kwh`, `electricity_cooling_kwh`, `electricity_central_system_cooling_kwh`, `electricity_fans_heating_kwh`, `electricity_fans_cooling_kwh`, `electricity_pumps_heating_kwh`, `electricity_central_system_pumps_heating_kwh`, `electricity_pumps_cooling_kwh`, `electricity_central_system_pumps_cooling_kwh`, `electricity_house_fan_kwh`.
+    3.  **`water_heating`**: `electricity_water_systems_kwh`.
+    4.  **`refrigerator`**: `electricity_refrigerator_kwh`.
+    5.  **`clothes_washer`**: `electricity_clothes_washer_kwh`.
+    6.  **`clothes_dryer`**: `electricity_clothes_dryer_kwh`.
+    7.  **`dishwasher`**: `electricity_dishwasher_kwh`.
+    8.  **`cooking_range`**: `electricity_cooking_range_kwh`.
+    9.  **`pool_spa_pumps`**: Sum of `electricity_pool_pump_kwh` and `electricity_hot_tub_pump_kwh`.
+    10. **`interior_lighting`**: `electricity_interior_lighting_kwh`.
+    11. **`exterior_lighting`**: `electricity_exterior_lighting_kwh`.
+    12. **`lighting`**: Sum of `interior_lighting` and `exterior_lighting`.
+    13. **`plug`**: Sum of `electricity_plug_loads_kwh`, `electricity_range_fan_kwh`, `electricity_bath_fan_kwh`, `electricity_ceiling_fan_kwh`.
+    14. **`pool_spa_heater`**: Sum of `electricity_pool_heater_kwh` and `electricity_hot_tub_heater_kwh`.
+
+    Note: The order of columns in the target is specific.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Create datetime column
+    # Source time format: "2012-07-02 00:15:00.000"
+    # Target datetime format: "2012-01-01 00:15:00"
+    df = source.copy()
+    df['datetime'] = pd.to_datetime(df['time']).dt.strftime('%Y-%m-%d %H:%M:%S')
+    
+    # 2. Calculate hvac
+    # Includes heating, cooling, fans, pumps, and house fan
+    hvac_cols = [
+        'electricity_heating_kwh',
+        'electricity_central_system_heating_kwh',
+        'electricity_cooling_kwh',
+        'electricity_central_system_cooling_kwh',
+        'electricity_fans_heating_kwh',
+        'electricity_fans_cooling_kwh',
+        'electricity_pumps_heating_kwh',
+        'electricity_central_system_pumps_heating_kwh',
+        'electricity_pumps_cooling_kwh',
+        'electricity_central_system_pumps_cooling_kwh',
+        'electricity_house_fan_kwh'
+    ]
+    df['hvac'] = df[hvac_cols].sum(axis=1)
+    
+    # 3. Water heating
+    df['water_heating'] = df['electricity_water_systems_kwh']
+    
+    # 4. Refrigerator
+    df['refrigerator'] = df['electricity_refrigerator_kwh']
+    
+    # 5. Clothes washer
+    df['clothes_washer'] = df['electricity_clothes_washer_kwh']
+    
+    # 6. Clothes dryer
+    df['clothes_dryer'] = df['electricity_clothes_dryer_kwh']
+    
+    # 7. Dishwasher
+    df['dishwasher'] = df['electricity_dishwasher_kwh']
+    
+    # 8. Cooking range
+    df['cooking_range'] = df['electricity_cooking_range_kwh']
+    
+    # 9. Pool/Spa Pumps
+    df['pool_spa_pumps'] = df['electricity_pool_pump_kwh'] + df['electricity_hot_tub_pump_kwh']
+    
+    # 10. Interior Lighting
+    df['interior_lighting'] = df['electricity_interior_lighting_kwh']
+    
+    # 11. Exterior Lighting
+    df['exterior_lighting'] = df['electricity_exterior_lighting_kwh']
+    
+    # 12. Lighting (Total)
+    df['lighting'] = df['interior_lighting'] + df['exterior_lighting']
+    
+    # 13. Plug Loads
+    # Includes plug loads and various fans (range, bath, ceiling)
+    plug_cols = [
+        'electricity_plug_loads_kwh',
+        'electricity_range_fan_kwh',
+        'electricity_bath_fan_kwh',
+        'electricity_ceiling_fan_kwh'
+    ]
+    df['plug'] = df[plug_cols].sum(axis=1)
+    
+    # 14. Pool/Spa Heater
+    df['pool_spa_heater'] = df['electricity_pool_heater_kwh'] + df['electricity_hot_tub_heater_kwh']
+    
+    # Select and order columns as per target
+    target_columns = [
+        'datetime',
+        'hvac',
+        'water_heating',
+        'refrigerator',
+        'clothes_washer',
+        'clothes_dryer',
+        'dishwasher',
+        'cooking_range',
+        'pool_spa_pumps',
+        'interior_lighting',
+        'exterior_lighting',
+        'lighting',
+        'plug',
+        'pool_spa_heater'
+    ]
+    
+    result = df[target_columns]
+    
+    return result
+```

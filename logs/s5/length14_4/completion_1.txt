@@ -1,0 +1,176 @@
+Operator plan:
+1. Parse `Time Period` strings into numeric months (e.g., "January" -> 1).
+2. Filter the source data to include only rows where `Day Type` is "All". This is inferred because the target has exactly 288 rows (12 months * 24 hours), implying a single aggregated profile per month/hour, and "All" typically represents the aggregate of Weekday/Weekend or the total profile.
+3. Group the filtered data by `month` and `hour`.
+4. Sum the `Average Demand Per Home With This End Use [kW]` for each group, aggregating by target column names:
+    - `hvac`: Sum of demands where `End Use Category` is "Remaining Load" (In many end-use profiles, "Remaining Load" often acts as a proxy for HVAC or base load not otherwise specified, or specific HVAC end-uses might be mapped here. Given the distinct values and typical structure, "Remaining Load" is the largest component often associated with HVAC in simplified profiles, or we look for specific HVAC end uses. However, looking at the source distinct values for End Use Category: Kitchen, Laundry, Miscellaneous, Lighting, Remaining Load. There is no explicit "HVAC" category. "Remaining Load" is the standard bucket for HVAC + unmeasured loads in such datasets. Let's assume `hvac` maps to `Remaining Load`.
+    - `domestic_water_heating`: There is no explicit "Water Heating" category in the distinct values provided (`Kitchen`, `Laundry`, `Miscellaneous`, `Lighting`, `Remaining Load`). This is tricky. Often, water heating is part of "Remaining Load" or "Kitchen". However, looking at the target values, `domestic_water_heating` is significant. Let's re-read the source distinct values. `End Use` has 15 distinct values. `End Use Category` has 5.
+    - Let's look at the sample data again.
+        - "Kitchen" -> Freezer
+        - "Laundry" -> Clothes Dryer, Washer
+        - "Miscellaneous" -> TV, Computer, Misc Metered, Pool Pump
+        - "Lighting" -> Lighting
+        - "Remaining Load" -> Remaining Load
+    - The target columns are: `hvac`, `domestic_water_heating`, `major_appliances`, `lighting`, `miscellaneous_plug_loads`.
+    - Mapping:
+        - `lighting`: `End Use Category` == "Lighting".
+        - `major_appliances`: Likely `End Use Category` == "Kitchen" + "Laundry".
+        - `miscellaneous_plug_loads`: Likely `End Use Category` == "Miscellaneous".
+        - `hvac` and `domestic_water_heating`: These are usually the big components in `Remaining Load`. However, without explicit breakdown in the source categories, we might need to infer based on typical "Remaining Load" composition or if there are specific `End Use` strings.
+        - Wait, the `End Use` column has 15 distinct values. The sample shows: "Freezer", "Clothes Dryer - Electric", "Clothes Washer", "Primary TV and Peripherals", "Primary Desktop Computer", "Misc Metered", "Pool Pump", "Lighting", "Remaining Load".
+        - It is highly probable that `Remaining Load` contains both HVAC and Water Heating. But the target separates them.
+        - Let's look at the target sample values.
+          - Month 10, Hour 9: hvac=331, dwh=653, major=484, misc=166.
+          - Month 7, Hour 12: hvac=2883, dwh=494, major=592, misc=212.
+        - If `Remaining Load` is the only source for HVAC and DWH, how are they split?
+        - Perhaps `End Use` contains specific strings like "Central AC", "Water Heater"? The sample doesn't show them, but `End Use` has 15 distinct values while we only see ~9 in the sample.
+        - Let's assume standard mapping:
+          - `hvac`: End Use containing "AC", "Heat", "HVAC", or perhaps `Remaining Load` is split? No, we can't split without ratios.
+          - Let's check if `Remaining Load` is the *only* thing in that category.
+          - If the source doesn't distinguish HVAC and DWH, maybe the prompt implies a specific mapping or the `End Use` column has specific values.
+          - Common values in such datasets (e.g., from utility data): "Central AC", "Heat Pump", "Water Heater".
+          - Let's assume:
+            - `hvac`: Sum of `Average Demand` where `End Use` contains "AC" or "Heat" or "HVAC".
+            - `domestic_water_heating`: Sum of `Average Demand` where `End Use` contains "Water" or "Heater".
+            - `major_appliances`: Sum of `Average Demand` where `End Use Category` is "Kitchen" or "Laundry".
+            - `lighting`: Sum of `Average Demand` where `End Use Category` is "Lighting".
+            - `miscellaneous_plug_loads`: Sum of `Average Demand` where `End Use Category` is "Miscellaneous".
+            - `Remaining Load` might be ignored if it's not HVAC/DWH? Or maybe `Remaining Load` *is* the HVAC/DWH bucket and needs to be split?
+            - Actually, in many "Remaining Load" contexts, if specific HVAC/Water Heater meters are present, they are extracted. If the source has "Remaining Load" as an End Use, it might be the residual.
+            - However, looking at the target `hvac` values (e.g., 2883 kW in July), these are very high. `Remaining Load` in the sample is null or not shown for high values.
+            - Let's look at the `distinct_values` of `End Use`? They are not provided in the schema, only `distinct` count (15).
+            - I will assume the standard specific End Use strings for HVAC and Water Heating exist in the 15 distinct values.
+            - Hypothesis:
+              - `hvac`: End Use in ["Central AC", "Heat Pump", "Gas Furnace", ...] or containing "AC"/"Heat".
+              - `domestic_water_heating`: End Use containing "Water".
+              - `major_appliances`: Kitchen + Laundry.
+              - `lighting`: Lighting.
+              - `miscellaneous_plug_loads`: Miscellaneous.
+              - `Remaining Load`: Might be excluded or mapped to something else? The target has `total`=0, which is strange.
+            - Alternative: The target `hvac` and `domestic_water_heating` are derived from `Remaining Load`? No, that's impossible without a split factor.
+            - Most likely: The `End Use` column contains specific strings for HVAC and Water Heating. I will filter for those.
+            - Since I don't have the list of 15 End Uses, I will use common keywords.
+            - Keywords for HVAC: "AC", "Heat", "HVAC", "Cooling", "Heating".
+            - Keywords for Water Heating: "Water", "Heater".
+            - Keywords for Major Appliances: "Kitchen", "Laundry".
+            - Keywords for Lighting: "Lighting".
+            - Keywords for Misc: "Miscellaneous".
+            
+            Let's refine the mapping based on typical dataset structures (like the "Plug Load" datasets):
+            - `hvac`: End Use Category == "Remaining Load" is often the catch-all. BUT if there are specific meters, they are listed.
+            - Let's look at the sample again. "Remaining Load" is an End Use.
+            - If I sum "Remaining Load" for July 12, is it 2883?
+            - If I sum "Kitchen" and "Laundry" for July 12, is it 592?
+            - If I sum "Miscellaneous" for July 12, is it 212?
+            - If I sum "Lighting" for July 12, is it 0? (Target lighting is 0).
+            
+            The target `lighting` is 0 for all samples. The source has "Lighting" category. Why is target 0?
+            Maybe `lighting` in target is not `Lighting` in source?
+            Or maybe the `Average Demand` for Lighting is 0? No, sample has 0.094.
+            
+            Wait, look at the target `lighting` distinct values: [0]. It is always 0.
+            Look at target `total` distinct values: [0]. It is always 0.
+            
+            This suggests `lighting` and `total` are dummy columns or I am misinterpreting the aggregation.
+            
+            Let's look at `hvac`, `domestic_water_heating`, `major_appliances`, `miscellaneous_plug_loads`.
+            
+            If `lighting` is 0, maybe the source `Lighting` category is ignored?
+            
+            Let's assume the following mapping for the non-zero columns:
+            - `major_appliances`: Sum of `Kitchen` and `Laundry`.
+            - `miscellaneous_plug_loads`: Sum of `Miscellaneous`.
+            - `hvac` and `domestic_water_heating`: These must come from `Remaining Load` or specific End Uses.
+            
+            If `Remaining Load` is a single End Use, how do we split it?
+            Maybe `End Use` has "Central AC" and "Water Heater"?
+            
+            Given the ambiguity of the 15 End Uses, I will proceed with:
+            1. Filter `Day Type` == "All".
+            2. Parse Month.
+            3. Group by Month, Hour.
+            4. Sum `Average Demand` for:
+               - `major_appliances`: `End Use Category` in ['Kitchen', 'Laundry']
+               - `miscellaneous_plug_loads`: `End Use Category` == 'Miscellaneous'
+               - `hvac`: `End Use Category` == 'Remaining Load' AND `End Use` contains 'AC' or 'Heat'? Or just `Remaining Load`?
+               - `domestic_water_heating`: `End Use Category` == 'Remaining Load' AND `End Use` contains 'Water'?
+            
+            If `Remaining Load` is the only category for HVAC/DWH, and we can't split, maybe `hvac` is `Remaining Load` and `domestic_water_heating` is 0? But target `domestic_water_heating` is not 0.
+            
+            Therefore, specific `End Use` strings must exist.
+            I will use:
+            - `hvac`: `End Use` contains "AC" or "Heat" (case-insensitive).
+            - `domestic_water_heating`: `End Use` contains "Water" (case-insensitive).
+            - `major_appliances`: `End Use Category` in ["Kitchen", "Laundry"].
+            - `miscellaneous_plug_loads`: `End Use Category` == "Miscellaneous".
+            - `lighting`: 0 (as per target sample).
+            - `total`: 0 (as per target sample).
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Map month names to numbers
+    month_map = {
+        'January': 1, 'February': 2, 'March': 3, 'April': 4, 'May': 5, 'June': 6,
+        'July': 7, 'August': 8, 'September': 9, 'October': 10, 'November': 11, 'December': 12
+    }
+    
+    # Filter for 'All' day type to get the aggregate profile
+    df = source[source['Day Type'] == 'All'].copy()
+    
+    # Parse Month
+    df['month'] = df['Time Period'].map(month_map)
+    
+    # Identify categories
+    # Major Appliances: Kitchen and Laundry
+    df['is_major_appliances'] = df['End Use Category'].isin(['Kitchen', 'Laundry'])
+    
+    # Miscellaneous Plug Loads
+    df['is_misc'] = df['End Use Category'] == 'Miscellaneous'
+    
+    # HVAC: Look for specific end uses in Remaining Load or generally
+    # Assuming specific end uses like 'Central AC', 'Heat Pump', etc. exist in the 15 distinct End Uses
+    # We check if the End Use string contains common HVAC keywords
+    df['is_hvac'] = df['End Use'].str.contains('AC|Heat|HVAC|Cooling|Heating', case=False, na=False) & (df['End Use Category'] != 'Miscellaneous') & (df['End Use Category'] != 'Lighting') & (df['End Use Category'] != 'Kitchen') & (df['End Use Category'] != 'Laundry')
+    # Note: If 'Remaining Load' is the category for HVAC, we might need to check End Use specifically.
+    # If 'Remaining Load' is the only category for these, and End Use is 'Remaining Load', this fails.
+    # However, if End Use is 'Central AC', Category might be 'Remaining Load' or 'HVAC'.
+    # Given 'Remaining Load' is a category in the source, and HVAC is likely inside it or a specific End Use.
+    # Let's also check if End Use Category is 'Remaining Load' and End Use is NOT 'Remaining Load' (implying specific meter)
+    # Or simpler: Just match keywords in End Use regardless of category, excluding known others.
+    
+    # Domestic Water Heating
+    df['is_dwh'] = df['End Use'].str.contains('Water', case=False, na=False) & (~df['is_hvac'])
+    
+    # Drop rows with null demand for aggregation, or fill with 0
+    df['demand'] = df['Average Demand Per Home With This End Use [kW]'].fillna(0)
+    
+    # Aggregate
+    agg_df = df.groupby(['month', 'Hour Ending']).agg(
+        hvac=('is_hvac', lambda x: df.loc[x.index, 'demand'].sum()),
+        domestic_water_heating=('is_dwh', lambda x: df.loc[x.index, 'demand'].sum()),
+        major_appliances=('is_major_appliances', lambda x: df.loc[x.index, 'demand'].sum()),
+        miscellaneous_plug_loads=('is_misc', lambda x: df.loc[x.index, 'demand'].sum())
+    ).reset_index()
+    
+    # Rename Hour Ending to hour
+    agg_df = agg_df.rename(columns={'Hour Ending': 'hour'})
+    
+    # Add constant columns as per target sample
+    agg_df['lighting'] = 0
+    agg_df['total'] = 0
+    
+    # Ensure correct column order
+    cols = ['month', 'hour', 'hvac', 'domestic_water_heating', 'major_appliances', 'lighting', 'miscellaneous_plug_loads', 'total']
+    agg_df = agg_df[cols]
+    
+    # Ensure dtypes
+    agg_df['month'] = agg_df['month'].astype(int)
+    agg_df['hour'] = agg_df['hour'].astype(int)
+    agg_df['lighting'] = agg_df['lighting'].astype(int)
+    agg_df['total'] = agg_df['total'].astype(int)
+    
+    return agg_df
+```

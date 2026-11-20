@@ -1,0 +1,148 @@
+{
+  "case": "length1_3",
+  "length": 1,
+  "strategy": "s3",
+  "model": "qwen36-27b",
+  "is_demo": true,
+  "parameters": {
+    "output": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment",
+    "model": "qwen36-27b",
+    "base_url": "https://openai.rc.asu.edu/v1",
+    "max_tokens": 6000,
+    "reasoning_effort": "none",
+    "k": 5,
+    "sample_rows": 12,
+    "timeout": 120,
+    "seed": 42,
+    "strategy": "s3",
+    "python": "3.14.4 (main, Apr  7 2026, 13:13:20) [Clang 21.0.0 (clang-2100.0.123.102)]",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "pandas": "3.1.1",
+    "held_out": [
+      "length1_1",
+      "length1_2",
+      "length1_3",
+      "length2_1",
+      "length3_1"
+    ],
+    "benchmark": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split"
+  },
+  "prompt_path": "logs/s3/length1_3/prompt.json",
+  "completion_path": "logs/s3/length1_3/response.json",
+  "execution": {
+    "status": "ok",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": "",
+    "seconds": 0.5501592500004335,
+    "shape": [
+      183,
+      25
+    ],
+    "fingerprint": "8756b8aefcd4bdbbfaa3433f9cacc4baf15f1b0940624d25e331c6453b1518bb"
+  },
+  "autopipeline": {
+    "accuracy": 1.0,
+    "is_correct": true,
+    "similarities": {},
+    "info": [
+      "cst",
+      "2:00",
+      "3:00",
+      "4:00",
+      "5:00",
+      "6:00",
+      "7:00",
+      "8:00",
+      "9:00",
+      "10:00",
+      "11:00",
+      "12:00",
+      "1:00",
+      "14:00",
+      "15:00",
+      "16:00",
+      "17:00",
+      "18:00",
+      "19:00",
+      "20:00",
+      "21:00",
+      "22:00",
+      "23:00",
+      "24:00",
+      "13:00"
+    ]
+  },
+  "hard_match": {
+    "accuracy": 0.2275409836065574,
+    "is_correct": false,
+    "similarities": [
+      1.0,
+      0.07103825136612021,
+      0.0,
+      0.01639344262295082,
+      0.3825136612021858,
+      0.34972677595628415,
+      0.01092896174863388,
+      0.5519125683060109,
+      0.0273224043715847,
+      0.23497267759562843,
+      0.01092896174863388,
+      0.2459016393442623,
+      0.0273224043715847,
+      0.13114754098360656,
+      0.3224043715846995,
+      0.2459016393442623,
+      0.273224043715847,
+      0.5901639344262295,
+      0.0,
+      0.3005464480874317,
+      0.28415300546448086,
+      0.03278688524590164,
+      0.0546448087431694,
+      0.22950819672131148,
+      0.29508196721311475
+    ],
+    "info": [
+      "cst"
+    ]
+  },
+  "hard_match_provenance": "course-provided hard_match.py and utils.py",
+  "exact_schema": true,
+  "generation": {
+    "request_hash": "742992d559ef269681303d96f7717927d58285c7b035f872a3335d25f792e422",
+    "usage": {
+      "completion_tokens": 20604,
+      "prompt_tokens": 10687,
+      "total_tokens": 31291,
+      "completion_tokens_details": null,
+      "prompt_tokens_details": {
+        "audio_tokens": null,
+        "cache_write_tokens": null,
+        "cached_tokens": 9856,
+        "image_tokens": null,
+        "text_tokens": null,
+        "created_cache_tokens": 0,
+        "multimodal_tokens": null
+      },
+      "co2_g": 6.936032,
+      "energy_wh": 20.581698
+    },
+    "latency_seconds": 231.8661475000008,
+    "api_attempts": 1,
+    "cached": false,
+    "candidate_count": 5,
+    "reasoning_effort_header": "none",
+    "selected_index": 0,
+    "clusters": {
+      "1c4930626d19e3005818deffe522068a7ce00c80087427cb0cb57b98e0e6850f": [
+        0,
+        3
+      ],
+      "f50f635dc93aedb5623fa76645f0821dae198a73d55c66fb5b66bf223c4be786": [
+        2
+      ]
+    }
+  },
+  "wall_seconds": 234.87308195799778
+}

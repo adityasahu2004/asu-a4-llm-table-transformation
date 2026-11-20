@@ -1,0 +1,200 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `Date` column from string format (`M/D/YYYY`) to pandas datetime objects.
+2.  **Generate Daily Index**: The source data contains bi-weekly snapshots (182 rows for a year). The target data contains daily records (365/366 rows for a year). We need to expand the source data to a daily frequency.
+    *   Determine the start date (first day of the year of the first source date) and end date (last day of the year of the last source date).
+    *   Create a complete daily date range for that year.
+    *   Merge this daily index with the source data. Since the source data represents a "profile" or "curve" for a specific period, and the target values for different dates look like interpolated or representative curves, we need to figure out how to map source rows to target rows.
+    *   *Correction/Refinement*: Looking closely at the data:
+        *   Source has 182 rows. Target has 183 rows in the sample, but the schema says 183 distinct `dt_strata`. Wait, the target schema says `rows: 183` and `distinct: 183` for `dt_strata`. The sample shows dates like `1/1/2013`, `1/17/2013`, `2/3/2013`... these are bi-weekly intervals (16 days apart).
+        *   Let's check the source dates: `7/3/2013`, `7/19/2013` (16 days), `8/4/2013` (16 days).
+        *   The source covers July to December 2013.
+        *   The target covers January to July 2013? No, the target sample starts `1/1/2013` and ends `7/2/2013`.
+        *   Actually, let's look at the mapping.
+        *   Source Row 0: `7/3/2013`. Target Row 11: `7/2/2013`. Values are similar but not identical.
+        *   Source Row 1: `7/19/2013`. Target Row 10: `6/15/2013`? No.
+        *   Let's look at the structure again.
+        *   Source: 182 rows. Bi-weekly.
+        *   Target: 183 rows. Bi-weekly.
+        *   The target `dt_strata` values are `1/1/2013`, `1/17/2013`, `2/3/2013`...
+        *   The source `Date` values are `7/3/2013`... `12/31/2013`.
+        *   It seems the target is a *different* set of dates, or the data is shifted/interpolated.
+        *   However, usually in these problems, if the row counts are similar (182 vs 183) and the pattern is bi-weekly, it's likely a direct mapping or a simple interpolation.
+        *   Let's check if the target is just the source data shifted or if it's a full year expansion.
+        *   Source distinct dates: 182. Target distinct dates: 183.
+        *   Source dates: July-Dec 2013.
+        *   Target dates: Jan-July 2013.
+        *   This looks like the target is the *first half* of the year and source is the *second half*? Or is it a generic "load profile" transformation?
+        *   Let's look at the values.
+        *   Source `7/3/2013` (Wed): `0.56, 0.51...`
+        *   Target `7/2/2013` (Tue): `0.66, 0.61...`
+        *   Target `1/1/2013` (Tue): `0.89, 0.80...`
+        *   There is no obvious 1:1 value mapping between source and target rows based on date proximity because the dates are in different halves of the year.
+        *   *Hypothesis*: The problem might be asking to generate a *typical* day profile for each day of the year based on the source data? But the source only has 182 rows.
+        *   *Alternative Hypothesis*: The source and target are actually the *same* dataset but the sample provided in the prompt is misleading or I am misinterpreting the "rows" count.
+        *   Let's re-read carefully.
+        *   Source: 182 rows. Dates: 7/3/2013 to 12/31/2013.
+        *   Target: 183 rows. Dates: 1/1/2013 to 7/2/2013.
+        *   This implies the target is the *other half* of the year.
+        *   How do we get Jan-Jun data from Jul-Dec data? We can't, unless there's a pattern.
+        *   *Wait*, look at the `Class` column. It's constant `RESIDENT`.
+        *   Look at the target columns: `pct_hourly_0100` to `pct_hourly_2500`.
+        *   Source columns: `1` to `24`.
+        *   Target has 25 hourly columns (1-25). Source has 24 (1-24).
+        *   Target `pct_hourly_2500` is all null.
+        *   This suggests the transformation is:
+            1.  Rename source columns `1`..`24` to `pct_hourly_0100`..`pct_hourly_2400`.
+            2.  Add a column `pct_hourly_2500` filled with NaN.
+            3.  Generate a new date index.
+        *   But how is the new date index generated? And where do the values come from?
+        *   If the values in the target are *not* from the source, this is impossible without external data.
+        *   Therefore, the values *must* be derived from the source.
+        *   Is it possible the source and target samples are just *different slices* of the same underlying logic, and the "evaluation source" will have the dates that match the target?
+        *   No, the prompt says "Compute the result only from the source DataFrame."
+        *   Let's look at the row counts again.
+        *   Source: 182 rows.
+        *   Target: 183 rows.
+        *   If the evaluation source has 182 rows, and the target has 183, we must be adding a row or expanding.
+        *   However, if the evaluation source *also* has dates in the second half of the year, and the target expects dates in the first half, we have a mismatch.
+        *   *Crucial Insight*: In many energy/load datasets, "bi-weekly" profiles are used to represent the whole year. Often, the first 182 days (Jan-Jun) and last 183 days (Jul-Dec) are treated similarly or one is a proxy for the other.
+        *   BUT, look at the target `dt_strata` values: `1/1/2013`, `1/17/2013`...
+        *   Look at the source `Date` values: `7/3/2013`, `7/19/2013`...
+        *   Notice that `1/1/2013` is a Tuesday. `7/2/2013` is a Tuesday.
+        *   `1/17/2013` is a Thursday. `7/18/2013` would be a Thursday.
+        *   The target dates are exactly 6 months (approx) before the source dates?
+        *   `7/3/2013` - 6 months = `1/3/2013`. Target has `1/1/2013` and `1/17/2013`.
+        *   This doesn't align perfectly.
+
+    *   *Let's try a different angle*: What if the transformation is simply **renaming and reshaping**, and the date/index generation is based on the *source* dates, but the sample target provided is just an example of the *format*?
+    *   No, the target schema explicitly lists `dt_strata` values `1/1/2013` to `7/2/2013`.
+    *   If the evaluation source contains dates `7/3/2013` to `12/31/2013`, and I must produce `1/1/2013` to `7/2/2013`, I cannot do this deterministically without a mapping.
+
+    *   *Re-evaluating the "Rows" count*:
+        *   Source: 182 rows.
+        *   Target: 183 rows.
+        *   2013 is not a leap year. 365 days.
+        *   365 / 2 = 182.5.
+        *   So 182 rows covers half the year, 183 covers the other half.
+        *   The source covers the *second* half (Jul-Dec).
+        *   The target covers the *first* half (Jan-Jun).
+        *   Is it possible the task is to **shift** the dates back by 6 months?
+        *   `7/3/2013` -> `1/3/2013`?
+        *   Target has `1/1/2013` and `1/17/2013`.
+        *   Source has `7/3/2013` and `7/19/2013`.
+        *   The offset is not constant.
+
+    *   *Let's look at the `dow` (Day of Week)*:
+        *   Target `1/1/2013` (Tue) -> `dow` 2.
+        *   Target `1/17/2013` (Thu) -> `dow` 4.
+        *   Target `2/3/2013` (Sun) -> `dow` 0.
+        *   This confirms `dow` is calculated from `dt_strata`.
+
+    *   *Let's look at the values again*:
+        *   Source `7/3/2013` (Wed): `0.56, 0.51...`
+        *   Target `7/2/2013` (Tue): `0.66, 0.61...`
+        *   Target `1/1/2013` (Tue): `0.89, 0.80...`
+        *   The values for `1/1/2013` (Winter) are higher than `7/2/2013` (Summer). This makes sense for heating/cooling loads.
+        *   The values for `7/3/2013` (Summer) are lower.
+        *   This implies the data is *seasonal*.
+        *   If the source only has Summer/Fall data, how can we generate Winter/Spring data?
+        *   **Unless**: The "Source" provided in the prompt is just a *sample* of the training data, and the *evaluation source* will contain the full year or the specific dates needed?
+        *   The prompt says: "Source row count describes a training sample only, not the evaluation input."
+        *   This is the key. The evaluation input might have different dates.
+        *   However, the transformation must be general.
+        *   If the evaluation input has dates `D1, D2...`, the output should have dates `D1, D2...` (or derived from them).
+        *   But the target schema shows specific dates `1/1/2013`...
+        *   If the evaluation source has `7/3/2013`, should the output have `7/3/2013` or `1/3/2013`?
+        *   Given the target sample has `1/1/2013` and the source sample has `7/3/2013`, and they are distinct, it's highly likely that the **evaluation source will contain the dates that appear in the target**.
+        *   i.e., The evaluation source will likely have rows for `1/1/2013`, `1/17/2013`, etc.
+        *   The "Source" block in the prompt is just showing the *schema* and a *sample* of what the data looks like (bi-weekly, 24 hours). The specific dates in the sample might not be the dates in the evaluation.
+        *   Therefore, the transformation is:
+            1.  Take the source DataFrame.
+            2.  Parse the `Date` column.
+            3.  Create `dt_strata` by formatting the date as `M/D/YYYY`.
+            4.  Create `dow` by getting the day of the week (0=Mon, 6=Sun? Or 0=Sun? Let's check).
+                *   Target `1/1/2013` (Tue) is `2`.
+                *   Target `2/3/2013` (Sun) is `0`.
+                *   Target `1/17/2013` (Thu) is `4`.
+                *   This matches Python's `weekday()` where Mon=0, Tue=1, Wed=2, Thu=3, Fri=4, Sat=5, Sun=6?
+                *   Wait. `1/1/2013` is Tuesday. `weekday()` returns 1. Target is 2.
+                *   `2/3/2013` is Sunday. `weekday()` returns 6. Target is 0.
+                *   `1/17/2013` is Thursday. `weekday()` returns 3. Target is 4.
+                *   It looks like `dow` = `weekday() + 1`?
+                    *   Tue (1) + 1 = 2. Correct.
+                    *   Sun (6) + 1 = 7. Target is 0.
+                    *   Thu (3) + 1 = 4. Correct.
+                *   So it's `(weekday() + 1) % 7`?
+                    *   Sun: (6+1)%7 = 0. Correct.
+                    *   Mon: (0+1)%7 = 1.
+                    *   Tue: (1+1)%7 = 2.
+                    *   This maps Mon->1, Tue->2, ..., Sun->0.
+            5.  Rename columns `1`..`24` to `pct_hourly_0100`..`pct_hourly_2400`.
+            6.  Add column `pct_hourly_2500` with NaN.
+            7.  Select/Order columns: `dt_strata`, `dow`, `pct_hourly_0100`...`pct_hourly_2500`.
+            8.  Sort by `dt_strata` (or original date order).
+
+    *   Let's verify the column renaming.
+        *   Source `1` -> Target `pct_hourly_0100`.
+        *   Source `2` -> Target `pct_hourly_0200`.
+        *   ...
+        *   Source `24` -> Target `pct_hourly_2400`.
+        *   Target has `pct_hourly_2500` (all null).
+
+    *   Let's verify the date format.
+        *   Source: `7/3/2013`.
+        *   Target: `1/1/2013`.
+        *   Format: `M/D/YYYY` (no leading zeros).
+
+    *   Let's verify the `dow` calculation again.
+        *   `pd.to_datetime('1/1/2013').weekday()` is 1 (Tue). Target is 2.
+        *   `pd.to_datetime('2/3/2013').weekday()` is 6 (Sun). Target is 0.
+        *   Formula: `(dt.weekday() + 1) % 7`.
+
+    *   Assumption: The evaluation source will contain the rows that need to be transformed, with dates corresponding to the target `dt_strata`. The sample source dates (Jul-Dec) are just illustrative of the schema. The transformation logic (rename, format date, calc dow, add null col) applies regardless of the specific dates.
+
+### Python Code
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse the Date column
+    # The source date format is M/D/YYYY
+    df = source.copy()
+    df['parsed_date'] = pd.to_datetime(df['Date'], format='%m/%d/%Y')
+    
+    # 2. Create dt_strata
+    # Format as M/D/YYYY (no leading zeros)
+    df['dt_strata'] = df['parsed_date'].dt.strftime('%-m/%-d/%Y')
+    
+    # 3. Create dow
+    # Mapping: Mon=1, Tue=2, Wed=3, Thu=4, Fri=5, Sat=6, Sun=0
+    # Python weekday(): Mon=0, ..., Sun=6
+    # Formula: (weekday() + 1) % 7
+    df['dow'] = (df['parsed_date'].dt.weekday + 1) % 7
+    
+    # 4. Rename hourly columns
+    # Source columns '1' through '24' become 'pct_hourly_0100' through 'pct_hourly_2400'
+    rename_map = {}
+    for i in range(1, 25):
+        rename_map[str(i)] = f'pct_hourly_{i:04d}'
+    
+    df = df.rename(columns=rename_map)
+    
+    # 5. Add pct_hourly_2500 column with NaN
+    df['pct_hourly_2500'] = np.nan
+    
+    # 6. Select and order columns
+    # Target order: dt_strata, dow, pct_hourly_0100 ... pct_hourly_2500
+    hourly_cols = [f'pct_hourly_{i:04d}' for i in range(1, 26)]
+    final_cols = ['dt_strata', 'dow'] + hourly_cols
+    
+    result = df[final_cols]
+    
+    # 7. Sort by dt_strata to match typical target presentation (optional but good practice)
+    # The target sample is sorted by date.
+    result = result.sort_values('dt_strata').reset_index(drop=True)
+    
+    return result
+```

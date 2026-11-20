@@ -1,0 +1,27 @@
+{
+  "python": "3.14.10 (main, Nov  5 2026, 08:03:50) [GCC 14.2.0]",
+  "platform": "Linux-6.10.14-linuxkit-aarch64-with-glibc2.41",
+  "machine": "aarch64",
+  "pandas": "3.1.1",
+  "numpy": "2.5.5",
+  "test_result": "31 passed",
+  "network": "none",
+  "capabilities": "ALL dropped",
+  "no_new_privileges": true,
+  "image_id": "sha256:ed38e7d551ef88d9325eebd4f89cb8ea6e392497d74d2f246d8cd6881edaa9e3",
+  "checked_at_utc": "2026-11-20T20:06:19.239555+00:00",
+  "macos_tests": "30 passed; 1 Linux-only test skipped",
+  "previous_tested_image_id": "sha256:a8dbacc479cd9f54a085945a92d7cb67c53ef4e73db84583ac4a788f02c2308c",
+  "benchmark_smoke": "7 real cached case replays across s1/s2/s4/s5 matched, run as UID 65534 with network disabled",
+  "verified_execution_source_sha256": {
+    "execution.py": "89ef991fa8eed76da55b0565bb404af5e906429c0c4ddb0c1104b653912d77e8",
+    "worker.py": "68e7c522935ca24444944c0d1471fdb1bd403ed3f53220acc87df90d111d3024",
+    "linux_sandbox.py": "7c70c76a541b80b0b55ab1f63c98b540615841cddea4fb90b1ef5c5de4199230",
+    "target_constraints.py": "80a1ccaae6e88998ba374e5bf4359182807df613186845ba9f38a02b62630058",
+    "strategies/common.py": "e8e7636dc58ef14774f3c63f5e355bad9d7290d5ea04d3434049e55ba35ecdf2",
+    "strategies/s5.py": "aed6f876cfda08325f7c966df9b40a8638595546438ab9421a859ae65f2a93e6",
+    "tests/test_harness.py": "ad2c04afdeef33114dc48fd20673f1b6e70bd8ee1443d9c51659bbe239f5b845",
+    "pytest.ini": "c809c969ec7e11b9ff37784e9c6fcc0b7c5148d168e18b05aed797e03fbd6ead"
+  },
+  "validation_scope": "Execution, policy and test source matches the tested Linux image. Report-only edits made afterwards."
+}

@@ -1,0 +1,125 @@
+Operator plan:
+1. Parse the `date` column into a datetime object.
+2. Extract the date part (day) and the hour part. The hour in the target columns (1:00 to 24:00) corresponds to the hour of the day, with 0 mapped to 24 (midnight/end of day).
+3. Pivot the data so that each unique date becomes a row, and the hours become columns.
+4. Fill missing values with 0.0.
+5. Format the date column as "Dow MM/DD/YYYY".
+6. Rename the hour columns to "H:00".
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date
+    df = source.copy()
+    df['dt'] = pd.to_datetime(df['date'])
+    
+    # Extract day for grouping and hour for pivoting
+    df['day'] = df['dt'].dt.date
+    df['hour'] = df['dt'].dt.hour
+    
+    # Map hour 0 to 24 to match target schema (1:00...24:00)
+    # Target columns are 1:00 to 24:00.
+    # Source has hours like 0:11, 2:22, etc.
+    # Hour 0 in source -> 24 in target? Or 1?
+    # Let's look at sample.
+    # Source: 1/2/2018 0:11 -> value 67.9
+    # Target: Tue 01/02/2018, 24:00 is 746.9. 1:00 is 0.0.
+    # Wait, the values in target are quite different from source.
+    # Source values are ~67. Target values are ~4000 or 746.
+    # This implies an aggregation or a different dataset transformation.
+    # However, the instructions say "Compute the result only from the source DataFrame".
+    # And "Never copy target rows".
+    # But the target has 2 rows, source has 1450.
+    # The target dates are Mon 01/01/2018 and Tue 01/02/2018.
+    # Source dates are 1/2/2018 to 1/3/2018.
+    # This mismatch suggests the sample data in the prompt might be illustrative or from different evaluations.
+    # BUT, looking closely at the source sample:
+    # 1/2/2018 0:11, 1/2/2018 2:22 ...
+    # These are irregular intervals.
+    # The target has regular hourly buckets 1:00 to 24:00.
+    # Usually, this implies grouping by date and hour.
+    
+    # Let's re-read the distinct values.
+    # Source zone_016 distinct: 24.
+    # Target 1:00 distinct: 2.
+    
+    # If I simply pivot:
+    # Index: Day
+    # Columns: Hour (adjusted)
+    # Values: zone_016
+    
+    # How to map source hour to target column?
+    # Source 0:11 -> Hour 0. Target has 24:00. Likely 0->24.
+    # Source 2:22 -> Hour 2. Target has 2:00.
+    # Source 4:34 -> Hour 4. Target has 4:00.
+    
+    # What if multiple rows fall into the same hour?
+    # The sample has one row per 2 hours roughly.
+    # If there are multiple, should we sum? Mean?
+    # The target values are very large (4000+) compared to source (67).
+    # This suggests the source sample provided in the prompt might not align numerically with the target sample provided, 
+    # OR there is a multiplication factor, OR the target is an aggregate of many more rows not shown in the small source sample.
+    # However, I must infer the transformation from the schema.
+    # Standard operation for this pattern is Pivot.
+    # If I assume the source contains all data, and I pivot, I get the structure.
+    # The numerical discrepancy is likely due to the "sample" note: "Source row count describes a training sample only".
+    # The evaluation input will have different data. I should implement the structural transformation.
+    
+    # Step 1: Parse datetime
+    df['dt'] = pd.to_datetime(df['date'])
+    
+    # Step 2: Extract date and hour
+    df['date_only'] = df['dt'].dt.date
+    df['hour_int'] = df['dt'].dt.hour
+    
+    # Step 3: Map hour 0 to 24
+    df['hour_label'] = df['hour_int'].apply(lambda h: 24 if h == 0 else h)
+    
+    # Step 4: Pivot
+    # If there are multiple entries per hour, we need an aggregation.
+    # Given the nature of load/zone data, sum is common if it's partial loads, 
+    # but mean or last might be used if it's a snapshot.
+    # However, looking at the target, 0.0 is used for missing.
+    # If I pivot with sum, and there are no duplicates, it works.
+    # If there are duplicates, sum is safer than mean if they represent disjoint intervals.
+    # Let's try pivot_table with sum.
+    
+    pivoted = df.pivot_table(
+        index='date_only', 
+        columns='hour_label', 
+        values='zone_016', 
+        aggfunc='sum', 
+        fill_value=0.0
+    )
+    
+    # Step 5: Format columns
+    # Columns are integers 1..24. Rename to "H:00"
+    pivoted.columns = [f"{h}:00" for h in pivoted.columns]
+    
+    # Ensure all hours 1-24 are present, fill missing with 0
+    for h in range(1, 25):
+        col = f"{h}:00"
+        if col not in pivoted.columns:
+            pivoted[col] = 0.0
+            
+    # Reorder columns
+    pivoted = pivoted[[f"{h}:00" for h in range(1, 25)]]
+    
+    # Step 6: Format index date
+    # Convert index to datetime for formatting
+    pivoted.index = pd.to_datetime(pivoted.index)
+    
+    # Format as "Dow MM/DD/YYYY"
+    # e.g. Mon 01/01/2018
+    pivoted.index = pivoted.index.strftime('%a %m/%d/%Y')
+    
+    # Rename index to 'cst'
+    pivoted.index.name = 'cst'
+    
+    # Reset index to make 'cst' a column
+    result = pivoted.reset_index()
+    
+    return result
+```

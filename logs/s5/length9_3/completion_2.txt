@@ -1,0 +1,200 @@
+Operator plan:
+1.  **Parse Date/Time Info**: Extract `season` and `daytype` from the `SEASON DAY TYPE` column.
+    *   `SEASON DAY TYPE` values like "June WE" imply Summer and Weekend. "July WD" implies Summer and Weekday.
+    *   Looking at the target sample, "SPRING" and "SUMMER" are the seasons. The source sample only shows Summer months (June, July, August, September, October, November, December). Wait, the target sample has "SPRING" and "SUMMER". The source sample has "June WE", "July WD", etc.
+    *   Let's infer the mapping.
+        *   "June WE" -> Summer, Weekend? Or Spring? June is usually Summer.
+        *   "July WD" -> Summer, Weekday.
+        *   "September WD" -> Fall? Or Summer?
+        *   The target distinct values for `season` are "SPRING" and "SUMMER".
+        *   The target distinct values for `daytype` are "WEEKDAY" and "WEEKEND".
+        *   Source `SEASON DAY TYPE` contains: "June WE", "July WD", "July WE", "August WD", "September WD", "September WE", "October WD", "October WE", "November WD", "November WE", "December WD", "December WE".
+        *   This looks like a specific mapping. Let's look at the target sample data to reverse engineer.
+        *   Target row 1: `SPRING`, `WEEKDAY`, `1`. Source row 5: `September WD`, `1`. So September WD -> SPRING WEEKDAY? That seems odd for typical meteorological seasons, but possible in this dataset's context (e.g., fiscal year or specific definition).
+        *   Target row 2: `SPRING`, `WEEKEND`, `4`. Source row 6: `September WE`, `4`. So September WE -> SPRING WEEKEND.
+        *   Target row 3: `SPRING`, `WEEKDAY`, `7`. Source row 7: `October WD`, `8`. No, hour is 7. Source row 7 is Hour 8.
+        *   Let's check the hours.
+            *   Target Hour 1: Source Hour 1 (September WD).
+            *   Target Hour 4: Source Hour 4 (September WE).
+            *   Target Hour 7: Source Hour 8 (October WD)? No, Target Hour 7 is `SPRING`, `WEEKDAY`. Source Hour 8 is `October WD`.
+            *   Target Hour 10: Source Hour 11 (October WE)? Target is `SPRING`, `WEEKEND`.
+            *   Target Hour 13: Source Hour 13 (June WE)? Target is `SPRING`, `WEEKDAY`. But Source June WE is `SPRING`?
+            *   Target Hour 16: Source Hour 16 (July WD)? Target is `SPRING`, `WEEKEND`. But Source July WD is `WEEKDAY`.
+        *   There is a mismatch in my simple row-by-row assumption because the source sample is just a subset, not necessarily aligned 1:1 with the target sample rows in order. The target sample has 12 rows. The source sample has 12 rows.
+        *   Let's look at the `temperature_range` and `low_end`/`high_end` to identify the row.
+        *   Target Row 0: `hour=1`, `low_end=9`, `high_end=62`. `temperature_range=53`.
+        *   Source Row 4: `hour=1`, `T_MIN_1=41`, `T_MAX_1=59.5`. `T_MIN_2=59.5`, `T_MAX_2=68.5`. `T_MIN_3=68.5`, `T_MAX_3=76.0`.
+        *   Target Row 0 `low_end=9`, `high_end=62`. This doesn't match Source Row 4 directly.
+        *   Let's look at Target Row 6: `SUMMER`, `WEEKDAY`, `20`, `low_end=40`, `high_end=78`.
+        *   Source Row 10: `hour=20`, `December WD`. `T_MIN_1=21`, `T_MAX_1=32.5`.
+        *   This implies the target data is not just a projection of the source columns. The values in `low_end` and `high_end` in the target (e.g., 9, 62) are not in the source sample rows for Hour 1 (41, 59.5).
+        *   Wait, look at Target Row 0: `low_end=9`, `high_end=62`.
+        *   Look at Source Row 4 (Hour 1): `T_MIN_1=41`.
+        *   Maybe the target sample rows correspond to different source rows not shown, or the transformation involves calculation.
+        *   However, the prompt says "Infer a general transformation... Compute the result only from the source DataFrame."
+        *   Let's re-read the target schema. `constant` and `coefficient` are all null in the target sample.
+        *   `season` and `daytype` are derived from `SEASON DAY TYPE`.
+        *   `hour` is from `HOUR`.
+        *   `temperature_range` is likely `T_MAX_1 - T_MIN_1`? Or `PROFILE_MAX - PROFILE_MIN`?
+        *   Target Row 0: `temperature_range=53`. Source Row 4 (Hour 1): `PROFILE_MAX=2.891`, `PROFILE_MIN=0.566`. Diff = 2.325. No.
+        *   Source Row 4: `T_MAX_1=59.5`, `T_MIN_1=41`. Diff = 18.5. No.
+        *   Let's look at Target Row 6: `SUMMER`, `WEEKDAY`, `20`, `temperature_range=38`, `low_end=40`, `high_end=78`.
+        *   Source Row 10: `December WD`, `Hour=20`. `T_MAX_1=32.5`, `T_MIN_1=21`.
+        *   This data doesn't seem to match the source sample values directly.
+        *   Is it possible the target sample is from a different part of the dataset? Yes, "Source row count describes a training sample only".
+        *   Let's look at the structure.
+        *   `season`: Derived from `SEASON DAY TYPE`. "June"->"SUMMER"? "September"->"SPRING"? This mapping is weird.
+        *   Let's look at the distinct values in Source `SEASON DAY TYPE`:
+            *   June WE, July WD, July WE, August WD, September WD, September WE, October WD, October WE, November WD, November WE, December WD, December WE.
+        *   Target `season`: SPRING, SUMMER.
+        *   Target `daytype`: WEEKDAY, WEEKEND.
+        *   Mapping `daytype`:
+            *   "WD" -> "WEEKDAY"
+            *   "WE" -> "WEEKEND"
+        *   Mapping `season`:
+            *   If "September" is SPRING, then "June" is likely SPRING or SUMMER.
+            *   If "December" is SUMMER (Southern Hemisphere? or Fiscal Year?), then "June" might be SPRING?
+            *   Let's assume:
+                *   June, July, August -> SUMMER?
+                *   September, October, November, December -> SPRING?
+                *   Or June, July -> SPRING? August, Sept, Oct, Nov, Dec -> SUMMER?
+            *   Let's check Target Row 0: `SPRING`, `WEEKDAY`, `1`.
+            *   Target Row 6: `SUMMER`, `WEEKDAY`, `20`.
+            *   Without more info, I will guess:
+                *   June, July, August, September, October, November, December are the only months.
+                *   Maybe June, July, August are SUMMER.
+                *   September, October, November, December are SPRING? (This is counter-intuitive for Northern Hemisphere, but maybe it's Southern Hemisphere where Dec-Feb is Summer, so Dec is Summer, Jan is Summer, Feb is Summer. June-Aug is Winter. Sep-Nov is Spring.
+                *   If Southern Hemisphere:
+                    *   Dec, Jan, Feb: Summer
+                    *   Mar, Apr, May: Autumn
+                    *   Jun, Jul, Aug: Winter
+                    *   Sep, Oct, Nov: Spring
+                *   Target only has SPRING and SUMMER.
+                *   So Sep, Oct, Nov, Dec -> SPRING? No, Dec is Summer in SH.
+                *   So Dec -> SUMMER.
+                *   Sep, Oct, Nov -> SPRING.
+                *   What about Jun, Jul, Aug? Winter. Not in target?
+                *   The source sample has June, July, August. If they are Winter, and target only has Spring/Summer, maybe they are mapped to something else or the target sample doesn't include them?
+                *   But the target has 300 rows, same as source.
+                *   Let's look at Target Row 0: `SPRING`.
+                *   Let's look at Target Row 6: `SUMMER`.
+                *   If I assume:
+                    *   Dec, Jan, Feb -> SUMMER
+                    *   Mar, Apr, May -> SPRING?
+                    *   But source has Jun-Dec.
+                    *   Maybe:
+                        *   Sep, Oct, Nov, Dec -> SPRING? (If Dec is Spring, it's weird).
+                        *   Jun, Jul, Aug -> SUMMER? (If Jun-Aug is Summer, it's Northern Hemisphere).
+                        *   If Jun-Aug is Summer, then Sep-Dec is Fall/Winter.
+                        *   Why would Sep-Dec be Spring?
+        *   Let's look at the `temperature_range` calculation.
+        *   Target `low_end` and `high_end` are integers. Source `T_MIN` and `T_MAX` are floats/ints.
+        *   Target `low_end` = `T_MIN_1`? Target `high_end` = `T_MAX_1`?
+        *   Target Row 0: `low_end=9`, `high_end=62`.
+        *   Target Row 6: `low_end=40`, `high_end=78`.
+        *   Source Row 10 (Hour 20, Dec WD): `T_MIN_1=21`, `T_MAX_1=32.5`.
+        *   Source Row 4 (Hour 1, Sep WD): `T_MIN_1=41`, `T_MAX_1=59.5`.
+        *   The values don't match.
+        *   However, `low_end` and `high_end` in target look like temperature bounds.
+        *   `temperature_range` = `high_end - low_end`?
+        *   Target Row 0: 62 - 9 = 53. Matches `temperature_range=53`.
+        *   Target Row 6: 78 - 40 = 38. Matches `temperature_range=38`.
+        *   So `temperature_range` is derived from `low_end` and `high_end`.
+        *   Where do `low_end` and `high_end` come from?
+        *   Source has `T_MIN_1`, `T_MAX_1`, `T_MIN_2`, `T_MAX_2`, `T_MIN_3`, `T_MAX_3`.
+        *   Maybe `low_end` = `T_MIN_1` and `high_end` = `T_MAX_1`?
+        *   If so, why the mismatch in sample values?
+        *   The sample rows in target are likely not the same rows as in source.
+        *   I will assume:
+            *   `low_end` = `T_MIN_1` (cast to int)
+            *   `high_end` = `T_MAX_1` (cast to int)
+            *   `temperature_range` = `high_end - low_end`
+        *   `constant` and `coefficient` are all null in target. Source has `CONSTANT_1`, `TEMP_1` (coefficient?).
+        *   Target `constant` is null. Target `coefficient` is null.
+        *   So I will set them to NaN.
+        *   `season` and `daytype` mapping:
+            *   `daytype`: "WD" -> "WEEKDAY", "WE" -> "WEEKEND".
+            *   `season`:
+                *   If SH: Dec, Jan, Feb = Summer. Sep, Oct, Nov = Spring.
+                *   Source has Jun, Jul, Aug (Winter).
+                *   If the target only has Spring/Summer, maybe Jun-Aug are mapped to Summer? Or Spring?
+                *   Let's guess:
+                    *   Jun, Jul, Aug -> SUMMER
+                    *   Sep, Oct, Nov, Dec -> SPRING
+                    *   This is the most distinct split if we ignore hemisphere logic and just look at the two groups.
+                    *   Or:
+                    *   Jun, Jul -> SPRING
+                    *   Aug, Sep, Oct, Nov, Dec -> SUMMER
+                *   Let's check the number of distinct values.
+                *   Source `SEASON DAY TYPE` has 13 distinct values.
+                *   Target `season` has 2.
+                *   I will use a heuristic:
+                    *   If month in [6, 7, 8] (Jun, Jul, Aug) -> SUMMER
+                    *   If month in [9, 10, 11, 12] (Sep, Oct, Nov, Dec) -> SPRING
+                    *   This assumes Northern Hemisphere Summer is Jun-Aug. And Spring is Sep-Dec? That's Fall/Winter.
+                    *   Maybe it's Southern Hemisphere:
+                    *   Dec, Jan, Feb -> SUMMER
+                    *   Sep, Oct, Nov -> SPRING
+                    *   Jun, Jul, Aug -> WINTER (Not in target?)
+                    *   If Winter is not in target, where do Jun-Aug go?
+                    *   Maybe the target *does* have Winter, but the sample doesn't show it?
+                    *   Target schema says `distinct: 2` for `season`. Values: "SPRING", "SUMMER".
+                    *   So Jun-Aug must be mapped to one of them.
+                    *   If SH: Jun-Aug is Winter. Maybe mapped to SPRING?
+                    *   If NH: Jun-Aug is Summer. Sep-Dec is Fall/Winter. Maybe mapped to SPRING?
+                    *   I will assume:
+                        *   Jun, Jul, Aug -> SUMMER
+                        *   Sep, Oct, Nov, Dec -> SPRING
+                        *   This covers all source months.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Extract month and day type from SEASON DAY TYPE
+    # Format: "Month WD" or "Month WE"
+    month_str = source['SEASON DAY TYPE'].str.split().str[0]
+    day_type_str = source['SEASON DAY TYPE'].str.split().str[1]
+    
+    # Map day type
+    daytype_map = {'WD': 'WEEKDAY', 'WE': 'WEEKEND'}
+    daytype = day_type_str.map(daytype_map)
+    
+    # Map season
+    # Assuming Jun, Jul, Aug -> SUMMER
+    # Assuming Sep, Oct, Nov, Dec -> SPRING
+    def get_season(month):
+        if month in ['June', 'July', 'August']:
+            return 'SUMMER'
+        else:
+            return 'SPRING'
+            
+    season = month_str.apply(get_season)
+    
+    # Hour
+    hour = source['HOUR'].astype('int64')
+    
+    # Temperature range, low_end, high_end
+    # Assuming low_end = T_MIN_1, high_end = T_MAX_1
+    low_end = source['T_MIN_1'].astype('int64')
+    high_end = source['T_MAX_1'].astype('int64')
+    temperature_range = (high_end - low_end).astype('int64')
+    
+    # Constant and Coefficient are null in target
+    constant = pd.Series([np.nan] * len(source), dtype='float64')
+    coefficient = pd.Series([np.nan] * len(source), dtype='float64')
+    
+    out = pd.DataFrame({
+        'season': season,
+        'daytype': daytype,
+        'hour': hour,
+        'temperature_range': temperature_range,
+        'constant': constant,
+        'coefficient': coefficient,
+        'low_end': low_end,
+        'high_end': high_end
+    })
+    
+    return out
+```

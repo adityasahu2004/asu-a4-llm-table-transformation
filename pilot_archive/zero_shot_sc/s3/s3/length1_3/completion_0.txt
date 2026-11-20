@@ -1,0 +1,214 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `date` column from string (`M/D/YYYY`) to datetime objects.
+2.  **Generate Target Date Range**: The source data covers a specific range (e.g., July 2014 to Dec 2014 in the sample), but the target shows a continuous range starting from `Wed 01/01/2014` and ending at `Wed 07/02/2014` (in the sample target, though the sample data provided in the prompt for target seems to cover Jan-Jul 2014, while source covers Jul-Dec 2014. Wait, looking closely at the sample data:
+    *   Source sample dates: `7/3/2014` to `12/31/2014`.
+    *   Target sample dates: `Wed 01/01/2014` to `Wed 07/02/2014`.
+    *   This implies the transformation is not just a simple rename/reorder of the *existing* rows, but potentially involves generating a full date range or the source provided in the "sample" block is just a subset and the actual evaluation source will cover the full year or relevant period. However, the prompt says "Compute the result only from the source DataFrame".
+    *   Let's re-read carefully. The source has 182 rows. The target has 183 rows.
+    *   Source distinct dates: 182. Target distinct dates: 183.
+    *   Source sample dates are weekly? `7/3`, `7/19`, `8/4`... roughly every 2 weeks.
+    *   Target sample dates are weekly? `01/01`, `01/17`, `02/03`... roughly every 2 weeks.
+    *   Actually, let's look at the columns.
+    *   Source columns: `1:00 AM` ... `11:00 AM`, `12:00 AM`, `1:00 PM` ... `11:00 PM`, `12:00 PM`, `DSL`.
+    *   Target columns: `1:00` ... `24:00`.
+    *   The mapping from 12-hour format (AM/PM) to 24-hour format is required.
+        *   `12:00 AM` -> `1:00` (Hour 1) or `0:00`? Standard 24h: 12 AM is 00:00. But target col is `1:00`. Let's check the values.
+        *   In standard 24h clock:
+            *   12:00 AM = 00:00
+            *   1:00 AM = 01:00
+            *   ...
+            *   11:00 AM = 11:00
+            *   12:00 PM = 12:00
+            *   1:00 PM = 13:00
+            *   ...
+            *   11:00 PM = 23:00
+        *   Target columns are `1:00` to `24:00`. This suggests a 1-based index for hours.
+            *   `1:00` likely corresponds to 00:00-01:00 (12:00 AM).
+            *   `2:00` likely corresponds to 01:00-02:00 (1:00 AM).
+            *   ...
+            *   `12:00` likely corresponds to 11:00 AM.
+            *   `13:00` likely corresponds to 12:00 PM.
+            *   ...
+            *   `24:00` likely corresponds to 11:00 PM.
+        *   Let's verify this mapping hypothesis.
+            *   Source `12:00 AM` -> Target `1:00`
+            *   Source `1:00 AM` -> Target `2:00`
+            *   Source `2:00 AM` -> Target `3:00`
+            *   ...
+            *   Source `11:00 AM` -> Target `12:00`
+            *   Source `12:00 PM` -> Target `13:00`
+            *   Source `1:00 PM` -> Target `14:00`
+            *   ...
+            *   Source `11:00 PM` -> Target `24:00`
+
+3.  **Handle Date Generation/Alignment**:
+    *   The source has 182 rows. The target has 183 rows.
+    *   The source sample shows dates like `7/3/2014`. The target sample shows `Wed 01/01/2014`.
+    *   If the evaluation source contains different rows, we must infer the logic.
+    *   Is it possible the source *already* contains the full range, and the sample just showed a subset? The schema says "rows: 182" for source and "rows: 183" for target.
+    *   182 days is roughly half a year. 183 days is also roughly half a year.
+    *   Maybe the target adds a row? Or maybe the source is missing one day?
+    *   Let's look at the date format in target: `Wed 01/01/2014`. This is `DayName MM/DD/YYYY`.
+    *   The source `date` is `M/D/YYYY`.
+    *   The difference in row count (182 vs 183) is suspicious. 183 is exactly 182 + 1.
+    *   Perhaps the target includes the start date of the month/year or an extra day?
+    *   Alternatively, maybe the source data is *weekly* aggregates? No, the columns are hourly.
+    *   Let's assume the transformation is:
+        1.  Map the hourly columns from 12h AM/PM to 24h `1:00`-`24:00`.
+        2.  Format the date column to `DayName MM/DD/YYYY`.
+        3.  The row count discrepancy might be due to the specific evaluation input having 183 rows, or the source having 182. The prompt says "Source row count describes a training sample only". The *evaluation source* will have its own rows. The target will have `N` or `N+1` rows?
+        4.  Usually, in these problems, if the row count changes slightly (182->183), it might be adding a header or a summary row, or the date range is expanded. However, without explicit instruction on *how* to generate the extra row (e.g., "add a row for the next day"), and given the strict "compute only from source" rule, it's risky to generate data not present in the source.
+        5.  Let's look closer at the dates.
+            *   Source Sample: `7/3/2014` (Thu), `7/19/2014` (Sat), `8/4/2014` (Mon)... These are not daily. They are sparse.
+            *   Target Sample: `Wed 01/01/2014`, `Fri 01/17/2014`... Also sparse.
+            *   Wait, the schema says `distinct: 182` for source dates and `distinct: 183` for target dates. This implies every row has a unique date.
+            *   If the source has 182 unique dates and the target has 183, one date is added.
+            *   However, the sample data provided for source only shows 12 rows, and target shows 12 rows.
+            *   Let's check the first and last dates in the schema stats:
+                *   Source: `7/3/2014` to `12/31/2014`.
+                *   Target: `Wed 01/01/2014` to `Wed 07/02/2014`.
+            *   These ranges are completely different! The source sample is H2 2014. The target sample is H1 2014.
+            *   This suggests the "Sample" data in the JSON is just illustrative of the *format* and *column mapping*, and the actual evaluation source will likely contain the data corresponding to the target dates, OR the transformation involves shifting dates?
+            *   No, "Compute the result only from the source DataFrame". If the source has dates in July-Dec, the target should have dates in July-Dec. The fact that the target *sample* shows Jan-July implies that the *evaluation source* will likely contain Jan-July data (or whatever range matches the target). The sample provided in the JSON is just a snapshot. The key is the *schema* and the *mapping*.
+            *   So, I should not hardcode date ranges. I should transform the dates present in the source.
+            *   What about the +1 row?
+                *   Source: 182 rows. Target: 183 rows.
+                *   Maybe the target includes a row for `12:00 AM` of the *next* day? Or `24:00` represents the end of the day, and there's a cumulative aspect?
+                *   Or maybe one of the source rows is dropped?
+                *   Let's look at the `DSL` column. It has values `0.0` and `0.119509`. It is not in the target. So `DSL` is dropped.
+                *   Let's look at the hour mapping again.
+                    *   Source: `12:00 AM`, `1:00 AM` ... `11:00 AM`, `12:00 PM` ... `11:00 PM`. (24 columns).
+                    *   Target: `1:00` ... `24:00`. (24 columns).
+                    *   This is a 1-to-1 mapping.
+                *   If the mapping is 1-to-1 for columns and rows are unique dates, where does the extra row come from?
+                *   Hypothesis: The source data might have a `NaN` date or a duplicate date that gets split? No, distinct count is 182.
+                *   Hypothesis: The target date range is inclusive of an extra day at the start or end?
+                *   Let's look at the target date format: `Wed 01/01/2014`.
+                *   If I simply format the source dates, I get 182 rows.
+                *   Is it possible the source *evaluation* file will have 183 rows? The note says "Source row count describes a training sample only". This implies the evaluation source might have a different number of rows. If the evaluation source has 183 rows, the target will have 183 rows. The discrepancy in the *sample* stats (182 vs 183) might just be because the sample source provided is a subset of the full training data, or the sample target is a subset of the full training target, and they don't align perfectly in the JSON snippet.
+                *   However, usually, `transform` must handle the source as given. If the source has N rows, and the mapping is 1-to-1, the target should have N rows.
+                *   Let's assume the 1-to-1 mapping is correct and the row count difference in the sample stats is an artifact of the specific samples chosen (e.g., maybe the source sample missed one day that is in the target sample, or vice versa). The most robust transformation is to map each source row to a target row.
+
+4.  **Refining the Column Mapping**:
+    *   `12:00 AM` -> `1:00`
+    *   `1:00 AM` -> `2:00`
+    *   `2:00 AM` -> `3:00`
+    *   `3:00 AM` -> `4:00`
+    *   `4:00 AM` -> `5:00`
+    *   `5:00 AM` -> `6:00`
+    *   `6:00 AM` -> `7:00`
+    *   `7:00 AM` -> `8:00`
+    *   `8:00 AM` -> `9:00`
+    *   `9:00 AM` -> `10:00`
+    *   `10:00 AM` -> `11:00`
+    *   `11:00 AM` -> `12:00`
+    *   `12:00 PM` -> `13:00`
+    *   `1:00 PM` -> `14:00`
+    *   `2:00 PM` -> `15:00`
+    *   `3:00 PM` -> `16:00`
+    *   `4:00 PM` -> `17:00`
+    *   `5:00 PM` -> `18:00`
+    *   `6:00 PM` -> `19:00`
+    *   `7:00 PM` -> `20:00`
+    *   `8:00 PM` -> `21:00`
+    *   `9:00 PM` -> `22:00`
+    *   `10:00 PM` -> `23:00`
+    *   `11:00 PM` -> `24:00`
+
+5.  **Refining the Date Formatting**:
+    *   Input: `M/D/YYYY` (e.g., `7/3/2014`).
+    *   Output: `DayName MM/DD/YYYY` (e.g., `Thu 07/03/2014`).
+    *   Note: The sample target shows `Wed 01/01/2014`. `01/01` is zero-padded. The source `7/3` is not. So we need zero-padding for month and day.
+    *   DayName: Full name? `Wed` is abbreviated. `Wednesday` is full. The sample shows `Wed`. So use `%a` (abbreviated weekday name).
+    *   Format string: `%a %m/%d/%Y`.
+
+6.  **Implementation Steps**:
+    *   Create a mapping dictionary for the columns.
+    *   Rename the columns in the source dataframe.
+    *   Drop the `DSL` column.
+    *   Parse the `date` column.
+    *   Format the `date` column to the target string format.
+    *   Rename the `date` column to `cst`.
+    *   Reorder columns to match the target specification (`cst`, then `1:00` to `24:00`).
+    *   Return the dataframe.
+
+7.  **Addressing the Row Count Discrepancy**:
+    *   If the evaluation source has 183 rows, the code will naturally produce 183 rows.
+    *   If the evaluation source has 182 rows, the code will produce 182 rows.
+    *   The sample stats are likely from different subsets. I will proceed with the 1-to-1 transformation.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Define the mapping from source column names (12-hour format) to target column names (24-hour format)
+    # Source: 12:00 AM -> Target: 1:00
+    # Source: 1:00 AM -> Target: 2:00
+    # ...
+    # Source: 11:00 AM -> Target: 12:00
+    # Source: 12:00 PM -> Target: 13:00
+    # ...
+    # Source: 11:00 PM -> Target: 24:00
+    
+    col_mapping = {
+        '12:00 AM': '1:00',
+        '1:00 AM': '2:00',
+        '2:00 AM': '3:00',
+        '3:00 AM': '4:00',
+        '4:00 AM': '5:00',
+        '5:00 AM': '6:00',
+        '6:00 AM': '7:00',
+        '7:00 AM': '8:00',
+        '8:00 AM': '9:00',
+        '9:00 AM': '10:00',
+        '10:00 AM': '11:00',
+        '11:00 AM': '12:00',
+        '12:00 PM': '13:00',
+        '1:00 PM': '14:00',
+        '2:00 PM': '15:00',
+        '3:00 PM': '16:00',
+        '4:00 PM': '17:00',
+        '5:00 PM': '18:00',
+        '6:00 PM': '19:00',
+        '7:00 PM': '20:00',
+        '8:00 PM': '21:00',
+        '9:00 PM': '22:00',
+        '10:00 PM': '23:00',
+        '11:00 PM': '24:00'
+    }
+
+    # Create a copy to avoid modifying the original
+    df = source.copy()
+
+    # Rename the hourly columns
+    df.rename(columns=col_mapping, inplace=True)
+
+    # Drop the DSL column as it is not in the target
+    if 'DSL' in df.columns:
+        df.drop(columns=['DSL'], inplace=True)
+
+    # Parse the date column
+    # Source format: M/D/YYYY (e.g., 7/3/2014)
+    df['date'] = pd.to_datetime(df['date'], format='%m/%d/%Y')
+
+    # Format the date to target format: "DayName MM/DD/YYYY" (e.g., "Wed 01/01/2014")
+    # %a gives abbreviated weekday name (Wed)
+    # %m gives zero-padded month
+    # %d gives zero-padded day
+    # %Y gives 4-digit year
+    df['cst'] = df['date'].dt.strftime('%a %m/%d/%Y')
+
+    # Drop the original date column
+    df.drop(columns=['date'], inplace=True)
+
+    # Define the target column order
+    target_columns = ['cst'] + [f'{h}:00' for h in range(1, 25)]
+
+    # Ensure all target columns exist and reorder
+    # Note: The mapping above ensures the columns exist if the source was valid.
+    df = df[target_columns]
+
+    return df
+```

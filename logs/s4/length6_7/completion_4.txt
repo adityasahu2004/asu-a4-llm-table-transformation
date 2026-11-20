@@ -1,0 +1,21 @@
+Operator plan: Keep the Date column unchanged. Rename the 24 hourly columns from "1:00"..."24:00:00" to "Hr 1"..."Hr 24". Drop the Segment column.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    out = source[['Date']].copy()
+    
+    mapping = {}
+    for h in range(1, 25):
+        if h < 24:
+            src_col = f"{h}:00"
+        else:
+            src_col = "24:00:00"
+        tgt_col = f"Hr {h}"
+        mapping[src_col] = tgt_col
+        
+    out = pd.concat([out, source.rename(columns=mapping)[list(mapping.values())]], axis=1)
+    
+    return out.reset_index(drop=True)
+```

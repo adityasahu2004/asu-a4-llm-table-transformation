@@ -1,0 +1,146 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `date` column from string format (`M/D/YYYY`) to pandas datetime objects.
+2.  **Generate Full Date Range**: The target has 183 rows, while the source has 182. The target dates range from `2015-01-01` to `2015-07-02` (based on the sample `first_last_non_null` and row count logic: 183 days covers Jan 1 to July 2 inclusive). We generate a complete daily date range for 2015 starting from Jan 1st up to the max date in the source (or slightly beyond if needed to match count, but typically this implies filling missing days in the source). Looking at the source sample, dates are sparse (bi-weekly or irregular). The target contains *every* day. We must reindex the source data to a daily frequency.
+3.  **Reindex/Fill Missing Days**:
+    *   Create a new DataFrame with a daily index from `2015-01-01` to `2015-12-31` (or specifically the range covering the source data).
+    *   However, the target sample shows specific dates like `Thu 01/01/2015`, `Sat 01/17/2015`, etc. These are not consecutive days in the sample display, but the row count (183) suggests a contiguous block or a specific subset. Let's look closer.
+    *   Source: 182 rows. Target: 183 rows.
+    *   Source dates: `7/3/2015` to `12/31/2015`.
+    *   Target dates: `Thu 01/01/2015` to `Thu 07/02/2015`.
+    *   Wait, the target `first_last_non_null` is `Thu 01/01/2015` and `Thu 07/02/2015`.
+    *   Let's check the day count between Jan 1, 2015 and July 2, 2015.
+        *   Jan: 31
+        *   Feb: 28
+        *   Mar: 31
+        *   Apr: 30
+        *   May: 31
+        *   Jun: 30
+        *   Jul: 2
+        *   Total: 31+28+31+30+31+30+2 = 183 days.
+    *   So the target is a **daily** time series from `2015-01-01` to `2015-07-02`.
+    *   The source data provided in the sample is sparse (e.g., `7/3/2015`, `7/19/2015`). This implies the source DataFrame likely contains *all* days, but the sample only showed a subset, OR the source is sparse and we need to interpolate/fill.
+    *   However, the prompt says "Source row count describes a training sample only". The source schema says 182 rows. The target has 183 rows.
+    *   Crucially, the source sample data values for `Hour 1` etc. are constant or near-constant.
+    *   Let's look at the mapping. The source has `date` strings. The target has `cst` strings formatted as `Ddd MM/DD/YYYY`.
+    *   The target columns `1:00` to `24:00` correspond to source `Hour 1` to `Hour 24`.
+    *   The key transformation is:
+        1.  Parse source `date`.
+        2.  Set `date` as index.
+        3.  Reindex to a daily frequency from `2015-01-01` to `2015-07-02`.
+        4.  Since the source only has 182 rows and the target has 183, and the source sample dates are in the second half of the year (July-Dec) while the target is first half (Jan-July), there is a mismatch in the *sample* data provided vs the *schema* description.
+        5.  *Correction*: The source sample shows dates like `7/3/2015`. The target sample shows `Thu 01/01/2015`. This suggests the source data in the *evaluation* might be different, or the source data provided in the sample is just a snippet.
+        6.  Actually, looking at the distinct values: Source `Hour 1` is always `0.0002398657`. Target `1:00` is always `0.0002398657`.
+        7.  The most robust interpretation: The source DataFrame contains daily data (or sparse data that needs to be expanded). The target is a specific date range.
+        8.  However, usually in these problems, if the source has 182 rows and target 183, and the dates don't overlap in the sample, it might be that the source *is* the data for the target period, but the sample shown is misleading or from a different part of the file.
+        9.  Let's look at the `first_last_non_null` again.
+            *   Source: `7/3/2015` to `12/31/2015`.
+            *   Target: `Thu 01/01/2015` to `Thu 07/02/2015`.
+            *   This is a complete mismatch in time periods.
+            *   Hypothesis: The source data provided in the JSON is just a *sample* of the structure, but the actual evaluation source will contain the data for the target period. OR, the transformation is simply renaming and reformatting, and the date range generation is based on the source dates.
+            *   If I assume the source contains the data for the target period, I should:
+                1. Parse `date`.
+                2. Sort by date.
+                3. Reindex to fill any missing days if necessary (though 182 vs 183 is close).
+                4. Format the date column as `cst` with format `%a %m/%d/%Y`.
+                5. Rename `Hour N` to `N:00`.
+    
+    *   Let's check the row count difference again. 182 vs 183.
+    *   If the source is daily data for a period, and one day is missing, reindexing with `freq='D'` will fill it with NaN.
+    *   The target has `nulls: 0`. This implies no NaNs.
+    *   If the source is sparse, we can't just reindex.
+    *   However, looking at the values: `Hour 1` is constant. `Hour 9-16` are 0.
+    *   It is highly likely that the source data *is* the target data, just with different column names and date formats, and potentially one extra row in the target (maybe a header or a specific start date included).
+    *   Given the strict instruction "Compute the result only from the source DataFrame", I cannot hardcode `2015-01-01`. I must derive the range from the source.
+    *   If the source dates are `7/3/2015`...`12/31/2015`, and I format them, I get `Fri 07/03/2015`...`Fri 12/31/2015`. This does not match the target sample `Thu 01/01/2015`.
+    *   This implies the **evaluation source** will have dates corresponding to the target period. The sample provided in the prompt is just to show schema/types.
+    *   Therefore, the transformation is:
+        1.  Parse `date` column to datetime.
+        2.  Sort by date.
+        3.  Rename columns: `Hour 1` -> `1:00`, ..., `Hour 24` -> `24:00`.
+        4.  Format the `date` column into `cst` using `%a %m/%d/%Y`.
+        5.  Drop the original `date` column.
+        6.  Ensure the index is reset.
+        7.  Handle the row count: If the source has 182 rows and target 183, and the source is daily, there might be a missing day. But since we can't invent data, and the target has no nulls, it's possible the source *already* has the correct rows for the evaluation case, or the "182" vs "183" is a distractor/sample artifact.
+        8.  Wait, look at the target `cst` values: `Thu 01/01/2015`.
+        9.  Look at source `date`: `7/3/2015`.
+        10. If the evaluation source contains dates from Jan 1 to July 2, 2015, then parsing and formatting will work.
+        11. What about the missing row? If the source is missing one day, `reindex` would create NaNs. The target has no NaNs.
+        12. Perhaps the source *is* complete for the evaluation period. The sample in the prompt is just illustrative of the *schema*, not the actual data content for the target period.
+        13. I will assume the source DataFrame contains the exact rows needed for the target, possibly unsorted.
+        14. Steps:
+            *   Parse `date`.
+            *   Sort by `date`.
+            *   Rename `Hour` columns.
+            *   Format `date` to `cst`.
+            *   Select columns in order: `cst`, then `1:00` to `24:00`.
+
+    *   Refinement on Date Formatting:
+        *   Target: `Thu 01/01/2015`.
+        *   Format: `%a %m/%d/%Y`.
+        *   Note: `%a` is abbreviated weekday name (e.g., Thu).
+
+    *   Refinement on Column Renaming:
+        *   `Hour 1` -> `1:00`
+        *   `Hour 2` -> `2:00`
+        *   ...
+        *   `Hour 24` -> `24:00`
+
+    *   Refinement on Data Types:
+        *   Target `9:00` to `16:00` are `int64`. Source `Hour 9` to `Hour 16` are `int64`.
+        *   Others are `float64`.
+        *   Pandas will preserve these types if we just rename.
+
+    *   One detail: The target has 183 rows, source 182.
+    *   If the source is missing a day, and we just rename, we get 182 rows.
+    *   If the evaluation source has 183 rows, we get 183.
+    *   The prompt says "Source row count describes a training sample only". This confirms the evaluation source might have different row counts. I should not try to force 183 rows if the source has 182. I should process whatever is in the source.
+
+    *   Final Plan:
+        1.  Parse `date` to datetime.
+        2.  Sort by `date`.
+        3.  Create `cst` column from `date` using `dt.strftime('%a %m/%d/%Y')`.
+        4.  Rename `Hour N` columns to `N:00`.
+        5.  Drop `date` column.
+        6.  Reorder columns to start with `cst`.
+        7.  Reset index.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse the date column
+    df = source.copy()
+    df['date'] = pd.to_datetime(df['date'])
+    
+    # 2. Sort by date to ensure chronological order
+    df = df.sort_values('date').reset_index(drop=True)
+    
+    # 3. Create the 'cst' column with the specified format
+    # Format: "Thu 01/01/2015" -> %a %m/%d/%Y
+    df['cst'] = df['date'].dt.strftime('%a %m/%d/%Y')
+    
+    # 4. Rename Hour columns to HH:00 format
+    rename_map = {}
+    for i in range(1, 25):
+        old_name = f"Hour {i}"
+        new_name = f"{i}:00"
+        if old_name in df.columns:
+            rename_map[old_name] = new_name
+            
+    df = df.rename(columns=rename_map)
+    
+    # 5. Drop the original date column
+    df = df.drop(columns=['date'])
+    
+    # 6. Reorder columns: 'cst' first, then the hour columns in order
+    hour_cols = [f"{i}:00" for i in range(1, 25)]
+    final_cols = ['cst'] + hour_cols
+    
+    # Ensure we only select columns that exist
+    existing_cols = [c for c in final_cols if c in df.columns]
+    df = df[existing_cols]
+    
+    return df
+```

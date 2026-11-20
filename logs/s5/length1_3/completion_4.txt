@@ -1,0 +1,44 @@
+**Operator Plan:**
+1.  **Parse Date:** Convert the `date` column (format `M/D/YYYY`) to datetime objects.
+2.  **Format `cst`:** Format the parsed datetime as `%a %m/%d/%Y` (e.g., "Wed 01/01/2014").
+3.  **Map Hourly Columns:** The source columns use a 12-hour AM/PM format but are not in chronological order (1-11 AM, 12 AM, 1-11 PM, 12 PM). We need to map these to 24-hour chronological labels `1:00` through `24:00`.
+    *   `1:00 AM` -> `1:00`
+    *   ...
+    *   `11:00 AM` -> `11:00`
+    *   `12:00 PM` -> `12:00` (Note: Source has `12:00 PM` at the end)
+    *   `1:00 PM` -> `13:00`
+    *   ...
+    *   `11:00 PM` -> `23:00`
+    *   `12:00 AM` -> `24:00` (Midnight at the end of the day)
+4.  **Construct Output:** Create a new DataFrame with the formatted `cst` and the mapped hourly columns. Reset index.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date and format as 'DayOfWeek MM/DD/YYYY'
+    dt = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    out = pd.DataFrame(index=source.index)
+    out['cst'] = dt.dt.strftime('%a %m/%d/%Y')
+    
+    # Define mapping from source AM/PM columns to target 24h columns
+    # Source order: 1-11 AM, 12 AM, 1-11 PM, 12 PM
+    # Target order: 1-24 (where 24:00 is midnight/end of day)
+    
+    # 1:00 AM to 11:00 AM -> 1:00 to 11:00
+    for h in range(1, 12):
+        out[f'{h}:00'] = source[f'{h}:00 AM']
+        
+    # 12:00 PM -> 12:00
+    out['12:00'] = source['12:00 PM']
+    
+    # 1:00 PM to 11:00 PM -> 13:00 to 23:00
+    for h in range(1, 12):
+        out[f'{h+12}:00'] = source[f'{h}:00 PM']
+        
+    # 12:00 AM -> 24:00
+    out['24:00'] = source['12:00 AM']
+    
+    return out.reset_index(drop=True)
+```

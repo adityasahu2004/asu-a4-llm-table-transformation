@@ -1,0 +1,83 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `date` column from string format (`%m/%d/%Y %H:%M`) to a pandas datetime object.
+2.  **Extract Features**: Derive the `Hour` (integer, 0-23) and `Month` (integer, 1-12) from the parsed datetime.
+3.  **Pivot/Aggregate**: Group the data by `Hour` and `Month`, calculating the mean of `cerc_logger_1`. This reduces the 74,848 rows into a summary table of 24 hours x 12 months.
+4.  **Reshape**: Unpivot or restructure the grouped data into a wide format where rows are `Hour` and columns are the month names (`January` through `December`).
+5.  **Format**:
+    *   Ensure `Hour` is an integer.
+    *   Rename the month columns to their full English names.
+    *   Sort the result by `Hour` ascending.
+    *   Reset the index to ensure a clean 0-based integer index if required, though the sample implies specific hour values (0, 2, 4... 23) which suggests the aggregation might be sparse or the sample is just a subset. However, looking at the target sample, it has 24 rows but only 12 distinct hours shown in the snippet? Wait, the target schema says `rows: 24` and `distinct: 24` for `Hour`. The sample data provided in the prompt only shows 12 rows (0, 2, 4... 23). This is likely a truncated sample. The transformation should produce 24 rows (one for each hour 0-23). If an hour has no data, it might be NaN or excluded. Given "nulls: 0" in target, all 24 hours must exist. I will assume the source covers all hours or we fill missing ones.
+    *   Wait, looking closely at the target sample: It lists hours 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 23. It skips odd hours except 23? No, 23 is odd. It skips 1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21. And includes 23. This looks like the sample is just arbitrary or truncated. The schema says `distinct: 24` for Hour. So the output must have 24 rows. I will pivot on all hours 0-23.
+
+**Refined Plan:**
+1.  Parse `date`.
+2.  Extract `Hour` and `Month`.
+3.  Group by `Hour` and `Month`, mean of `cerc_logger_1`.
+4.  Pivot so index is `Hour`, columns are `Month` (1-12), values are the mean.
+5.  Rename columns 1-12 to "January"-"December".
+6.  Sort by `Hour`.
+7.  Reset index.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse the date string
+    # Format observed: "7/28/2019 4:50" -> %m/%d/%Y %H:%M
+    source = source.copy()
+    source['dt'] = pd.to_datetime(source['date'], format='%m/%d/%Y %H:%M')
+    
+    # 2. Extract Hour and Month
+    source['Hour'] = source['dt'].dt.hour
+    source['Month'] = source['dt'].dt.month
+    
+    # 3. Group by Hour and Month, calculate mean of the measurement
+    # The target has 24 rows (one per hour) and 12 columns (one per month).
+    # We aggregate the logger value.
+    agg_df = source.groupby(['Hour', 'Month'])['cerc_logger_1'].mean().reset_index()
+    
+    # 4. Pivot to wide format
+    # Index: Hour, Columns: Month, Values: cerc_logger_1
+    pivot_df = agg_df.pivot(index='Hour', columns='Month', values='cerc_logger_1')
+    
+    # 5. Rename month columns to full names
+    month_names = {
+        1: 'January', 2: 'February', 3: 'March', 4: 'April',
+        5: 'May', 6: 'June', 7: 'July', 8: 'August',
+        9: 'September', 10: 'October', 11: 'November', 12: 'December'
+    }
+    pivot_df.rename(columns=month_names, inplace=True)
+    
+    # 6. Ensure all 24 hours are present (fill NaN if any hour is missing in source)
+    # The target schema implies 24 distinct hours and 0 nulls. 
+    # If source data is sparse, we might need to forward fill or assume complete data.
+    # Given the "nulls: 0" in target, we assume the source covers all hours or we fill.
+    # However, usually in these problems, if data is missing, it stays NaN unless specified.
+    # But target says nulls: 0. Let's reindex to 0-23.
+    all_hours = pd.RangeIndex(0, 24)
+    pivot_df = pivot_df.reindex(all_hours)
+    
+    # If there are still NaNs (missing hours in source), we might need to handle them.
+    # The problem statement says "Preserve NaNs unless the inferred operation requires otherwise."
+    # But target schema says "nulls: 0". This implies the source has data for all hours.
+    # We will not impute arbitrarily, but if reindex introduces NaNs, they are technically
+    # required by the "24 rows" constraint. If the source doesn't have hour X, it's impossible
+    # to have 0 nulls without imputation. Assuming source is complete for all hours.
+    
+    # 7. Reset index to make 'Hour' a column
+    pivot_df = pivot_df.reset_index()
+    pivot_df.rename(columns={'index': 'Hour'}, inplace=True)
+    
+    # 8. Ensure column order matches target
+    target_cols = ['Hour', 'January', 'February', 'March', 'April', 'May', 'June', 
+                   'July', 'August', 'September', 'October', 'November', 'December']
+    
+    result = pivot_df[target_cols]
+    
+    # Ensure Hour is int64
+    result['Hour'] = result['Hour'].astype('int64')
+    
+    return result
+```

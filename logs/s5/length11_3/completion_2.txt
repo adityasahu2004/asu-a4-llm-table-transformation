@@ -1,0 +1,157 @@
+**Operator Plan:**
+1.  **Parse Timestamp**: Convert the `timestamp` string column into a pandas datetime object to extract `month` and `hour`.
+2.  **Extract Time Features**: Create `month` and `hour` columns from the parsed datetime.
+3.  **Map Columns**: Select specific source columns and rename them to the target schema names.
+    *   `AC COMPRESSOR WHS [emon ch3,4]` -> `hvac`
+    *   `WATER HEATER WHS [emon ch7,8]` -> `water_heating`
+    *   `Primary Fridge WHS [emon ch12]` + `2nd Fridge WHS [emon ch13]` -> `refrigerator` (Summing the two fridge columns based on semantic grouping, or potentially just selecting one if they are mutually exclusive/aliases, but summing is safer for "Total Refrigerator" load if both exist. Looking at sample data, `Primary` and `2nd` often have values. However, in the target sample, `refrigerator` values like `65534.0` appear. `65534` is `2 * 32767`. This suggests `refrigerator` might be the sum of `Primary` and `2nd` fridges, or simply that the target expects the sum. Let's look closer. In source row 1: Primary=58, 2nd=32767. Sum=32825. Target row 1: `refrigerator`=65534. Wait.
+    *   Let's re-examine the mapping.
+        *   Source Row 1: `Primary`=58.0, `2nd`=32767.0.
+        *   Target Row 1: `refrigerator`=65534.0.
+        *   Source Row 2: `Primary`=62.0, `2nd`=18.0.
+        *   Target Row 2: `refrigerator`=479.0. (62+18 = 80 != 479).
+        *   Let's check other columns.
+        *   Target `hvac` Row 1: 98301.0. Source `AC COMPRESSOR`=0.0. Source `AIR HANDLER`=16.0.
+        *   This implies the target data provided in the sample block might not correspond directly to the source sample block rows in a 1-to-1 index match, or there is a complex aggregation/transformation not immediately obvious from simple column mapping.
+        *   *Correction*: The prompt states "Source row count describes a training sample only...". The sample data provided for source and target are likely just *samples* of the respective schemas, not necessarily aligned row-by-row. The task is to infer the *schema transformation*.
+    *   Let's look at the distinct values and names.
+        *   `hvac`: Likely `AC COMPRESSOR WHS` + `AIR HANDLER WHS` + `Minisplit WHS`.
+        *   `water_heating`: `WATER HEATER WHS`.
+        *   `refrigerator`: `Primary Fridge WHS` + `2nd Fridge WHS`.
+        *   `clothes_washer`: `Wattsup Energy Washer`? Or `SPARE`? The target has `clothes_washer` as int64 with distinct value 0. This suggests it might be a placeholder or derived from a column that is mostly 0 or mapped to 0. Or perhaps `DISH WASHER` is dishwasher, and `clothes_washer` is something else.
+        *   `clothes_dryer`: `DRYER WHS (1-CT)` + `Dryer WHS (2-CTs)`.
+        *   `dishwasher`: `DISH WASHER WHS`.
+        *   `cooking_range`: `RANGE WHS (1-CT)`.
+        *   `pool_spa_pumps`: `POOL PUMP WHS (2-CTs)`.
+        *   `interior_lighting`, `exterior_lighting`, `lighting`, `plug`, `pool_spa_heater`: All have distinct value 0 in the target sample. This strongly suggests these columns are either constant 0 or derived from columns that are effectively 0 or not present/valid in the target context. Given the source has many `SPARE` and `Future use` columns with 32767 (error/missing) or 0, and the target has 0s, it's likely these specific target columns are filled with 0s or mapped to columns that are consistently 0 in the valid data subset.
+    *   However, usually, in these problems, if a target column is constant 0, we just assign 0.
+    *   Let's look at `hvac` again. Target distinct: 12015. Source `AC COMPRESSOR` distinct: 6181. `AIR HANDLER` distinct: 5586. `Minisplit` distinct: 1507. Summing them would create new distinct values.
+    *   Let's look at `refrigerator`. Target distinct: 1760. Source `Primary` distinct: 761. `2nd` distinct: 1063. Summing them would create new distinct values.
+    *   Let's look at `clothes_dryer`. Target distinct: 10348. Source `DRYER (1-CT)` distinct: 3901. `Dryer (2-CTs)` distinct: 3446.
+    *   It seems highly probable that the transformation involves **summing** related appliance columns.
+        *   `hvac` = `AC COMPRESSOR WHS` + `AIR HANDLER WHS` + `Minisplit WHS (2-CTs) [xpod chA-7,8]`
+        *   `refrigerator` = `Primary Fridge WHS` + `2nd Fridge WHS`
+        *   `clothes_dryer` = `DRYER WHS (1-CT)` + `Dryer WHS (2-CTs)`
+        *   `water_heating` = `WATER HEATER WHS`
+        *   `dishwasher` = `DISH WASHER WHS`
+        *   `cooking_range` = `RANGE WHS (1-CT)`
+        *   `pool_spa_pumps` = `POOL PUMP WHS (2-CTs)`
+    *   What about `clothes_washer`? Source has `Wattsup Energy Washer`. Target `clothes_washer` is int64, distinct 1, value 0. This is strange. Maybe `clothes_washer` is not measured or mapped to 0.
+    *   What about `interior_lighting`, `exterior_lighting`, `lighting`, `plug`, `pool_spa_heater`? All distinct 1, value 0. These are likely dummy columns or derived from unmeasured/unused channels set to 0.
+
+    *   **Refined Plan**:
+        1.  Parse `timestamp` to get `month` and `hour`.
+        2.  Construct `hvac` by summing `AC COMPRESSOR WHS [emon ch3,4]`, `AIR HANDLER WHS [emon ch5,6]`, and `Minisplit WHS (2-CTs) [xpod chA-7,8]`.
+        3.  Construct `water_heating` from `WATER HEATER WHS [emon ch7,8]`.
+        4.  Construct `refrigerator` by summing `Primary Fridge WHS [emon ch12]` and `2nd Fridge WHS [emon ch13]`.
+        5.  Construct `clothes_dryer` by summing `DRYER WHS (1-CT) [emon ch9]` and `Dryer WHS (2-CTs) [xpod chA-9,10]`.
+        6.  Construct `dishwasher` from `DISH WASHER WHS [emon ch11]`.
+        7.  Construct `cooking_range` from `RANGE WHS (1-CT) [emon ch10]`.
+        8.  Construct `pool_spa_pumps` from `POOL PUMP WHS (2-CTs) [xpod chA-3,4]`.
+        9.  Set `clothes_washer`, `interior_lighting`, `exterior_lighting`, `lighting`, `plug`, `pool_spa_heater` to 0 (int64).
+
+    *   *Self-Correction on "Distinct Values"*: The target `hvac` has 12015 distinct values. If we sum 3 columns with ~6000, ~5000, and ~1500 distinct values, the number of distinct sums can be higher. This fits.
+    *   *Self-Correction on "32767"*: The source data contains 32767 as a "null" or "error" value. The target data also contains 32767 (e.g., in `hvac`, `water_heating`). This implies we should **not** replace 32767 with NaN or 0, but preserve it as is, or that the summation logic should handle it (though 32767+0=32767). If we sum, 32767+16=32783. The target `hvac` has distinct values like 32773, 32770, 32778, 32782.
+        *   Let's check Target Row 1: `hvac` = 98301.0.
+        *   Let's check Source Row 1: `AC`=0, `AIR`=16, `Minisplit`=32767. Sum = 32783. This does NOT match 98301.
+        *   Let's check Target Row 2: `hvac` = 33294.0.
+        *   Let's check Source Row 2: `AC`=1714, `AIR`=201, `Minisplit`=32767. Sum = 34682. Does NOT match 33294.
+        *   Wait, look at Target Row 1 `hvac` = 98301. `98301 = 3 * 32767`.
+        *   Look at Target Row 6 `hvac` = 32773.
+        *   Look at Target Row 8 `hvac` = 32770.
+        *   Look at Target Row 10 `hvac` = 98301.
+        *   It seems `hvac` might just be one of the columns, or the sample data is completely misaligned.
+        *   Actually, look at `refrigerator` in Target Row 1: 65534. `65534 = 2 * 32767`.
+        *   `clothes_dryer` in Target Row 1: 65534. `65534 = 2 * 32767`.
+        *   `water_heating` in Target Row 1: 32767.
+        *   This suggests that when a value is 32767 (missing/error) in the source, it might be preserved or summed.
+        *   However, the most robust interpretation of "Infer the transformation" given the column names is to map the semantic categories. The discrepancy in the sample values is likely due to the samples being from different parts of the dataset (as noted: "Source row count describes a training sample only..."). I will proceed with the semantic column mapping and summation for grouped appliances.
+
+    *   **Mapping**:
+        *   `hvac`: `AC COMPRESSOR WHS [emon ch3,4]` + `AIR HANDLER WHS [emon ch5,6]` + `Minisplit WHS (2-CTs) [xpod chA-7,8]`
+        *   `water_heating`: `WATER HEATER WHS [emon ch7,8]`
+        *   `refrigerator`: `Primary Fridge WHS [emon ch12]` + `2nd Fridge WHS [emon ch13]`
+        *   `clothes_dryer`: `DRYER WHS (1-CT) [emon ch9]` + `Dryer WHS (2-CTs) [xpod chA-9,10]`
+        *   `dishwasher`: `DISH WASHER WHS [emon ch11]`
+        *   `cooking_range`: `RANGE WHS (1-CT) [emon ch10]`
+        *   `pool_spa_pumps`: `POOL PUMP WHS (2-CTs) [xpod chA-3,4]`
+        *   `clothes_washer`: 0 (int)
+        *   `interior_lighting`: 0 (int)
+        *   `exterior_lighting`: 0 (int)
+        *   `lighting`: 0 (int)
+        *   `plug`: 0 (int)
+        *   `pool_spa_heater`: 0 (int)
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse timestamp to extract month and hour
+    ts = pd.to_datetime(source['timestamp'])
+    out = pd.DataFrame()
+    out['month'] = ts.dt.month.astype('int64')
+    out['hour'] = ts.dt.hour.astype('int64')
+    
+    # Define column mappings for summation
+    # hvac: AC Compressor + Air Handler + Minisplit
+    col_ac = 'AC COMPRESSOR WHS [emon ch3,4]'
+    col_air = 'AIR HANDLER WHS [emon ch5,6]'
+    col_mini = 'Minisplit WHS (2-CTs) [xpod chA-7,8]'
+    
+    # water_heating
+    col_wh = 'WATER HEATER WHS [emon ch7,8]'
+    
+    # refrigerator: Primary + 2nd
+    col_fridge1 = 'Primary Fridge WHS [emon ch12]'
+    col_fridge2 = '2nd Fridge WHS [emon ch13]'
+    
+    # clothes_dryer: Dryer 1-CT + Dryer 2-CTs
+    col_dryer1 = 'DRYER WHS (1-CT) [emon ch9]'
+    col_dryer2 = 'Dryer WHS (2-CTs) [xpod chA-9,10]'
+    
+    # dishwasher
+    col_dw = 'DISH WASHER WHS [emon ch11]'
+    
+    # cooking_range
+    col_range = 'RANGE WHS (1-CT) [emon ch10]'
+    
+    # pool_spa_pumps
+    col_pool = 'POOL PUMP WHS (2-CTs) [xpod chA-3,4]'
+    
+    # Perform calculations
+    # Note: Preserving 32767 as per target sample appearance, simple arithmetic sum
+    out['hvac'] = (source[col_ac] + source[col_air] + source[col_mini]).astype('float64')
+    out['water_heating'] = source[col_wh].astype('float64')
+    out['refrigerator'] = (source[col_fridge1] + source[col_fridge2]).astype('float64')
+    out['clothes_dryer'] = (source[col_dryer1] + source[col_dryer2]).astype('float64')
+    out['dishwasher'] = source[col_dw].astype('float64')
+    out['cooking_range'] = source[col_range].astype('float64')
+    out['pool_spa_pumps'] = source[col_pool].astype('float64')
+    
+    # Constant zero columns as int64
+    out['clothes_washer'] = 0
+    out['interior_lighting'] = 0
+    out['exterior_lighting'] = 0
+    out['lighting'] = 0
+    out['plug'] = 0
+    out['pool_spa_heater'] = 0
+    
+    # Ensure dtypes match target
+    out['clothes_washer'] = out['clothes_washer'].astype('int64')
+    out['interior_lighting'] = out['interior_lighting'].astype('int64')
+    out['exterior_lighting'] = out['exterior_lighting'].astype('int64')
+    out['lighting'] = out['lighting'].astype('int64')
+    out['plug'] = out['plug'].astype('int64')
+    out['pool_spa_heater'] = out['pool_spa_heater'].astype('int64')
+    
+    # Reorder columns to match target schema
+    target_cols = [
+        'month', 'hour', 'hvac', 'water_heating', 'refrigerator', 
+        'clothes_washer', 'clothes_dryer', 'dishwasher', 'cooking_range', 
+        'pool_spa_pumps', 'interior_lighting', 'exterior_lighting', 
+        'lighting', 'plug', 'pool_spa_heater'
+    ]
+    
+    return out[target_cols]
+```

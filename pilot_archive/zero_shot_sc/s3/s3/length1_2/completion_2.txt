@@ -1,0 +1,84 @@
+### Operator Plan
+
+1.  **Parse Dates**: The source `date` column contains dates in `M/D/YYYY` format. We parse these into datetime objects.
+2.  **Generate Full Date Range**: The target has 183 rows corresponding to a continuous daily time series. The source has 182 rows with some days missing (e.g., the source starts `7/3/2011` but the target starts `01/01/2011` and ends `07/02/2011`). We need to infer the full date range covered by the target. Looking at the target sample, it starts at `Sat 01/01/2011` and ends at `Sat 07/02/2011`. This is exactly 183 days. We will create a complete date range from `2011-01-01` to `2011-07-02` (inclusive) to serve as the index for the target DataFrame.
+3.  **Map Source Data**: We set the parsed source `date` as the index. The columns `value1` through `value24` represent hourly loads for hours 1 to 24. We rename these columns to match the target format `"1:00"`, `"2:00"`, ..., `"24:00"`.
+4.  **Reindex**: We reindex the source DataFrame to the full generated date range. This will introduce NaNs for dates missing in the source (though the problem statement implies the source might just be a subset or the target includes extrapolated/interpolated data, but typically in these transformations, if data is missing, it's NaN. However, looking at the distinct counts: Source `value1` has 168 distinct values, Target `1:00` has 179. The target row count is 183. The source row count is 182. The target includes `01/01/2011` which is not in the source sample start `07/03/2011`. Wait, the source sample `first_last_non_null` for date is `7/3/2011` to `12/31/2011`. But the target is `01/01/2011` to `07/02/2011`. This implies the source provided in the schema description is a *sample* of a larger dataset, or the transformation logic must be generic.
+    *   *Correction*: The prompt says "Source row count describes a training sample only". The evaluation source will have different rows. I must infer the general transformation.
+    *   The target columns are `cst` (formatted date) and hours `1:00` to `24:00`.
+    *   The source has `value1`...`value24`.
+    *   The target `cst` format is `Dow MM/DD/YYYY` (e.g., `Sat 01/01/2011`).
+    *   The transformation is essentially a reshaping and formatting task.
+    *   We take the source DataFrame, parse the `date` column, set it as index.
+    *   Rename `value` columns to `H:00`.
+    *   Sort by date.
+    *   Format the index into the `cst` string format.
+    *   The target row count (183) vs source (182) in the *sample* suggests the target might include an extra day or the source sample is truncated. However, the instruction says "Compute the result only from the source DataFrame". If the source has 182 rows, the result should likely have 182 rows unless we are expected to fill gaps. But the target schema shows `cst` has 183 distinct values. Let's look closer.
+    *   Source dates in sample: `7/3/2011` ... `12/31/2011`.
+    *   Target dates in sample: `01/01/2011` ... `07/02/2011`.
+    *   These are completely disjoint time periods in the samples! This implies the "sample" data provided in the JSON is just illustrative of the *schema* and *format*, not the actual data content linkage. The evaluation input will have a source that corresponds to the target.
+    *   Therefore, the transformation is:
+        1.  Parse `date` to datetime.
+        2.  Rename `value1`...`value24` to `1:00`...`24:00`.
+        3.  Sort by `date`.
+        4.  Format `date` to `cst` string `"%a %m/%d/%Y"` (Note: `01/01/2011` is Saturday. `Sat 01/01/2011`).
+        5.  Set `cst` as a column (or keep as index then reset). The target has `cst` as a column.
+        6.  Return the DataFrame with columns `cst`, `1:00`, ..., `24:00`.
+
+    *   *Self-Correction on Date Format*: `Sat 01/01/2011`. `%a` is abbreviated weekday. `%m/%d/%Y` is the date.
+    *   *Handling Missing Days*: If the source has gaps, `reindex` with a full range would create NaNs. If the source is just a list of days and we just format them, we keep the source rows. Given the distinct counts in the target (183) vs source (182) in the *sample*, and the disjoint dates, I should assume the source provided in the evaluation will contain all the necessary rows to produce the target, or I should just transform the existing source rows. Usually, these tasks are "clean and reshape". I will not generate new rows (imputation) unless explicitly required. I will simply transform the existing source rows. The row count difference in the sample is likely due to the sample being a subset or different dataset. I will stick to transforming the source rows provided.
+
+    *   *Refined Plan*:
+        1.  Parse `date` column to datetime.
+        2.  Select `value1`-`value24` columns.
+        3.  Rename them to `1:00`-`24:00`.
+        4.  Create `cst` column by formatting the parsed `date`.
+        5.  Sort by `date` (implicitly by `cst` if formatted correctly, but better to sort by datetime first).
+        6.  Drop original `date` and other non-value columns (`class`, `Description`, `analysis`, `uom`).
+        7.  Ensure column order: `cst` first, then `1:00`...`24:00`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    """
+    Transforms the source DataFrame by:
+    1. Parsing the 'date' column into datetime objects.
+    2. Renaming 'value1' through 'value24' to '1:00' through '24:00'.
+    3. Creating a 'cst' column with formatted date strings (e.g., 'Sat 01/01/2011').
+    4. Sorting by date.
+    5. Returning the DataFrame with columns ['cst', '1:00', ..., '24:00'].
+    """
+    # Make a copy to avoid modifying the original
+    df = source.copy()
+    
+    # Parse dates
+    df['date_dt'] = pd.to_datetime(df['date'], format='%m/%d/%Y')
+    
+    # Sort by date to ensure chronological order
+    df = df.sort_values(by='date_dt')
+    
+    # Create the 'cst' column with format "Dow MM/DD/YYYY"
+    # Example: Sat 01/01/2011
+    df['cst'] = df['date_dt'].dt.strftime('%a %m/%d/%Y')
+    
+    # Rename value columns
+    value_cols = [f'value{i}' for i in range(1, 25)]
+    new_value_cols = [f'{i}:00' for i in range(1, 25)]
+    rename_map = dict(zip(value_cols, new_value_cols))
+    
+    df = df.rename(columns=rename_map)
+    
+    # Select and reorder columns: 'cst' first, then the hourly columns
+    final_cols = ['cst'] + new_value_cols
+    
+    # Filter to only include the desired columns
+    result = df[final_cols].reset_index(drop=True)
+    
+    # Ensure numeric types for value columns
+    for col in new_value_cols:
+        result[col] = pd.to_numeric(result[col], errors='coerce')
+        
+    return result
+```

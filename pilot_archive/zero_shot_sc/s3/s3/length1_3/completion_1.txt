@@ -1,0 +1,246 @@
+### Operator Plan
+
+1.  **Parse and Shift Dates**:
+    *   The source `date` column contains dates in `M/D/YYYY` format.
+    *   The target `cst` column contains dates in `ddd MM/DD/YYYY` format (e.g., "Wed 01/01/2014").
+    *   Comparing the sample data, the source row `"7/3/2014"` corresponds to a target row that is not explicitly shown as the first row, but the target starts at `"Wed 01/01/2014"`.
+    *   Let's check the mapping. The source has 182 rows. The target has 183 rows.
+    *   Source first date: `7/3/2014`. Source last date: `12/31/2014`.
+    *   Target first date: `Wed 01/01/2014`. Target last date: `Wed 07/02/2014`.
+    *   Wait, the target dates are *earlier* than the source dates?
+        *   Target start: `2014-01-01`.
+        *   Source start: `2014-07-03`.
+        *   Target end: `2014-07-02`.
+        *   Source end: `2014-12-31`.
+    *   This implies the source data is shifted relative to the target. Specifically, the target seems to represent the *previous* day's data or a shifted time window?
+    *   Let's look at the row counts. Source: 182 rows. Target: 183 rows.
+    *   The period from `2014-01-01` to `2014-07-02` is exactly 183 days (Jan 31 + Feb 28 + Mar 31 + Apr 30 + May 31 + Jun 30 + Jul 2 = 183).
+    *   The period from `2014-07-03` to `2014-12-31` is exactly 182 days (Jul 29 + Aug 31 + Sep 30 + Oct 31 + Nov 30 + Dec 31 = 182).
+    *   Therefore, the target DataFrame covers the time period `2014-01-01` to `2014-07-02`. The source DataFrame covers `2014-07-03` to `2014-12-31`.
+    *   This suggests the transformation is not a direct row-wise mapping of values from source to target based on identical dates. Instead, it looks like the *values* in the source are being shifted or the dates are being shifted.
+    *   However, usually in these problems, the rows correspond. If Source Row 0 (`7/3/2014`) maps to Target Row 0 (`1/1/2014`), that would be a date shift of -184 days? That seems unlikely for a simple transformation unless it's a specific lag.
+    *   Let's re-read carefully. "Compute the result only from the source DataFrame."
+    *   If I must compute the target *only* from the source, and the source contains dates `7/3/2014` to `12/31/2014`, how can I produce rows for `1/1/2014` to `7/2/2014`?
+    *   I cannot generate data for dates not present in the source unless I shift the existing dates.
+    *   If I shift the source dates back by 184 days, `7/3/2014` becomes `1/1/2014`. `12/31/2014` becomes `7/2/2014`.
+    *   Let's verify: `2014-07-03` minus 184 days.
+        *   July has 31 days. 31-3 = 28 days in July.
+        *   June 30, May 31, Apr 30, Mar 31, Feb 28, Jan 31.
+        *   28 + 30 + 31 + 30 + 31 + 28 + 31 = 209 days back to Jan 1? No.
+        *   Days between Jan 1 and Jul 3:
+            *   Jan: 31
+            *   Feb: 28
+            *   Mar: 31
+            *   Apr: 30
+            *   May: 31
+            *   Jun: 30
+            *   Jul: 3
+            *   Total days elapsed since Jan 1 (exclusive) to Jul 3 (inclusive) is 31+28+31+30+31+30+3 = 184 days.
+            *   So `Jul 3` is the 184th day of the year? No, Jan 1 is day 1. Jul 3 is day 184.
+            *   So `Jul 3` - 183 days = `Jan 1`.
+            *   Source has 182 rows. Target has 183 rows.
+            *   If Source Row 0 (`Jul 3`) maps to Target Row 1 (`Jan 2`)? Or Target Row 0 (`Jan 1`)?
+            *   If Source Row 0 (`Jul 3`) -> Target Row 0 (`Jan 1`), the shift is -183 days.
+            *   Let's check the last row. Source Last (`Dec 31`). Target Last (`Jul 2`).
+            *   Days from `Jul 2` to `Dec 31`:
+                *   Jul: 31-2 = 29
+                *   Aug: 31
+                *   Sep: 30
+                *   Oct: 31
+                *   Nov: 30
+                *   Dec: 31
+                *   Total: 29+31+30+31+30+31 = 182 days difference.
+                *   So `Dec 31` - 182 days = `Jul 2`.
+            *   This implies the shift is not constant if we map row 0 to row 0 and last to last.
+                *   Row 0: `Jul 3` -> `Jan 1` (Shift -183 days)
+                *   Row 181: `Dec 31` -> `Jul 2` (Shift -182 days)
+            *   This is inconsistent.
+    *   Alternative interpretation: The target includes an extra row at the beginning or end?
+    *   Let's look at the values.
+        *   Source Row 0 (`7/3/2014`): `1:00 AM` = 1.035932.
+        *   Target Row 0 (`Wed 01/01/2014`): `1:00` = 0.401886.
+        *   Target Row 1 (`Fri 01/17/2014`): `1:00` = 0.646067.
+        *   There is no obvious value match.
+    *   Let's reconsider the "Compute the result only from the source DataFrame" constraint.
+    *   Is it possible the source dates are actually *later* in time and we are just relabeling them?
+    *   Or is it possible the source data *is* the target data, but the dates in the source are shifted forward by 183 days?
+    *   If Source Date `D` corresponds to Target Date `D - 183 days`:
+        *   Source `7/3/2014` -> Target `1/1/2014`.
+        *   Source `12/31/2014` -> Target `7/1/2014`?
+        *   Wait, `Dec 31` - 183 days.
+            *   183 days before Dec 31.
+            *   Dec 31 is day 365.
+            *   365 - 183 = 182.
+            *   Day 182 of 2014 is July 1st (Jan 31+Feb 28+Mar 31+Apr 30+May 31+Jun 30 = 181. So Day 182 is Jul 1).
+            *   So Source Last (`Dec 31`) would map to `Jul 1`.
+            *   But Target Last is `Jul 2`.
+            *   And Target has 183 rows, Source has 182.
+    *   This suggests the target has one more row than the source.
+    *   Where does the extra row come from?
+    *   Maybe the source `date` column is not the date of the data, but something else? No, it looks like a time series.
+    *   Let's look at the `DSL` column in source. It has values `0.0` and `0.119509`.
+    *   The target does not have a `DSL` column.
+    *   The target columns `1:00` to `24:00` correspond to source columns `1:00 AM` to `12:00 PM` and `1:00 PM` to `12:00 AM`?
+        *   Source: `1:00 AM`, `2:00 AM` ... `12:00 AM` (which is midnight start of day?), `1:00 PM` ... `12:00 PM`.
+        *   Standard 24h clock:
+            *   1:00 AM -> 1:00
+            *   2:00 AM -> 2:00
+            *   ...
+            *   12:00 AM -> 0:00 or 24:00?
+            *   1:00 PM -> 13:00
+            *   ...
+            *   12:00 PM -> 12:00
+        *   Target columns: `1:00`, `2:00`, ..., `12:00`, `13:00`, ..., `24:00`.
+        *   Mapping:
+            *   Source `1:00 AM` -> Target `1:00`
+            *   Source `2:00 AM` -> Target `2:00`
+            *   ...
+            *   Source `12:00 AM` -> Target `24:00` (Midnight at end of day)
+            *   Source `1:00 PM` -> Target `13:00`
+            *   Source `2:00 PM` -> Target `14:00`
+            *   ...
+            *   Source `12:00 PM` -> Target `12:00`
+    *   So the column transformation is a renaming/reordering.
+        *   `1:00 AM` -> `1:00`
+        *   `2:00 AM` -> `2:00`
+        *   ...
+        *   `11:00 AM` -> `11:00`
+        *   `12:00 PM` -> `12:00`
+        *   `1:00 PM` -> `13:00`
+        *   ...
+        *   `11:00 PM` -> `23:00`
+        *   `12:00 AM` -> `24:00`
+
+    *   Now back to the rows and dates.
+    *   Source has 182 rows. Target has 183 rows.
+    *   If the transformation is purely deterministic from source, and we can't create new data, where does the 183rd row come from?
+    *   Hypothesis: The source data is missing the first row of the target period, or the target period extends one day further?
+    *   Or, is it possible that `DSL` is used to generate a new row? Unlikely.
+    *   Let's look at the dates again.
+    *   Source: `7/3/2014` to `12/31/2014`.
+    *   Target: `1/1/2014` to `7/2/2014`.
+    *   These are disjoint time periods.
+    *   If the problem states "Compute the result only from the source DataFrame", and the source contains *only* data for Jul-Dec, but the target requires data for Jan-Jul, this is impossible unless:
+        1.  The `date` column in the source is not the true date, but an index that needs to be shifted.
+        2.  The values in the source *are* the values for the target dates, but the `date` labels in the source are shifted by +183 days.
+    *   If we assume the values in Source Row `i` belong to Target Row `i`, then we just need to:
+        1.  Map the columns.
+        2.  Generate the new `cst` dates by taking the source dates and subtracting 183 days?
+        3.  But Source has 182 rows, Target has 183.
+    *   Let's check if Source Row `i` matches Target Row `i+1`?
+        *   If Source `7/3/2014` (Row 0) maps to Target `1/2/2014` (Row 1)?
+        *   Then Target Row 0 (`1/1/2014`) is missing from source?
+    *   Or does Source Row `i` map to Target Row `i`?
+        *   Source `7/3/2014` -> Target `1/1/2014`.
+        *   Source `12/31/2014` -> Target `7/1/2014` (Row 181).
+        *   Target has Row 182 (`7/2/2014`).
+        *   So Source covers Target Rows 0-181. Target Row 182 is extra.
+    *   How to get Target Row 182?
+    *   Maybe the `DSL` column indicates something?
+    *   Or maybe the source data *does* contain the data for `7/2/2014` but it's labeled differently?
+    *   Let's look at the `DSL` values. `0.0` and `0.119509`.
+    *   In the sample, all `DSL` are `0.0`.
+    *   This might be a distractor or a filter.
+    *   Wait, look at the target sample data values.
+        *   Target `1/1/2014`: `1:00` = 0.401886.
+        *   Source `7/3/2014`: `1:00 AM` = 1.035932.
+        *   These are different.
+    *   This implies the values are *not* simply shifted. The values in the source for `7/3/2014` are NOT the values for `1/1/2014`.
+    *   This contradicts "Compute the result only from the source DataFrame" if the source doesn't contain the data for Jan-Jun.
+    *   **CRITICAL RE-EVALUATION**:
+        *   Is it possible the `date` column in the source is actually `MM/DD/YYYY` but represents a different year? No, 2014 is explicit.
+        *   Is it possible the source and target are from the *same* dataset, but the source provided in the prompt is a *subset* or *shifted* view, and the "evaluation input" will have the correct dates?
+        *   The prompt says: "The evaluation source contains different rows; never copy target rows...".
+        *   It also says: "Infer a general transformation from the source schema and target specification."
+        *   If the transformation is `Target = Source.shift(-183 days)`, then the values must match. They don't in the sample.
+        *   However, if the *evaluation source* will have dates that, when shifted, align with the target, and the *values* will also align, then the transformation is just a date shift and column rename.
+        *   But why do the sample values not match?
+            *   Sample Source: `7/3/2014`.
+            *   Sample Target: `1/1/2014`.
+            *   If the transformation is `date - 183 days`, then `7/3/2014` becomes `1/1/2014`.
+            *   The value `1.035932` in Source `7/3/2014` should become the value in Target `1/1/2014`.
+            *   But Target `1/1/2014` has `0.401886`.
+            *   This means the values are *different*.
+            *   This implies the Source and Target are **not** the same data shifted in time. They are different data.
+            *   BUT, the instruction says "Compute the result only from the source DataFrame".
+            *   This is a contradiction unless:
+                1.  The source DataFrame in the *evaluation* will have the data for `1/1/2014` labeled as `7/3/2014`? (i.e. the labels are wrong in the source, but the values are correct for the target dates).
+                2.  Or, the transformation involves some calculation that changes the values? (e.g., averaging, differencing).
+                3.  Or, the `date` column is irrelevant for the values, and we just need to generate a new date sequence? But we can't generate values out of thin air.
+
+    *   Let's look at the `DSL` column again.
+    *   Source `DSL` has 2 distinct values. Target has no `DSL`.
+    *   Maybe `DSL` is a flag for "Daylight Saving Time"?
+    *   In 2014, DST started March 9 and ended Nov 1.
+    *   Source dates: Jul-Dec. All DST?
+    *   Target dates: Jan-Jul. Jan-Jun Non-DST, Jul DST?
+    *   This doesn't explain the value mismatch.
+
+    *   Let's reconsider the "182 vs 183" rows.
+    *   Source: 182 rows. Target: 183 rows.
+    *   If the transformation is simply `rename columns` and `shift dates`, we are missing one row of data.
+    *   Is it possible the source contains a "header" or "footer" row that is dropped?
+    *   Or is it possible the target includes an aggregate row?
+    *   Let's look at the Target Last Row: `Wed 07/02/2014`.
+    *   Source Last Row: `12/31/2014`.
+    *   If we assume the values *do* correspond (i.e., the sample provided is misleading or I am misinterpreting "different rows"), the most logical structural transformation is:
+        1.  Parse source dates.
+        2.  Subtract 183 days from each date to get the target date.
+        3.  Format as `ddd MM/DD/YYYY`.
+        4.  Rename columns to 24h format.
+        5.  But we have 182 rows and need 183.
+    
+    *   Let's look at the first target date: `Wed 01/01/2014`.
+    *   Let's look at the source date that would map to this: `01/01/2014` + 183 days = `07/03/2014`.
+    *   Source starts at `07/03/2014`.
+    *   So Source Row 0 maps to Target Row 0.
+    *   Source Last Date: `12/31/2014`.
+    *   Target Date for Source Last: `12/31/2014` - 183 days = `07/01/2014`.
+    *   Target Last Date: `07/02/2014`.
+    *   So Source covers Target Rows 0 to 181 (dates `01/01` to `07/01`).
+    *   Target has Row 182 (`07/02`).
+    *   Where does `07/02` come from?
+    *   It is one day after the last source-mapped date.
+    *   Is it possible the source has a hidden row or the `DSL` column generates it?
+    *   Or is it possible the source date `12/31/2014` actually maps to `07/02/2014`?
+        *   `12/31` - `07/02` = 182 days.
+        *   `07/03` - `01/01` = 183 days.
+        *   The shift is not constant.
+
+    *   **Alternative Theory**: The source data is *daily* data. The target data is *daily* data.
+    *   The source dates are `7/3` to `12/31`.
+    *   The target dates are `1/1` to `7/2`.
+    *   These are consecutive periods.
+    *   Source Period: Jul-Dec.
+    *   Target Period: Jan-Jul.
+    *   If the evaluation source will have data for `1/1` to `7/2` (labeled correctly or shifted), the transformation is just column renaming and date formatting.
+    *   But the sample source has `7/3`...`12/31`.
+    *   If the evaluation source has *different rows*, it might have `1/1`...`7/2` in the `date` column.
+    *   If the evaluation source has `1/1`...`7/2`, then:
+        1.  Parse `date`.
+        2.  Format as `ddd MM/DD/YYYY`.
+        3.  Rename columns.
+        4.  Return.
+    *   This fits "Compute the result only from the source".
+    *   The sample provided in the prompt is just a *sample* of the schema, not necessarily the *evaluation* input. The note says "Source row count describes a training sample only".
+    *   The "training sample" source has dates `7/3`-`12/31`. The "training sample" target has dates `1/1`-`7/2`.
+    *   This implies the *training* source and target are misaligned in time, likely because the source was shifted or the target was shifted for the purpose of the example, OR the transformation involves a time shift.
+    *   However, if the evaluation source contains the *correct* dates for the target (i.e., `1/1`-`7/2`), then no date shifting is needed, just formatting.
+    *   But if the evaluation source contains dates like `7/3`-`12/31` (like the sample), and we need to produce `1/1`-`7/2`, we must shift.
+    *   Which is more likely?
+    *   Usually, in these tasks, the schema is consistent. The `date` column in the source is a `str`. The `cst` column in the target is a `str`.
+    *   If I assume the evaluation source will have dates that map directly to the target dates (i.e., Source `1/1/2014` -> Target `1/1/2014`), then the transformation is:
+        1.  Parse `date` (`%m/%d/%Y`).
+        2.  Format as `%a %m/%d/%Y` (e.g., `Wed 01/01/2014`).
+        3.  Rename columns to 24h format.
+        4.  Drop `DSL`.
+    *   This explains the column changes perfectly.
+    *   Does it explain the row count?
+        *   If Source has 183 rows (`1/1`-`7/2`), Target has 183 rows.
+        *   The sample source had 182 rows. This might be because the sample source was truncated or shifted.
+        *   The note says "Source row count describes a training sample only".
+        *   If the evaluation source has the correct dates, the row count will match the target.
+    
+    *   **Decision**: I will assume the `date` values in the source DataFrame correspond directly to the dates required in the target, and the primary transformation is **date formatting** and **column renaming/reordering**. The discrepancy in the sample (dates shifted by ~6 months) is likely an artifact of the specific training sample provided (e.g., the source sample was from a later period, but the target sample was from an earlier period, or the source sample was shifted for privacy/noise, but the *structure* of the transformation is date formatting and column mapping).
+    *   Wait, if the source sample dates are `7/3`-`12/31` and I format them, I get `Wed 07/03/2014`...`Sun 12/31/2014`.
+   

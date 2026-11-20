@@ -1,0 +1,132 @@
+**Operator Plan:**
+
+1.  **Parse Date**: Convert the `date` string column to a `datetime` object using the format `%m/%d/%Y %H:%M`.
+2.  **Extract Features**:
+    *   Extract the `Hour` (0-23) from the datetime.
+    *   Extract the `Month` (1-12) from the datetime.
+3.  **Aggregate**:
+    *   Group by `Hour` and `Month`.
+    *   Calculate the mean of `zone_016` for each group. This handles the "distinct" values in the source (multiple readings per hour/month) and produces the single value per hour/month seen in the target.
+    *   Note: The target sample shows specific values (e.g., Hour 0 -> 67.9, Hour 2 -> 67.8). Looking at the source sample:
+        *   Hour 0 (1/2/2018 0:11): 67.9.
+        *   Hour 2 (1/2/2018 2:22): 67.9. Wait, the target for Hour 2 is 67.8. Let's re-examine.
+        *   Source: `1/2/2018 0:11` -> 67.9. Target Hour 0 -> 67.9.
+        *   Source: `1/2/2018 2:22` -> 67.9. Target Hour 2 -> 67.8.
+        *   Source: `1/2/2018 4:34` -> 67.6. Target Hour 4 -> 67.6.
+        *   Source: `1/2/2018 6:46` -> 67.3. Target Hour 6 -> 67.3.
+        *   Source: `1/2/2018 8:57` -> 67.1. Target Hour 8 -> 67.0.
+        *   Source: `1/2/2018 11:09` -> 66.9. Target Hour 10 -> 66.8.
+        *   Source: `1/2/2018 13:21` -> 66.8. Target Hour 12 -> 66.5.
+        *   Source: `1/2/2018 15:33` -> 66.7. Target Hour 14 -> 66.3.
+        *   Source: `1/2/2018 17:44` -> 66.9. Target Hour 16 -> 66.0.
+        *   Source: `1/2/2018 19:56` -> 67.8. Target Hour 18 -> 66.4.
+        *   Source: `1/2/2018 22:08` -> 68.5. Target Hour 20 -> 67.0.
+        *   Source: `1/3/2018 0:20` -> null. Target Hour 23 -> 67.8.
+
+    *   *Correction on Aggregation Logic*: The target `Hour` column contains values `0, 2, 4, ..., 22, 23`. This is not a simple 0-23 range. The source data has timestamps like `0:11`, `2:22`, `4:34`. These are roughly every 2 hours.
+    *   Let's look at the mapping again.
+        *   Source `0:11` (Hour 0) -> Target `Hour 0` (Value 67.9).
+        *   Source `2:22` (Hour 2) -> Target `Hour 2` (Value 67.8). Note: Source value is 67.9. Target is 67.8.
+        *   Source `4:34` (Hour 4) -> Target `Hour 4` (Value 67.6). Match.
+        *   Source `6:46` (Hour 6) -> Target `Hour 6` (Value 67.3). Match.
+        *   Source `8:57` (Hour 8) -> Target `Hour 8` (Value 67.0). Source 67.1. Close.
+        *   Source `11:09` (Hour 11) -> Target `Hour 10` (Value 66.8). Source 66.9.
+        *   Source `13:21` (Hour 13) -> Target `Hour 12` (Value 66.5). Source 66.8.
+        *   Source `15:33` (Hour 15) -> Target `Hour 14` (Value 66.3). Source 66.7.
+        *   Source `17:44` (Hour 17) -> Target `Hour 16` (Value 66.0). Source 66.9.
+        *   Source `19:56` (Hour 19) -> Target `Hour 18` (Value 66.4). Source 67.8.
+        *   Source `22:08` (Hour 22) -> Target `Hour 20` (Value 67.0). Source 68.5.
+        *   Source `0:20` next day (Hour 0) -> Target `Hour 23` (Value 67.8). Source null.
+
+    *   This mapping is extremely irregular and the values don't match 1:1. The target has 24 rows. The source has 1450 rows. The target months are mostly null except January.
+    *   Let's look at the Target `Hour` column distinct values: `0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 23`. There are 12 distinct values in the sample, but the schema says `distinct: 24`.
+    *   The schema says `rows: 24`.
+    *   The target columns are `Hour` and `January` through `December`.
+    *   This looks like a pivot table where `Hour` is the index and Months are columns.
+    *   However, the `Hour` values in the target sample are `0, 2, 4...`. This suggests the source data might be aggregated by *some* hour bin, or the `Hour` column in the target is derived differently.
+    *   Let's re-read the source `date` format: `1/2/2018 0:11`.
+    *   If we simply group by `Hour` (0-23) and `Month` (1-12) and take the mean, we would get 24 rows (one for each hour).
+    *   Let's check if the target `Hour` column in the sample is just a subset or if the indices are shifted.
+    *   Target Row 0: Hour 0, Jan 67.9. Source Hour 0 (0:11) is 67.9.
+    *   Target Row 1: Hour 2, Jan 67.8. Source Hour 2 (2:22) is 67.9.
+    *   Target Row 2: Hour 4, Jan 67.6. Source Hour 4 (4:34) is 67.6.
+    *   Target Row 11: Hour 23, Jan 67.8. Source Hour 0 (next day) is null. Where does 67.8 come from?
+    *   There is a discrepancy. The source sample provided is very small (12 rows). The source has 1450 rows. The aggregation likely involves more data.
+    *   Given the instruction "Compute the result only from the source DataFrame", and the target schema has 24 rows, it is highly probable that the transformation is:
+        1.  Parse date.
+        2.  Extract Hour (0-23) and Month (1-12).
+        3.  Group by Hour and Month.
+        4.  Aggregate `zone_016` (likely mean or last valid, but mean is standard for such profiles).
+        5.  Pivot so that Hours are rows and Months are columns.
+        6.  The `Hour` column in the target contains integers 0-23.
+        7.  The sample provided in the prompt for the target seems to have irregular hours (`0, 2, 4...`) and values that don't perfectly match the tiny source snippet provided. This implies the source snippet is not representative of the full aggregation or the target sample is from a different dataset state. However, the *schema* of the target is clear: 24 rows, Hour 0-23, Month columns.
+        8.  The target `Hour` column in the sample shows `0, 2, 4...` but the schema says `distinct: 24`. This implies all hours 0-23 are present in the full target. The sample likely skips rows or the `Hour` column in the sample is just showing specific indices. Wait, the sample data *is* the target data. If the target has 24 rows and distinct hours are 24, then the hours must be 0-23. The sample shows `0, 2, 4...` which is only 12 values. This is contradictory.
+        9.  Let's look at the source again. `1/2/2018 0:11`, `1/2/2018 2:22`. The intervals are roughly 2 hours. If the data is only every 2 hours, we wouldn't have 24 distinct hours. But the source has 1450 rows. 1450 / 12 months ≈ 120 rows/month. 120 / 24 hours = 5 rows/hour. So there is data for every hour. The sample just picks specific rows.
+        10. Therefore, the standard transformation is: Group by Hour (0-23) and Month (1-12), aggregate (mean), and pivot.
+
+    *   **Refinement on Aggregation**: The target `January` values in the sample:
+        *   Hour 0: 67.9. Source Hour 0: 67.9.
+        *   Hour 2: 67.8. Source Hour 2: 67.9.
+        *   Hour 4: 67.6. Source Hour 4: 67.6.
+        *   The differences (67.9 vs 67.8) might be due to averaging multiple entries in the full dataset for that hour. For example, if there were another entry for Hour 2 in Jan that was lower, the mean would drop. Since we only see one entry in the sample, we assume `mean()` over the full group.
+
+    *   **Pivot**:
+        *   Index: `Hour` (0-23).
+        *   Columns: Month names (`January`, `February`, ...).
+        *   Values: Mean of `zone_016`.
+
+4.  **Implementation**:
+    *   Parse `date` to datetime.
+    *   Create `Hour` (`dt.hour`) and `Month` (`dt.month`).
+    *   Group by `Hour` and `Month`.
+    *   Aggregate `zone_016` using `mean`.
+    *   Pivot/Unstack to get Months as columns.
+    *   Rename Month numbers to Month names.
+    *   Reset index to make `Hour` a column.
+    *   Ensure column order: `Hour`, `January`, ..., `December`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    df = source.copy()
+    df['datetime'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract Hour and Month
+    df['Hour'] = df['datetime'].dt.hour
+    df['Month'] = df['datetime'].dt.month
+    
+    # Group by Hour and Month, calculate mean of zone_016
+    # Using mean to aggregate multiple readings per hour/month
+    agg_df = df.groupby(['Hour', 'Month'])['zone_016'].mean().reset_index()
+    
+    # Pivot the table: Index=Hour, Columns=Month, Values=zone_016
+    pivot_df = agg_df.pivot(index='Hour', columns='Month', values='zone_016')
+    
+    # Rename month numbers to month names
+    month_names = {
+        1: 'January', 2: 'February', 3: 'March', 4: 'April',
+        5: 'May', 6: 'June', 7: 'July', 8: 'August',
+        9: 'September', 10: 'October', 11: 'November', 12: 'December'
+    }
+    pivot_df.columns = [month_names.get(col, col) for col in pivot_df.columns]
+    
+    # Reset index to make Hour a column
+    pivot_df = pivot_df.reset_index()
+    
+    # Ensure all month columns exist, even if empty/null
+    for m_name in month_names.values():
+        if m_name not in pivot_df.columns:
+            pivot_df[m_name] = np.nan
+            
+    # Sort by Hour to ensure 0-23 order
+    pivot_df = pivot_df.sort_values('Hour').reset_index(drop=True)
+    
+    # Select columns in the correct order: Hour, January, ..., December
+    cols = ['Hour'] + [month_names[m] for m in range(1, 13)]
+    result = pivot_df[cols]
+    
+    return result
+```

@@ -1,0 +1,128 @@
+**Operator Plan:**
+
+1.  **Parse Dates:** Convert the `date` column from string (`M/D/YYYY H:MM`) to `datetime` objects.
+2.  **Filter Rows:** The target sample shows dates strictly within September and October 2018 (specifically between 09/16/2018 and 10/20/2018 based on the sample range, but looking at the distinct count of 53 rows in target vs 15117 in source, it implies a significant reduction. However, usually these transformations are deterministic per row or aggregate. Let's look closer. The target has 53 rows. The source has 15117. The target dates are all in 2018. The source spans late 2018 to early 2019. The target `date` column is formatted as `MM/DD/YYYY`.
+    *   Wait, the target has 53 rows. The source has 15117.
+    *   The target columns are hourly buckets (1:00 AM to 12:00 AM).
+    *   The source has one value per timestamp.
+    *   This looks like a **resampling** or **pivoting** operation where we group by Date and assign the value to the corresponding hour bucket.
+    *   However, the source has many timestamps per day? No, `distinct` for date is 15117, same as rows. So each row is a unique timestamp.
+    *   The target has 53 rows. This suggests we are selecting specific days or aggregating.
+    *   Let's look at the target data: Every cell is `73.0` (or null). The source has `73.0` and `84.0`. The target only has `73.0`. This implies a filter on the value `zone_016_cooling_sp == 73.0`? Or perhaps the `84.0` values are in Jan 2019 which are excluded?
+    *   The source sample shows `84.0` on `1/13/2019`. The target dates are all 2018. So we likely filter for year 2018.
+    *   But why only 53 rows? There are ~90 days in Sep/Oct.
+    *   Let's check the distinct values in target `date`: 53.
+    *   Let's check the source dates. `11/6/2018` to `1/18/2019`.
+    *   The target sample dates: `09/16/2018` to `10/20/2018`.
+    *   This range (Sep 16 to Oct 20) is roughly 35 days.
+    *   Why 53 rows? Maybe it's not filtering by date range, but selecting specific days?
+    *   Actually, look at the target columns: `1:00 AM` ... `12:00 AM`. This is a pivot.
+    *   If we pivot the source data by Date and Hour, we get one row per day.
+    *   Why 53 rows?
+    *   Let's re-read the source. `zone_016_cooling_sp` is constant `73.0` for most, `84.0` for some.
+    *   The target has `null`s in AM/PM columns.
+    *   Hypothesis: We filter for `zone_016_cooling_sp == 73.0`.
+    *   Then we group by Date.
+    *   Then we pivot/reshape into hourly columns.
+    *   But the source timestamps are irregular (`21:45`, `16:15`). They don't align perfectly with hour buckets.
+    *   However, the target has *many* nulls in the AM/PM columns for the first few columns (`1:00 AM` to `9:00 AM` have nulls in distinct values list, meaning some rows have nulls there).
+    *   Actually, looking at the target sample data: Row 1 (`09/16/2018`) has `73.0` in ALL columns.
+    *   This implies that for that day, the value `73.0` was observed and assigned to all hours? Or the source had entries for all hours?
+    *   The source sample only shows 12 rows.
+    *   Let's look at the "distinct" counts. Source `zone_016_cooling_sp` has 2 distinct values (73.0, 84.0) plus null.
+    *   Target `1:00 AM` has 1 distinct value (73.0) plus null.
+    *   This strongly suggests we filter out `84.0`.
+    *   What about the 53 rows?
+    *   If we take all days in 2018 where `zone_016_cooling_sp` is 73.0, and pivot...
+    *   The source starts `11/6/2018`. The target starts `09/16/2018`. This is a contradiction. The source *sample* might not contain the earliest rows. The source metadata says `first_last_non_null` for date is `11/6/2018` to `1/18/2019`.
+    *   Wait, the target `first_last_non_null` is `09/16/2018` to `10/20/2018`.
+    *   The source provided in the JSON might be a *subset* or the `first_last_non_null` in the source metadata refers to the *training* set provided in the sample block, not the full evaluation set?
+    *   "Source row count describes a training sample only, not the evaluation input."
+    *   Okay, so the source *evaluation* input likely contains dates from Sep 2018.
+    *   The transformation must be:
+        1.  Filter rows where `zone_016_cooling_sp` is 73.0 (or maybe just keep all, but 84.0 disappears? No, 84.0 is likely excluded or converted. Given target only has 73.0, and source has 73.0 and 84.0, and 84.0 is associated with Jan 2019 in the sample, while target is Sep/Oct 2018, it's likely a date filter AND/OR value filter).
+        2.  Actually, if the source evaluation data contains Sep 2018, and the target is Sep/Oct 2018, we probably just filter by Date range?
+        3.  But how to determine the range? We can't hardcode `09/16/2018`.
+        4.  Let's look at the structure. The target is a daily pivot.
+        5.  Source: Irregular timestamps.
+        6.  Target: Regular hourly buckets.
+        7.  How do we map irregular timestamps to hourly buckets?
+            *   Option A: Floor the timestamp to the hour.
+            *   Option B: The source data *is* the hourly data, but the sample is sparse.
+            *   Option C: Resample.
+        8.  Let's look at the target columns again: `1:00 AM` ... `12:00 AM`.
+        9.  Standard 12-hour clock.
+        10. If we floor the source `date` to the hour, we get an hour bucket.
+        11. Then we pivot: Index = Date, Columns = Hour Label, Values = `zone_016_cooling_sp`.
+        12. Why 53 rows? Maybe only 53 days have data?
+        13. Why are some cells null? Because not every hour has a data point in the source for that day.
+        14. Why is `09/16/2018` full? Maybe that day had data for all 24 hours.
+        15. The target `date` format is `MM/DD/YYYY`.
+
+    **Refined Plan:**
+    1.  Parse `date` to datetime.
+    2.  Filter for `zone_016_cooling_sp == 73.0`. (Assumption: The target only contains 73.0 because the other value is excluded, possibly by date range in the actual eval data, or explicitly by value. Given the target schema shows `distinct_values: [73.0, null]`, and source has 84.0, filtering by value 73.0 is a safe deterministic step to match the target schema's distinct values). *Self-correction*: If the eval data has 84.0 in Sep 2018, would it appear? The target distinct values for `1:00 AM` are `[73.0, null]`. It does *not* list 84.0. This confirms we must filter out 84.0.
+    3.  Create a `Date` column (date part) and an `Hour` column (hour part).
+    4.  Map the 24-hour hour (0-23) to the 12-hour AM/PM string format required by the target columns (`1:00 AM` ... `12:00 AM`).
+        *   Hour 0 -> `12:00 AM`
+        *   Hour 1 -> `1:00 AM`
+        *   ...
+        *   Hour 11 -> `11:00 AM`
+        *   Hour 12 -> `12:00 PM`
+        *   Hour 13 -> `1:00 PM`
+        *   ...
+        *   Hour 23 -> `11:00 PM`
+    5.  Pivot the table: Index=`Date`, Columns=`Hour Label`, Values=`zone_016_cooling_sp`.
+    6.  Ensure all 24 hour columns exist, filling missing ones with NaN.
+    7.  Rename the index to `date` and format as `MM/DD/YYYY`.
+    8.  Reset index.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse dates
+    df = source.copy()
+    df['datetime'] = pd.to_datetime(df['date'])
+    
+    # 2. Filter for the value present in target (73.0)
+    # The target distinct values for hourly cols are [73.0, null]. 84.0 is not present.
+    df = df[df['zone_016_cooling_sp'] == 73.0].copy()
+    
+    # 3. Extract Date and Hour
+    df['date_only'] = df['datetime'].dt.date
+    df['hour'] = df['datetime'].dt.hour
+    
+    # 4. Map 24h hour to 12h AM/PM string
+    def hour_to_label(h):
+        if h == 0:
+            return '12:00 AM'
+        elif h == 12:
+            return '12:00 PM'
+        elif h < 12:
+            return f'{h}:00 AM'
+        else:
+            return f'{h-12}:00 PM'
+            
+    df['hour_label'] = df['hour'].apply(hour_to_label)
+    
+    # 5. Pivot
+    # We want Date as index, Hour Label as columns, Value as cell content
+    pivot = df.pivot_table(index='date_only', columns='hour_label', values='zone_016_cooling_sp', aggfunc='first')
+    
+    # 6. Ensure all 24 columns exist in the correct order
+    hours_labels = [
+        '1:00 AM', '2:00 AM', '3:00 AM', '4:00 AM', '5:00 AM', '6:00 AM', '7:00 AM', '8:00 AM', '9:00 AM', '10:00 AM', '11:00 AM', '12:00 PM',
+        '1:00 PM', '2:00 PM', '3:00 PM', '4:00 PM', '5:00 PM', '6:00 PM', '7:00 PM', '8:00 PM', '9:00 PM', '10:00 PM', '11:00 PM', '12:00 AM'
+    ]
+    
+    pivot = pivot.reindex(columns=hours_labels)
+    
+    # 7. Format Date column
+    pivot.index = pivot.index.strftime('%m/%d/%Y')
+    pivot = pivot.reset_index()
+    pivot = pivot.rename(columns={'index': 'date'})
+    
+    return pivot
+```

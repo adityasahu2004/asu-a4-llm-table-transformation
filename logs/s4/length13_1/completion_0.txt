@@ -1,0 +1,301 @@
+**Operator Plan:**
+
+1.  **Parse Date**: Convert the `time` column from string format (`YYYY-MM-DD HH:MM:SS.fff`) to a datetime object, then format it as `YYYY-MM-DD HH:MM:SS` for the `datetime` column.
+2.  **Calculate HVAC**: Sum the heating and cooling components. Based on the source schema, this includes `electricity_heating_kwh`, `electricity_cooling_kwh`, `electricity_fans_heating_kwh`, `electricity_fans_cooling_kwh`, `electricity_pumps_heating_kwh`, and `electricity_pumps_cooling_kwh`. Note: The "central system" variants are subsets or duplicates often excluded in high-level aggregations unless specified, but looking at the magnitude of `net_site_electricity_kwh` vs the sum of all, we need to be careful. Let's look at the first sample row.
+    *   Source `net_site_electricity_kwh`: ~826k.
+    *   Target `total`: ~725k.
+    *   The target `total` is less than `net_site`. This suggests `total` is a sum of specific end-uses, not necessarily the net meter reading (which might include losses or unaccounted loads).
+    *   Let's check the target `hvac`. First row target `hvac` is ~292k.
+    *   Source heating components: `electricity_heating_kwh` (0.13) + `electricity_central_system_heating_kwh` (0.0). This is tiny.
+    *   Source cooling components: `electricity_cooling_kwh` (406k) + `electricity_central_system_cooling_kwh` (2k). Sum ~408k.
+    *   This doesn't match 292k.
+    *   Let's look at the fans and pumps.
+    *   Fans: `heating` (1.07) + `cooling` (83k).
+    *   Pumps: `heating` (0.00014) + `cooling` (0.0) + `central_system_pumps_cooling` (398).
+    *   Sum of Cooling + Fans(Cooling) + Pumps(Cooling) = 406k + 83k + 398 = ~489k. Still not 292k.
+    *   Let's re-read the source columns. There are `electricity_heating_kwh` and `electricity_central_system_heating_kwh`.
+    *   Maybe the aggregation is different. Let's look at the `total` in the target: 725,805.
+    *   Let's sum *all* electricity columns in the source for the first row:
+        *   Heating: 0.13 + 0 = 0.13
+        *   Cooling: 406631 + 2106 = 408737
+        *   Lighting: 23523 + 4592 = 28115
+        *   Fans: 1.07 + 83543 = 83544
+        *   Pumps: 0.00014 + 0 + 0 + 398 = 398
+        *   Water: 17024
+        *   Appliances: Refrig(51271) + Washer(444) + Dryer(12672) + Range(3725) + Dishwasher(289) = 68399
+        *   Plug Loads: 149820
+        *   Other Fans: House(0) + Range(178) + Bath(1347) + Ceiling(8952) = 10477
+        *   Pool/Hot Tub: Heater(64) + Pump(1180) + HotTubHeater(3325) + HotTubPump(4035) = 8604
+        *   Sum: 408737 + 28115 + 83544 + 398 + 17024 + 68399 + 149820 + 10477 + 8604 = ~775k.
+    *   This is close to 725k but not exact. The difference is about 50k.
+    *   Let's look at the target categories again: `hvac`, `domestic_water_heating`, `major_appliances`, `lighting`, `miscellaneous_plug_loads`.
+    *   `lighting`: Target ~46k. Source Interior(23k) + Exterior(4.5k) = 28k. Mismatch.
+    *   `miscellaneous_plug_loads`: Target ~246k. Source `electricity_plug_loads_kwh` is 149k. Mismatch.
+    *   `major_appliances`: Target ~79k. Source Appliance sum was ~68k.
+    *   `domestic_water_heating`: Target ~1.7k. Source `electricity_water_systems_kwh` is 17k. Mismatch.
+
+    Let's reconsider the mapping. The source data seems to be from an energy simulation (like EnergyPlus) where components are broken down finely. The target aggregates them.
+    
+    Let's try to reverse engineer the sums from the first row:
+    Target `total` = 725,805.76
+    Target `hvac` = 292,848.11
+    Target `domestic_water_heating` = 1,745.74
+    Target `major_appliances` = 79,768.17
+    Target `lighting` = 46,858.54
+    Target `miscellaneous_plug_loads` = 246,207.28
+
+    Let's look at `lighting` = 46,858.54.
+    Source: `electricity_interior_lighting_kwh` (23,523) + `electricity_exterior_lighting_kwh` (4,592) = 28,115.
+    What else could be lighting?
+    
+    Let's look at `miscellaneous_plug_loads` = 246,207.28.
+    Source `electricity_plug_loads_kwh` = 149,820.
+    Difference: ~96k.
+    
+    Let's look at `hvac` = 292,848.11.
+    Source Cooling: 406,631.
+    Source Fans Cooling: 83,543.
+    Source Pumps Cooling: 398.
+    
+    There seems to be a significant discrepancy. Let's look at the second row.
+    Source `net_site` = 1,839,641.
+    Target `total` = 973,222.
+    
+    Wait, look at the source column `electricity_cooling_kwh` for row 2: 1,010,773.
+    Target `hvac` for row 2: 318,833.
+    
+    Is it possible the source values are scaled or the target is a subset?
+    
+    Let's look at the column names again.
+    `electricity_heating_kwh`
+    `electricity_central_system_heating_kwh`
+    
+    Perhaps `hvac` = `electricity_heating_kwh` + `electricity_cooling_kwh`?
+    Row 1: 0.13 + 406,631 = 406,631. Target: 292,848. No.
+    
+    Let's try: `hvac` = `electricity_fans_cooling_kwh` + `electricity_pumps_cooling_kwh` + `electricity_cooling_kwh`?
+    Row 1: 83,543 + 0 + 406,631 = 490,174. Target: 292,848. No.
+    
+    Let's look at the `total` vs `net_site_electricity_kwh`.
+    Row 1: Net 826k, Total 725k.
+    Row 2: Net 1.84M, Total 973k.
+    
+    The target total is consistently roughly half or a specific fraction of the net site?
+    Row 1: 725/826 = 0.87
+    Row 2: 973/1839 = 0.52
+    
+    This implies the target is not just a sum of the source columns provided, OR I am missing a huge chunk of data, OR the source columns provided in the sample are not the only ones used, OR the transformation involves averaging or selecting specific components.
+    
+    However, usually these tasks involve simple column arithmetic. Let's look closer at the target `lighting` = 46,858.54.
+    Source `electricity_interior_lighting_kwh` = 23,523.08.
+    Source `electricity_exterior_lighting_kwh` = 4,592.04.
+    Sum = 28,115.
+    
+    Is it possible `lighting` includes `electricity_range_fan_kwh`? No, that's fans.
+    
+    Let's look at `miscellaneous_plug_loads` = 246,207.28.
+    Source `electricity_plug_loads_kwh` = 149,820.48.
+    
+    What if `miscellaneous_plug_loads` = `electricity_plug_loads_kwh` + `electricity_ceiling_fan_kwh` (8952) + `electricity_bath_fan_kwh` (1347) + `electricity_range_fan_kwh` (178) + `electricity_house_fan_kwh` (0)?
+    Sum = 149,820 + 8,952 + 1,347 + 178 = 160,297. Still short of 246k.
+    
+    What if `hvac` is just the *central* systems?
+    Row 1: Central Heating (0) + Central Cooling (2106) + Central Pumps Cooling (398). Sum = 2504. Target 292k. No.
+    
+    Let's look at the `total` again.
+    Target Total = HVAC + Water + Appliances + Lighting + Plug.
+    
+    Let's try to find which source columns sum to the Target Total (725,805).
+    We established the sum of *all* detailed electricity columns is ~775k.
+    The difference is ~50k.
+    
+    Which columns are missing or excluded?
+    Maybe `electricity_pool_heater_kwh`, `electricity_pool_pump_kwh`, `electricity_hot_tub_heater_kwh`, `electricity_hot_tub_pump_kwh` are excluded?
+    Sum of Pool/HotTub in Row 1: 64 + 1180 + 3325 + 4035 = 8604.
+    775k - 8.6k = 766k. Still not 725k.
+    
+    Maybe `electricity_water_systems_kwh` (17k) is excluded?
+    766k - 17k = 749k.
+    
+    Maybe `electricity_fans_heating_kwh` (1.07) and `electricity_pumps_heating_kwh` (0.00014) are excluded? Negligible.
+    
+    There is a ~24k gap remaining.
+    
+    Let's look at `electricity_clothes_washer_kwh` (444), `electricity_clothes_dryer_kwh` (12672), `electricity_cooking_range_kwh` (3725), `electricity_dishwasher_kwh` (289), `electricity_refrigerator_kwh` (51271).
+    Sum = 68,399.
+    Target `major_appliances` = 79,768.
+    Difference = 11,369.
+    
+    Let's look at `electricity_water_systems_kwh` (17,024).
+    Target `domestic_water_heating` = 1,745.
+    
+    This path of manual summation is fraught with error due to the "untrusted data" rule and the complexity of finding the exact linear combination without a clear legend.
+    
+    **Alternative Hypothesis:**
+    The target columns map to specific source columns or simple sums, but the names are abstracted.
+    
+    Let's look at the `datetime` column.
+    Source: `2012-07-02 00:15:00.000`
+    Target: `2012-01-01 00:15:00`
+    
+    Wait. The target sample starts with `2012-01-01`. The source sample starts with `2012-07-02`.
+    The note says "Source row count describes a training sample only".
+    The target `first_last_non_null` is `2012-01-01` to `2012-07-02`.
+    The source `first_last_non_null` is `2012-07-02` to `2013-01-01`.
+    
+    The target data in the sample block:
+    Row 1: `2012-01-01 00:15:00` ...
+    Row 12: `2012-07-02 00:00:00` ...
+    
+    The source data in the sample block:
+    Row 1: `2012-07-02 00:15:00` ...
+    
+    It appears the **Target Sample** provided in the prompt is actually from a *different* time period or the source sample provided is just a slice, but the *transformation logic* must hold.
+    
+    Crucially, look at the last row of the Target Sample:
+    `2012-07-02 00:00:00`
+    
+    Look at the first row of the Source Sample:
+    `2012-07-02 00:15:00.000`
+    
+    These are different times on the same day.
+    
+    However, look at the values.
+    Target Row 12 (`2012-07-02 00:00:00`):
+    HVAC: 505,761.52
+    Water: 20,987.93
+    Appliances: 79,801.70
+    Lighting: 46,858.54
+    Plug: 161,968.09
+    Total: 879,422.59
+    
+    Source Row 1 (`2012-07-02 00:15:00`):
+    Net: 826,347
+    
+    Source Row 12 (`2013-01-01 00:00:00`):
+    Net: 926,013
+    
+    There is no row in the source sample for `2012-07-02 00:00:00`. The source sample starts at `00:15:00`.
+    
+    **However**, I must infer the transformation from the schema. I cannot align rows if the timestamps don't match exactly in the sample. But I can infer the column mapping logic.
+    
+    Let's assume the standard EnergyPlus output mapping:
+    
+    1.  **datetime**: Parse `time`, strip milliseconds, format `YYYY-MM-DD HH:MM:SS`.
+    2.  **hvac**: Sum of heating and cooling equipment.
+        Typically: `electricity_heating_kwh` + `electricity_cooling_kwh` + `electricity_fans_heating_kwh` + `electricity_fans_cooling_kwh` + `electricity_pumps_heating_kwh` + `electricity_pumps_cooling_kwh`.
+        *Note*: The "central_system" columns are often sub-components. If the main `electricity_heating_kwh` is the total for that end use, we shouldn't double count. In EnergyPlus, `Electricity:Heating` is the end use. `Electricity:CentralSystemHeating` is a component. We should sum the End Uses, not the components, or sum components if End Uses aren't provided. Here both are provided. Usually, the non-central columns are the end-use totals.
+        Let's test this hypothesis on the Target Row 12 vs a Source row with similar characteristics? No, we can't.
+        
+        Let's look at the `lighting` target: 46,858.54.
+        Source Row 1 Interior: 23,523. Exterior: 4,592. Sum: 28,115.
+        
+        Is it possible `lighting` = `electricity_interior_lighting_kwh` + `electricity_exterior_lighting_kwh` + `electricity_range_fan_kwh` + `electricity_bath_fan_kwh` + `electricity_ceiling_fan_kwh`?
+        23523 + 4592 + 178 + 1347 + 8952 = 38,592. Closer, but not 46k.
+        
+        What if `lighting` includes `electricity_plug_loads_kwh`? No, that's plug.
+        
+        Let's look at `miscellaneous_plug_loads` target: 246,207.
+        Source `electricity_plug_loads_kwh`: 149,820.
+        
+        There is a consistent pattern in these problems where:
+        `hvac` = Sum of `electricity_heating_kwh`, `electricity_cooling_kwh`, `electricity_fans_heating_kwh`, `electricity_fans_cooling_kwh`, `electricity_pumps_heating_kwh`, `electricity_pumps_cooling_kwh`.
+        `domestic_water_heating` = `electricity_water_systems_kwh`.
+        `major_appliances` = `electricity_refrigerator_kwh` + `electricity_clothes_washer_kwh` + `electricity_clothes_dryer_kwh` + `electricity_cooking_range_kwh` + `electricity_dishwasher_kwh`.
+        `lighting` = `electricity_interior_lighting_kwh` + `electricity_exterior_lighting_kwh`.
+        `miscellaneous_plug_loads` = `electricity_plug_loads_kwh` + `electricity_house_fan_kwh` + `electricity_range_fan_kwh` + `electricity_bath_fan_kwh` + `electricity_ceiling_fan_kwh`.
+        `total` = Sum of the above 5 categories.
+        
+        Let's check if `total` matches `net_site_electricity_kwh`?
+        Row 1 Source Net: 826,347.
+        My calculated sum of all detailed columns earlier was ~775k.
+        The Target Total for the corresponding row (if it existed) would be the sum of the 5 categories.
+        
+        Why did my sum of all columns (~775k) differ from Net (~826k)?
+        Missing columns in my manual sum:
+        `electricity_pool_heater_kwh` (64)
+        `electricity_pool_pump_kwh` (1180)
+        `electricity_hot_tub_heater_kwh` (3325)
+        `electricity_hot_tub_pump_kwh` (4035)
+        Sum = 8604.
+        775k + 8.6k = 783.6k.
+        Still ~42k short of 826k.
+        
+        Are there other columns?
+        `electricity_central_system_heating_kwh` (0)
+        `electricity_central_system_cooling_kwh` (2106)
+        `electricity_central_system_pumps_heating_kwh` (0)
+        `electricity_central_system_pumps_cooling_kwh` (398)
+        Sum = 2504.
+        783.6k + 2.5k = 786k.
+        
+        Still ~40k short.
+        
+        Perhaps `net_site` includes losses or the source data has a `total_electricity_kwh` column not listed? No, the schema lists all columns.
+        
+        Regardless of the "Net" mismatch, the target `total` is defined as the sum of the 5 end-use categories. The transformation should construct these 5 categories from the source columns and sum them for `total`.
+        
+        **Mapping Definition:**
+        *   `datetime`: Format `time`.
+        *   `hvac`: `electricity_heating_kwh` + `electricity_cooling_kwh` + `electricity_fans_heating_kwh` + `electricity_fans_cooling_kwh` + `electricity_pumps_heating_kwh` + `electricity_pumps_cooling_kwh`
+        *   `domestic_water_heating`: `electricity_water_systems_kwh`
+        *   `major_appliances`: `electricity_refrigerator_kwh` + `electricity_clothes_washer_kwh` + `electricity_clothes_dryer_kwh` + `electricity_cooking_range_kwh` + `electricity_dishwasher_kwh`
+        *   `lighting`: `electricity_interior_lighting_kwh` + `electricity_exterior_lighting_kwh`
+        *   `miscellaneous_plug_loads`: `electricity_plug_loads_kwh` + `electricity_house_fan_kwh` + `electricity_range_fan_kwh` + `electricity_bath_fan_kwh` + `electricity_ceiling_fan_kwh`
+        *   `total`: Sum of the above 5.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse time and format as YYYY-MM-DD HH:MM:SS
+    dt = pd.to_datetime(source['time'])
+    out = pd.DataFrame(index=source.index)
+    out['datetime'] = dt.strftime('%Y-%m-%d %H:%M:%S')
+    
+    # HVAC: Heating + Cooling + Fans + Pumps (non-central system end-uses)
+    hvac_cols = [
+        'electricity_heating_kwh',
+        'electricity_cooling_kwh',
+        'electricity_fans_heating_kwh',
+        'electricity_fans_cooling_kwh',
+        'electricity_pumps_heating_kwh',
+        'electricity_pumps_cooling_kwh'
+    ]
+    out['hvac'] = source[hvac_cols].sum(axis=1)
+    
+    # Domestic Water Heating
+    out['domestic_water_heating'] = source['electricity_water_systems_kwh']
+    
+    # Major Appliances
+    appliance_cols = [
+        'electricity_refrigerator_kwh',
+        'electricity_clothes_washer_kwh',
+        'electricity_clothes_dryer_kwh',
+        'electricity_cooking_range_kwh',
+        'electricity_dishwasher_kwh'
+    ]
+    out['major_appliances'] = source[appliance_cols].sum(axis=1)
+    
+    # Lighting
+    lighting_cols = [
+        'electricity_interior_lighting_kwh',
+        'electricity_exterior_lighting_kwh'
+    ]
+    out['lighting'] = source[lighting_cols].sum(axis=1)
+    
+    # Miscellaneous Plug Loads (Plug loads + Fans that are not HVAC fans)
+    plug_cols = [
+        'electricity_plug_loads_kwh',
+        'electricity_house_fan_kwh',
+        'electricity_range_fan_kwh',
+        'electricity_bath_fan_kwh',
+        'electricity_ceiling_fan_kwh'
+    ]
+    out['miscellaneous_plug_loads'] = source[plug_cols].sum(axis=1)
+    
+    # Total
+    out['total'] = out['hvac'] + out['domestic_water_heating'] + out['major_appliances'] + out['lighting'] + out['miscellaneous_plug_loads']
+    
+    return out.reset_index(drop=True)
+```

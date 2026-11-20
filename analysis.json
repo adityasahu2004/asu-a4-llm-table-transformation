@@ -1,0 +1,142 @@
+{
+  "reviewed": true,
+  "author": "ASURITE: Asahu126",
+  "results_interpretation": "Target-constraint reranking (s5) leads at 50% official and 40% auxiliary accuracy, versus s4 at 49%/39%, s2 at 44%/38%, and s1 at 28%/21%. Its advantage is one recovered case, not a broad improvement in synthesis. Few-shot examples reduce truncated responses from 26 to four; sampling raises execution to 99%. Both s4 and s5 still fail roughly half the official cases. All comparisons use the same 100-case denominator.",
+  "length_interpretation": "The main self-consistency gains concentrate at lengths 4, 5, 7 and 12. s5 adds one length-2 pass, raising that group from 22% to 33%; all other official length scores match s4. Lengths 13-15 remain at zero despite high execution. Small groups and shared source tables limit interpretation; nominal SQL length is not a monotonic measure of pandas difficulty.",
+  "self_consistency_analysis": "Against s2, s4 gains six official passes and loses one; under hard_match it gains seven and loses six. In length2_2, three unpadded-date candidates beat two padded candidates and correct the result. In length2_6, all five share the wrong weekday convention, losing a correct s2 result despite 0.9999 partial credit. Consensus cannot cure shared bias. In 36 cases the largest cluster has one member; ties provide little consensus evidence. Training validity also does not guarantee test execution (length8_9 raises KeyError).",
+  "failure_summary": "The table counts three disjoint official-failure families. Truncation affects 26/100 s1, 4/100 s2, 19/500 s4 and 23/600 pooled s5 completions. The five examples illustrate concrete mechanisms, including auxiliary-only errors; fine-grained semantic subtypes are not exhaustively frequency-coded.",
+  "cost_analysis": "Few-shot prompting uses about five times the input tokens of s1 but emits fewer output tokens. s4 uses 5.2 times the s2 output tokens for five additional official passes. A cold s5 pool uses six samples and two requests; the submitted run reuses those exact responses, adding zero physical API requests and 42.0 summed minutes of local case work. Logical usage includes inherited generation, not fresh provider consumption. ASU charges no fee. Shared requests, queueing and interrupted intervals prevent clean elapsed-time comparisons.",
+  "limitations": "Results come from one model and one stochastic pool, with no independent seed replication. Cases share sources. s5 was designed after baseline error inspection and shares their samples; its one-case gain is exploratory, and extra candidate availability and constraint selection are not separately ablated. Its checks cover names and one calendar relation, not general transformation correctness. Validators ignore some row associations and normalize or tolerate differences. Runtime guards can reject valid code; Linux testing covers ARM64, not every host. Next steps are diverse fixed aggregation/pivot demonstrations, broader target keys and format constraints, training-only repair, and repeated seeds with source-level holdout.",
+  "failure_examples": [
+    {
+      "category": "Planning exhausts the output budget",
+      "strategy": "s1",
+      "case": "length3_4",
+      "prompt_excerpt": "Source rows: 15117; target rows: 53. A general transformation and final Python block were requested.",
+      "code_excerpt": "# No complete Python block was emitted.\n# finish_reason=\"length\"; completion_tokens=6000.",
+      "validator_observation": "Code extraction failed: \"No fenced Python block\"; both scores were 0.",
+      "explanation": "The response spent its budget debating weekly date conventions. This is a generation failure rather than an executed-table mismatch."
+    },
+    {
+      "category": "Pandas accessor used as a method",
+      "strategy": "s1",
+      "case": "length2_3",
+      "prompt_excerpt": "Target fields include dt_strata, dow, plus hourly measurements.",
+      "code_excerpt": "df['dow'] = (df['date_dt'].dt.weekday() + 1) % 7",
+      "validator_observation": "Execution raised TypeError: \"Series object is not callable\"; both scores were 0.",
+      "explanation": "The pandas weekday accessor is a Series property. The candidate incorrectly called it like a Python datetime method."
+    },
+    {
+      "category": "Sample periods mistaken for an alignment rule",
+      "strategy": "s2",
+      "case": "length1_5",
+      "prompt_excerpt": "Source sample first date: 7/3/2015; target sample first date: Thu 01/01/2015.",
+      "code_excerpt": "shifted_dates = dates - pd.DateOffset(months=6)",
+      "validator_observation": "Auto-Pipeline failed; hard_match reported 181 versus 183 rows after its deduplication step.",
+      "explanation": "Training and target samples cover different periods by construction. Shifting every evaluation date to align those periods introduces an unsupported transformation."
+    },
+    {
+      "category": "Midnight/noon column association",
+      "strategy": "s2",
+      "case": "length3_6",
+      "prompt_excerpt": "Source has 12:00 AM and 12:00 PM; target uses Hour 12 and Hour 24.",
+      "code_excerpt": "out['Hour 12'] = source['12:00 PM']\nout['Hour 24'] = source['12:00 AM']",
+      "validator_observation": "Auto-Pipeline passed, but hard_match partial credit was 0.9287 and exact match failed.",
+      "explanation": "The chosen clock interpretation differs from the benchmark mapping. Names are present, but their associated value columns differ; content-based matching can overlook that association."
+    },
+    {
+      "category": "Target string padding",
+      "strategy": "s2",
+      "case": "length7_1",
+      "prompt_excerpt": "Target month contains 'April    ' (nine characters, including four trailing spaces).",
+      "code_excerpt": "month_padded = month_names.str.pad(10, side='right')",
+      "validator_observation": "Auto-Pipeline failed while hard_match returned 1.0 and True.",
+      "explanation": "The output adds an extra space. The supplied hard matcher strips string whitespace, while Auto-Pipeline compares string value multisets literally. Neither validator universally dominates the other."
+    }
+  ],
+  "self_consistency_examples": {
+    "help": {
+      "case": "length2_2",
+      "evidence": "S2 used zero-padded month/day and failed. S4 selected a three-candidate unpadded-date cluster over a two-candidate padded cluster and passed both validators."
+    },
+    "hurt": {
+      "case": "length2_6",
+      "evidence": "S2 used Sunday-zero weekday numbering and passed both. All five S4 candidates used Monday-zero; the selected three-candidate cluster matched dates but failed dow. Hard partial credit was 0.999898528665652, yet exact match was False."
+    }
+  },
+  "review_note": "420 case records verified. Original three baseline results unchanged. Fourth policy frozen before its full 105-case run; raw pooled programs reused without editing. All 1684 program artifacts inventoried, sole original syntax-invalid candidate retained as failure. macOS tests30passed1skip; Linux31passed and7 real case replays matched. Final report and ZIP verified after construction.",
+  "reviewed_at_utc": "2026-11-20T19:49:41.912659+00:00",
+  "final_cached_audit_cases": {
+    "s1": 105,
+    "s2": 105,
+    "s4": 105
+  },
+  "metrics_snapshot": {
+    "s1": {
+      "cases": 100,
+      "autopipeline_accuracy": 0.28,
+      "hard_match_accuracy": 0.21,
+      "hard_match_partial": 0.3642060642147691,
+      "execution_rate": 0.6,
+      "llm_calls": 108,
+      "marginal_api_calls": 108,
+      "sampled_completions": 100,
+      "input_tokens": 915314,
+      "output_tokens": 359863,
+      "api_seconds": 10278.863004831968,
+      "wall_seconds": 12866.596350458953,
+      "unmeasured_wait_cases": 0,
+      "interrupted_calendar_wait_seconds": 0
+    },
+    "s2": {
+      "cases": 100,
+      "autopipeline_accuracy": 0.44,
+      "hard_match_accuracy": 0.38,
+      "hard_match_partial": 0.6015746876636898,
+      "execution_rate": 0.84,
+      "llm_calls": 101,
+      "marginal_api_calls": 101,
+      "sampled_completions": 100,
+      "input_tokens": 4570414,
+      "output_tokens": 163050,
+      "api_seconds": 5438.442335042011,
+      "wall_seconds": 5982.387175206,
+      "unmeasured_wait_cases": 0,
+      "interrupted_calendar_wait_seconds": 0
+    },
+    "s4": {
+      "cases": 100,
+      "autopipeline_accuracy": 0.49,
+      "hard_match_accuracy": 0.39,
+      "hard_match_partial": 0.6683726872456748,
+      "execution_rate": 0.99,
+      "llm_calls": 116,
+      "marginal_api_calls": 116,
+      "sampled_completions": 500,
+      "input_tokens": 4570414,
+      "output_tokens": 842295,
+      "api_seconds": 13442.614671046023,
+      "wall_seconds": 16037.759726624972,
+      "unmeasured_wait_cases": 3,
+      "interrupted_calendar_wait_seconds": 74218.41905283928
+    },
+    "s5": {
+      "cases": 100,
+      "autopipeline_accuracy": 0.5,
+      "hard_match_accuracy": 0.4,
+      "hard_match_partial": 0.6683737019590182,
+      "execution_rate": 0.99,
+      "llm_calls": 217,
+      "marginal_api_calls": 0,
+      "sampled_completions": 600,
+      "input_tokens": 9140828,
+      "output_tokens": 1005345,
+      "api_seconds": 18881.057006088035,
+      "wall_seconds": 21401.306478129052,
+      "unmeasured_wait_cases": 3,
+      "interrupted_calendar_wait_seconds": 74218.41905283928
+    }
+  },
+  "custom_strategy_analysis": "s5 changes selection in two cases. In length2_6, the target sample identifies Sunday-zero weekdays: the s4 winner violates that relation on every sampled training row, while the greedy s2 program satisfies it. Selecting that existing program adds one pass under both validators without losing any s4 pass. In length6_8, schema differences fall from 24 to two but the case still fails. This demonstrates reranking, not new code synthesis or independent model improvement.",
+  "full_fourth_strategy_cases": 105
+}

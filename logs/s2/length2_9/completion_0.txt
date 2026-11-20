@@ -1,0 +1,92 @@
+**Operator Plan:**
+
+1.  **Parse Date**: Convert the `date` column (format `m/d/yyyy H:MM`) to a pandas datetime object.
+2.  **Extract Components**:
+    *   Extract the date part for `dt_strata`.
+    *   Extract the hour part to determine the target column.
+    *   Extract the day of week (ISO: Monday=1, Sunday=7) for `dow`.
+3.  **Pivot/Reshape**:
+    *   Group by the date.
+    *   For each date, create a row with 24 hourly columns (`pct_hourly_0100` to `pct_hourly_2400`).
+    *   Map the source `zone_016` values to the corresponding hourly column based on the extracted hour.
+    *   Handle the 24-hour clock mapping: Hour 0 maps to `pct_hourly_2400`, Hours 1-23 map to `pct_hourly_0100`-`pct_hourly_2300`.
+    *   Fill missing hours with 0.0 (as implied by the target sample where missing data results in 0.0).
+4.  **Format Output**:
+    *   Format `dt_strata` as `MM/dd/yy`.
+    *   Add `pct_hourly_2500` column with value 0.
+    *   Ensure correct column order and types.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    # Format is "m/d/yyyy H:MM"
+    df = source.copy()
+    df['datetime'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract date, hour, and dow
+    df['date_only'] = df['datetime'].dt.date
+    df['hour'] = df['datetime'].dt.hour
+    df['dow'] = df['datetime'].dt.dayofweek + 1  # ISO: Mon=1, Sun=7
+    
+    # Map hour to target column name
+    # Hour 0 -> 2400, Hour 1-23 -> 0100-2300
+    def get_col_name(h):
+        if h == 0:
+            return 'pct_hourly_2400'
+        else:
+            return f'pct_hourly_{h:02d}00'
+            
+    df['target_col'] = df['hour'].apply(get_col_name)
+    
+    # Pivot the data
+    # We need one row per date
+    # First, let's create a list of all possible columns
+    all_cols = [f'pct_hourly_{h:02d}00' for h in range(1, 24)] + ['pct_hourly_2400']
+    
+    # Group by date_only and aggregate
+    # Since there might be multiple entries per hour (though sample suggests 1 per 2h block), 
+    # and missing hours should be 0.
+    # We will pivot and then fill NaNs with 0.
+    
+    # Create a pivot table
+    # Index: date_only, Columns: target_col, Values: zone_016
+    pivot_df = df.pivot_table(index='date_only', columns='target_col', values='zone_016', aggfunc='first')
+    
+    # Ensure all columns exist and fill missing with 0
+    for col in all_cols:
+        if col not in pivot_df.columns:
+            pivot_df[col] = 0.0
+            
+    # Reorder columns
+    pivot_df = pivot_df[all_cols]
+    
+    # Fill any remaining NaNs with 0
+    pivot_df = pivot_df.fillna(0.0)
+    
+    # Reset index to make date_only a column
+    pivot_df = pivot_df.reset_index()
+    
+    # Format dt_strata as MM/dd/yy
+    pivot_df['dt_strata'] = pd.to_datetime(pivot_df['date_only']).dt.strftime('%m/%d/%y')
+    
+    # Get dow for each date (it should be consistent per date)
+    # We can get it from the first row of each date in the original df
+    dow_map = df.groupby('date_only')['dow'].first()
+    pivot_df['dow'] = pivot_df['date_only'].map(dow_map)
+    
+    # Add pct_hourly_2500
+    pivot_df['pct_hourly_2500'] = 0
+    
+    # Select and order final columns
+    final_cols = ['dt_strata', 'dow'] + all_cols + ['pct_hourly_2500']
+    result = pivot_df[final_cols]
+    
+    # Ensure types
+    result['dow'] = result['dow'].astype(int)
+    result['pct_hourly_2500'] = result['pct_hourly_2500'].astype(int)
+    
+    return result
+```

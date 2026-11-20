@@ -1,0 +1,10 @@
+[
+  {
+    "index": 0,
+    "finish_reason": "length",
+    "execution": {
+      "status": "extraction_error",
+      "error": "No fenced Python block"
+    }
+  }
+]

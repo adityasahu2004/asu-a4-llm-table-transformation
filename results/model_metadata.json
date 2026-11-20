@@ -1,0 +1,39 @@
+{
+  "id": "qwen36-27b",
+  "created": null,
+  "object": "model",
+  "owned_by": "obleth",
+  "shutdown_date": null,
+  "aliases": [
+    "qwen36-27b-fp8"
+  ],
+  "boon_details": {},
+  "boons": [],
+  "context_window": 262144,
+  "description": "Qwen3.6 27B reasoning model. Accepts image input (up to 16 per prompt) and supports tool calling; suited to long documents. 256K context.",
+  "input_cost_per_token": 3e-07,
+  "max_input_tokens": 262144,
+  "mode": "chat",
+  "model_type": "chat",
+  "output_cost_per_token": 2e-06,
+  "quantization": "fp8",
+  "reasoning": {
+    "levels": {
+      "high": "high",
+      "low": "low",
+      "medium": "medium",
+      "none": "none"
+    },
+    "mode": "mapped"
+  },
+  "supports_function_calling": true,
+  "supports_response_schema": true,
+  "supports_system_messages": true,
+  "supports_tool_choice": true,
+  "supports_vision": true,
+  "tags": [
+    "vision",
+    "long-context",
+    "reasoning"
+  ]
+}

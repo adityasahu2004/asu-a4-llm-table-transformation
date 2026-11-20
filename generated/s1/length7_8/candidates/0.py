@@ -1,0 +1,43 @@
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    """
+    Transforms the source electricity rate data into a format with month, daytype,
+    and hourly values.
+    """
+    # Create a copy to avoid modifying the original
+    df = source.copy()
+    
+    # 1. Parse the Date column
+    # The format is M/D/YYYY or MM/DD/YYYY
+    df['parsed_date'] = pd.to_datetime(df['Date'], format='%m/%d/%Y')
+    
+    # 2. Extract Month Name and format to 10 chars padded with spaces
+    # e.g., "January" -> "January   "
+    month_names = df['parsed_date'].dt.strftime('%B')
+    df['month'] = month_names.str.pad(10, side='right')
+    
+    # 3. Determine Day Type
+    # weekday() returns 0 for Monday, ..., 4 for Friday, 5 for Saturday, 6 for Sunday
+    df['daytype'] = np.where(df['parsed_date'].dt.weekday < 5, 'weekday', 'weekend')
+    
+    # 4. Rename Hour columns from "Hr 1" to "hr1", etc.
+    # Identify hour columns
+    hour_cols = [col for col in df.columns if col.startswith('Hr ')]
+    rename_map = {}
+    for col in hour_cols:
+        # Extract the number, e.g., "Hr 1" -> "1"
+        num = col.split(' ')[1]
+        new_name = f"hr{num}"
+        rename_map[col] = new_name
+    
+    df.rename(columns=rename_map, inplace=True)
+    
+    # 5. Select and order the final columns
+    # Target columns: month, daytype, hr1...hr24
+    final_columns = ['month', 'daytype'] + [f'hr{i}' for i in range(1, 25)]
+    
+    result = df[final_columns]
+    
+    return result

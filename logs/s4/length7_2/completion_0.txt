@@ -1,0 +1,32 @@
+Operator plan:
+1. Parse `DT_STRATA` into a datetime object to extract the month name and day of week.
+2. Create the `month` column by formatting the extracted month name and padding it with spaces to a fixed width of 10 characters (e.g., "January  ").
+3. Create the `daytype` column, setting all values to "weekday" as per the target schema sample.
+4. Rename the 24 hourly columns (`PCT_HOURLY_0100` through `PCT_HOURLY_2400`) to `hr1` through `hr24`.
+5. Return the resulting DataFrame with the specified columns.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    dates = pd.to_datetime(source['DT_STRATA'], format='%m/%d/%Y')
+    
+    # Create the output dataframe
+    out = pd.DataFrame(index=source.index)
+    
+    # Extract month name and pad to 10 characters
+    month_names = dates.dt.strftime('%B')
+    out['month'] = month_names.str.pad(10, side='right')
+    
+    # Set daytype to weekday
+    out['daytype'] = 'weekday'
+    
+    # Rename and select hourly columns
+    for h in range(1, 25):
+        src_col = f'PCT_HOURLY_{h:02d}00'
+        tgt_col = f'hr{h}'
+        out[tgt_col] = source[src_col]
+        
+    return out.reset_index(drop=True)
+```

@@ -1,0 +1,92 @@
+**Operator plan:**
+1.  **Parse Date**: Convert the `date` column from string (`%m/%d/%Y`) to datetime objects.
+2.  **Derive Metadata**:
+    *   Extract the full month name (e.g., "January") for the `month` column.
+    *   Determine `daytype`: if the day of the week is Saturday (5) or Sunday (6) in 0-indexed pandas, label it "weekend"; otherwise "weekday".
+3.  **Map Hourly Columns**: The source columns are labeled in 12-hour AM/PM format (`1:00 AM` ... `12:00 PM`). Map these to the target sequential hour columns (`hr1` ... `hr24`).
+    *   `1:00 AM` -> `hr1`
+    *   `2:00 AM` -> `hr2`
+    *   ...
+    *   `11:00 AM` -> `hr11`
+    *   `12:00 PM` -> `hr12` (Note: `12:00 AM` is midnight/`hr1` usually, but here `1:00 AM` is `hr1`. Let's look at the source order: `1:00 AM`, `2:00 AM`... `11:00 AM`, `12:00 AM`, `1:00 PM`... `12:00 PM`.
+    *   Wait, the source column order in the sample is: `1:00 AM`, `2:00 AM`, ..., `11:00 AM`, `12:00 AM`, `1:00 PM`, ..., `12:00 PM`. This is a non-standard order.
+    *   Let's map based on standard 24-hour clock logic relative to the target `hr1` (1:00-2:00) ... `hr24` (24:00-1:00 next day? or 23:00-24:00?).
+    *   Target `hr1` corresponds to 1:00 AM. Target `hr12` corresponds to 12:00 PM (Noon). Target `hr13` corresponds to 1:00 PM. Target `hr24` corresponds to 12:00 AM (Midnight end of day).
+    *   Let's verify the mapping:
+        *   `hr1` = `1:00 AM`
+        *   `hr2` = `2:00 AM`
+        *   ...
+        *   `hr11` = `11:00 AM`
+        *   `hr12` = `12:00 PM` (Source column `12:00 PM`)
+        *   `hr13` = `1:00 PM`
+        *   ...
+        *   `hr23` = `11:00 PM`
+        *   `hr24` = `12:00 AM` (Source column `12:00 AM`)
+4.  **Construct Output**: Create a new DataFrame with `month`, `daytype`, and the mapped hourly columns `hr1` through `hr24`. Reset index.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date
+    dt = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    
+    # Derive month name
+    month = dt.dt.strftime('%B')
+    
+    # Derive daytype (0=Mon, 1=Tue, ..., 5=Sat, 6=Sun)
+    # Weekend if dayofweek is 5 or 6
+    daytype = dt.dt.dayofweek.apply(lambda d: 'weekend' if d >= 5 else 'weekday')
+    
+    # Map hourly columns
+    # Source columns: 
+    # 1:00 AM -> hr1
+    # 2:00 AM -> hr2
+    # ...
+    # 11:00 AM -> hr11
+    # 12:00 PM -> hr12
+    # 1:00 PM -> hr13
+    # ...
+    # 11:00 PM -> hr23
+    # 12:00 AM -> hr24
+    
+    mapping = {
+        '1:00 AM': 'hr1',
+        '2:00 AM': 'hr2',
+        '3:00 AM': 'hr3',
+        '4:00 AM': 'hr4',
+        '5:00 AM': 'hr5',
+        '6:00 AM': 'hr6',
+        '7:00 AM': 'hr7',
+        '8:00 AM': 'hr8',
+        '9:00 AM': 'hr9',
+        '10:00 AM': 'hr10',
+        '11:00 AM': 'hr11',
+        '12:00 PM': 'hr12',
+        '1:00 PM': 'hr13',
+        '2:00 PM': 'hr14',
+        '3:00 PM': 'hr15',
+        '4:00 PM': 'hr16',
+        '5:00 PM': 'hr17',
+        '6:00 PM': 'hr18',
+        '7:00 PM': 'hr19',
+        '8:00 PM': 'hr20',
+        '9:00 PM': 'hr21',
+        '10:00 PM': 'hr22',
+        '11:00 PM': 'hr23',
+        '12:00 AM': 'hr24'
+    }
+    
+    out = pd.DataFrame()
+    out['month'] = month
+    out['daytype'] = daytype
+    
+    for src_col, tgt_col in mapping.items():
+        out[tgt_col] = source[src_col]
+        
+    # Ensure column order
+    cols = ['month', 'daytype'] + [f'hr{i}' for i in range(1, 25)]
+    out = out[cols]
+    
+    return out.reset_index(drop=True)
+```

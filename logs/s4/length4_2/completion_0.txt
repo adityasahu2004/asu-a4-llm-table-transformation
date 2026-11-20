@@ -1,0 +1,110 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `date` column from string format (e.g., "7/3/2011") to datetime objects.
+2.  **Format Date**: Create the target `date` column by formatting the parsed datetime as ISO 8601 with zero hours/minutes/seconds ("YYYY-MM-DD 00:00:00").
+3.  **Rename Columns**: Map the source `value1` through `value24` columns to the specific target names representing hours in 12-hour AM/PM format. The mapping logic is:
+    *   `value1` (Hour 1) -> "1:00 AM"
+    *   `value2` (Hour 2) -> "2:00 AM"
+    *   ...
+    *   `value11` (Hour 11) -> "11:00 AM"
+    *   `value12` (Hour 12/Noon) -> "12:00 PM" (Note: Target schema lists "12:00 PM" at the end, but standard time sequence puts Noon after 11 AM. Looking at the target sample data order vs column names is crucial. The target columns are listed in a specific order: `1:00 AM`...`11:00 AM`, `12:00 AM`?, `1:00 PM`...`11:00 PM`, `12:00 PM`. Wait, let's look closer at the target schema column list order.
+    *   Target Columns: `date`, `1:00 AM`, `2:00 AM`, ..., `11:00 AM`, `12:00 AM`, `1:00 PM`, ..., `11:00 PM`, `12:00 PM`.
+    *   This order is unusual. `12:00 AM` (Midnight) is typically Hour 0 or Hour 24. `12:00 PM` (Noon) is Hour 12.
+    *   Source `value1` corresponds to the first hour of the day (1:00 AM).
+    *   Source `value12` corresponds to the 12th hour (12:00 PM / Noon).
+    *   Source `value24` corresponds to the 24th hour (11:00 PM - 12:00 AM period, often labeled 12:00 AM in 12-hour clocks if it's the start of the next day, or 11:00 PM if it's the end. Let's check the target distinct values or sample data to map correctly).
+    *   Let's check the target sample data for `2011-01-01`.
+        *   `1:00 AM`: 1.3683. Source `value1` for `1/1/2011`? The source sample starts at `7/3/2011`. We don't have `1/1/2011` in source sample.
+        *   Let's check `7/3/2011` in source.
+            *   `value1`: 1.0243
+            *   `value2`: 0.8341
+            *   ...
+            *   `value12`: 1.5353
+            *   ...
+            *   `value24`: 1.0449
+        *   Let's find `7/3/2011` in target? The target sample starts `2011-01-01`. It doesn't show `7/3/2011`.
+        *   However, standard convention for these "Hourly Load" datasets:
+            *   `value1` = 1:00 AM
+            *   `value2` = 2:00 AM
+            *   ...
+            *   `value11` = 11:00 AM
+            *   `value12` = 12:00 PM (Noon)
+            *   `value13` = 1:00 PM
+            *   ...
+            *   `value23` = 11:00 PM
+            *   `value24` = 12:00 AM (Midnight)
+    *   Let's verify the target column order provided in the schema:
+        `["date", "1:00 AM", "2:00 AM", "3:00 AM", "4:00 AM", "5:00 AM", "6:00 AM", "7:00 AM", "8:00 AM", "9:00 AM", "10:00 AM", "11:00 AM", "12:00 AM", "1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM", "5:00 PM", "6:00 PM", "7:00 PM", "8:00 PM", "9:00 PM", "10:00 PM", "11:00 PM", "12:00 PM"]`
+    *   This order is: 1-11 AM, then 12 AM, then 1-11 PM, then 12 PM. This is a very strange ordering. Usually 12 AM comes first.
+    *   Let's look at the data values in the target sample for `2011-01-01`:
+        *   `1:00 AM`: 1.3683
+        *   `12:00 AM`: 1.439
+        *   `12:00 PM`: 0.9434
+    *   If `value1` is 1 AM, `value12` is Noon (12 PM), `value24` is Midnight (12 AM).
+    *   Let's assume standard mapping:
+        *   `value1` -> `1:00 AM`
+        *   `value2` -> `2:00 AM`
+        *   ...
+        *   `value11` -> `11:00 AM`
+        *   `value12` -> `12:00 PM`
+        *   `value13` -> `1:00 PM`
+        *   ...
+        *   `value23` -> `11:00 PM`
+        *   `value24` -> `12:00 AM`
+    *   The target dataframe must have columns in the specific order listed in the target schema.
+
+4.  **Construct Output**: Create a new DataFrame with the formatted date and the renamed columns in the exact order specified by the target schema.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    dt = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    
+    # Format date to ISO 8601 with 00:00:00
+    out = pd.DataFrame()
+    out['date'] = dt.dt.strftime('%Y-%m-%d 00:00:00')
+    
+    # Define the mapping from source value columns to target hour labels
+    # Standard assumption: value1=1AM, value12=12PM, value24=12AM
+    col_map = {
+        'value1': '1:00 AM',
+        'value2': '2:00 AM',
+        'value3': '3:00 AM',
+        'value4': '4:00 AM',
+        'value5': '5:00 AM',
+        'value6': '6:00 AM',
+        'value7': '7:00 AM',
+        'value8': '8:00 AM',
+        'value9': '9:00 AM',
+        'value10': '10:00 AM',
+        'value11': '11:00 AM',
+        'value12': '12:00 PM', # Noon
+        'value13': '1:00 PM',
+        'value14': '2:00 PM',
+        'value15': '3:00 PM',
+        'value16': '4:00 PM',
+        'value17': '5:00 PM',
+        'value18': '6:00 PM',
+        'value19': '7:00 PM',
+        'value20': '8:00 PM',
+        'value21': '9:00 PM',
+        'value22': '10:00 PM',
+        'value23': '11:00 PM',
+        'value24': '12:00 AM' # Midnight
+    }
+    
+    # Rename columns
+    out = out.join(source.rename(columns=col_map))
+    
+    # Select and order columns exactly as per target schema
+    target_cols = [
+        'date', 
+        '1:00 AM', '2:00 AM', '3:00 AM', '4:00 AM', '5:00 AM', '6:00 AM', '7:00 AM', '8:00 AM', '9:00 AM', '10:00 AM', '11:00 AM', 
+        '12:00 AM', 
+        '1:00 PM', '2:00 PM', '3:00 PM', '4:00 PM', '5:00 PM', '6:00 PM', '7:00 PM', '8:00 PM', '9:00 PM', '10:00 PM', '11:00 PM', 
+        '12:00 PM'
+    ]
+    
+    return out[target_cols]
+```

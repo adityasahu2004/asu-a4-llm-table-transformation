@@ -1,0 +1,80 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `Date` column from string format (`M/D/YYYY`) to datetime objects to ensure correct sorting and handling.
+2.  **Filter**: Although the target row count (183) differs slightly from the source sample (182), the target data starts from `01/01/2013` while the source sample starts from `07/3/2013`. The transformation should preserve all rows provided in the source, as the "note" indicates the source row count is just a training sample. The primary structural change is column renaming and reordering.
+3.  **Rename Columns**: Map the source hour columns (integers `1` through `24`) to the target time-of-day strings (`1:00 AM` through `12:00 PM`).
+    *   Hours 1-11 map to `1:00 AM` - `11:00 AM`.
+    *   Hour 12 maps to `12:00 AM` (Midnight).
+    *   Hour 13 maps to `1:00 PM`.
+    *   Hours 14-23 map to `2:00 PM` - `11:00 PM`.
+    *   Hour 24 maps to `12:00 PM` (Noon).
+    *   *Correction based on standard 24-hour clock conventions in these datasets*: Usually, 1:00 is 1 AM, 12:00 is 12 PM (Noon), 13:00 is 1 PM, 24:00 is 12 AM (Midnight). Let's look at the target sample values.
+        *   Source `1` (0.56) -> Target `1:00 AM` (0.89? No, values differ because rows are different).
+        *   Let's check the mapping logic from the target column names directly.
+        *   Target `1:00 AM` corresponds to Source `1`.
+        *   Target `12:00 AM` is in the middle of the target columns. In the target schema, `12:00 AM` is the 13th column. Source `12` is the 13th data column. So Source `12` -> `12:00 AM`.
+        *   Target `1:00 PM` is the 14th column. Source `13` is the 14th data column. So Source `13` -> `1:00 PM`.
+        *   Target `12:00 PM` is the last column (25th). Source `24` is the last data column. So Source `24` -> `12:00 PM`.
+        *   This implies:
+            *   1-11 -> 1:00 AM - 11:00 AM
+            *   12 -> 12:00 AM
+            *   13-23 -> 1:00 PM - 11:00 PM
+            *   24 -> 12:00 PM
+4.  **Format Date**: Convert the parsed datetime back to string format `MM/DD/YYYY`.
+5.  **Select and Order Columns**: Create the output DataFrame with `date` followed by the renamed hour columns in the specific order shown in the target schema.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse dates to ensure consistent handling
+    dates = pd.to_datetime(source['Date'], format='%m/%d/%Y')
+    
+    # Format date as MM/DD/YYYY
+    out = pd.DataFrame()
+    out['date'] = dates.dt.strftime('%m/%d/%Y')
+    
+    # Mapping from source integer columns to target time string columns
+    # Source: 1, 2, ..., 11, 12, 13, ..., 23, 24
+    # Target: 1:00 AM ... 11:00 AM, 12:00 AM, 1:00 PM ... 11:00 PM, 12:00 PM
+    
+    # Construct the mapping dictionary
+    col_map = {}
+    
+    # 1-11: AM
+    for h in range(1, 12):
+        col_map[str(h)] = f"{h}:00 AM"
+        
+    # 12: 12:00 AM (Midnight)
+    col_map['12'] = "12:00 AM"
+    
+    # 13-23: PM (1:00 PM to 11:00 PM)
+    for h in range(13, 24):
+        pm_hour = h - 12
+        col_map[str(h)] = f"{pm_hour}:00 PM"
+        
+    # 24: 12:00 PM (Noon)
+    col_map['24'] = "12:00 PM"
+    
+    # Apply renaming
+    # Select only the hour columns from source
+    hour_cols = [str(h) for h in range(1, 25)]
+    subset = source[hour_cols]
+    renamed = subset.rename(columns=col_map)
+    
+    # Define the target column order
+    target_hour_cols = [
+        "1:00 AM", "2:00 AM", "3:00 AM", "4:00 AM", "5:00 AM", "6:00 AM", 
+        "7:00 AM", "8:00 AM", "9:00 AM", "10:00 AM", "11:00 AM", 
+        "12:00 AM", 
+        "1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM", "5:00 PM", "6:00 PM", 
+        "7:00 PM", "8:00 PM", "9:00 PM", "10:00 PM", "11:00 PM", 
+        "12:00 PM"
+    ]
+    
+    # Combine date and renamed hours
+    for col in target_hour_cols:
+        out[col] = renamed[col]
+        
+    return out.reset_index(drop=True)
+```

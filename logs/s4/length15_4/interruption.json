@@ -1,0 +1,6 @@
+{
+  "reason": "Fresh connection recovery after shared transport drop; no completion was received from the stale attempt.",
+  "calendar_wait_seconds": 6212.531659126282,
+  "active_wait_seconds": null,
+  "note": "Calendar interval is a bound for the logged prompt, not recoverable active latency. Received token usage is unknown. Interrupted attempts count as API requests."
+}

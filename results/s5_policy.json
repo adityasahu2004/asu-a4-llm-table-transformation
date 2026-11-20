@@ -1,0 +1,25 @@
+{
+  "frozen_at_utc": "2026-11-20T19:25:21.382217+00:00",
+  "policy": {
+    "version": "schema-weekday-v1",
+    "pool": "five few-shot SC samples + one greedy few-shot sample",
+    "constraints": [
+      "exact target schema",
+      "uniquely identified date-to-weekday relation"
+    ],
+    "target_rows": "the same 12-row prompt sample as the baselines",
+    "output_rows": "up to 128 evenly spaced training-output rows",
+    "selection": "strictly lower lexicographic constraint loss; preserve SC winner on ties",
+    "forbidden_inputs": [
+      "test_0.csv",
+      "validator results",
+      "case-specific rules",
+      "target row counts"
+    ]
+  },
+  "implementation_sha256": {
+    "target_constraints.py": "80a1ccaae6e88998ba374e5bf4359182807df613186845ba9f38a02b62630058",
+    "strategies/s5.py": "aed6f876cfda08325f7c966df9b40a8638595546438ab9421a859ae65f2a93e6"
+  },
+  "development_note": "Designed after inspecting baseline failures; evaluated once on every case. Exploratory comparison, not an independently held-out tuning study."
+}

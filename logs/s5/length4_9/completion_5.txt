@@ -1,0 +1,75 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `date` column (format `M/d/yyyy H:mm`) to a pandas datetime object.
+2.  **Extract Components**: Extract the calendar date (`dt.date`) and the hour (`dt.hour`) from the parsed datetime.
+3.  **Map Hour to Label**: Map the 24-hour integer hour (0-23) to the specific 12-hour AM/PM string labels required by the target schema (e.g., 0 -> "12:00 AM", 1 -> "1:00 AM", ..., 12 -> "12:00 PM", ..., 23 -> "11:00 PM").
+4.  **Pivot**: Pivot the dataframe so that:
+    *   Index: Calendar Date
+    *   Columns: The mapped Hour Labels
+    *   Values: `zone_016`
+5.  **Format Date**: Convert the index (calendar date) to the string format `MM/dd/yyyy`.
+6.  **Reorder Columns**: Ensure the columns appear in the specific order observed in the target: 1:00 AM through 11:00 PM, followed by 12:00 AM.
+7.  **Reset Index**: Convert the date index back to a column named `date`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse the date column
+    # Format is M/d/yyyy H:mm (e.g., "1/2/2018 0:11")
+    source = source.copy()
+    source['parsed_dt'] = pd.to_datetime(source['date'], format='%m/%d/%Y %H:%M')
+    
+    # 2. Extract date and hour
+    source['cal_date'] = source['parsed_dt'].dt.date
+    source['hour'] = source['parsed_dt'].dt.hour
+    
+    # 3. Map hour to target column labels
+    # 0 -> 12:00 AM, 1 -> 1:00 AM, ..., 11 -> 11:00 AM
+    # 12 -> 12:00 PM, 13 -> 1:00 PM, ..., 23 -> 11:00 PM
+    def map_hour_label(h):
+        if h == 0:
+            return "12:00 AM"
+        elif h < 12:
+            return f"{h}:00 AM"
+        elif h == 12:
+            return "12:00 PM"
+        else:
+            return f"{h-12}:00 PM"
+            
+    source['hour_label'] = source['hour'].apply(map_hour_label)
+    
+    # 4. Pivot the data
+    # Index: cal_date, Columns: hour_label, Values: zone_016
+    pivoted = source.pivot_table(
+        index='cal_date', 
+        columns='hour_label', 
+        values='zone_016', 
+        aggfunc='first' # Assuming unique per hour per day, or just take first
+    )
+    
+    # 5. Format the date index to MM/dd/yyyy
+    pivoted.index = pivoted.index.strftime('%m/%d/%Y')
+    pivoted.index.name = 'date'
+    
+    # 6. Reorder columns to match target schema order
+    # Target order: 1:00 AM ... 11:00 PM, 12:00 AM
+    ordered_labels = []
+    for h in range(1, 13):
+        ordered_labels.append(f"{h}:00 AM")
+    for h in range(12, 24):
+        if h == 12:
+            ordered_labels.append("12:00 PM")
+        else:
+            ordered_labels.append(f"{h-12}:00 PM")
+    ordered_labels.append("12:00 AM")
+    
+    # Filter to only existing columns in the correct order
+    existing_cols = [col for col in ordered_labels if col in pivoted.columns]
+    pivoted = pivoted[existing_cols]
+    
+    # 7. Reset index to make 'date' a column
+    result = pivoted.reset_index()
+    
+    return result
+```

@@ -1,0 +1,138 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `date` column from string format (`M/D/YYYY`) to datetime objects.
+2.  **Generate Target Index**: The target dataset has 183 rows, spanning from `2015-01-01` to `2015-07-02` (based on the first/last non-null values in the target `cst` column). The source data covers a subset of this range. We need to create a complete date range for the target period.
+    *   Start Date: `2015-01-01`
+    *   End Date: `2015-07-02`
+    *   Frequency: The source dates in the sample are bi-weekly (e.g., 7/3, 7/19, 8/4... wait, 7/3 to 7/19 is 16 days, 7/19 to 8/4 is 16 days). Let's look closer at the target sample.
+    *   Target Sample Dates:
+        *   `Thu 01/01/2015`
+        *   `Sat 01/17/2015` (+16 days)
+        *   `Tue 02/03/2015` (+17 days? Jan has 31 days. 31-17=14. 14+3=17. Yes, 17 days).
+        *   `Thu 02/19/2015` (+16 days)
+        *   `Sun 03/08/2015` (+17 days? Feb 2015 has 28 days. 28-19=9. 9+8=17. Yes).
+    *   The pattern seems to be bi-weekly (14 days) but the specific dates in the sample suggest a specific schedule or simply every 14/15/16 days? Let's re-read the source distinct count: 182 distinct dates. Target distinct count: 183.
+    *   Let's look at the target `cst` format: `Ddd MM/DD/YYYY` (e.g., `Thu 01/01/2015`).
+    *   The target rows correspond to specific dates. The source rows also correspond to specific dates. The transformation likely involves **aligning** the source data to a fixed set of target dates.
+    *   However, usually in these problems, if the row count changes significantly (182 -> 183) and the dates are distinct, it implies a **reindexing** or **forward/backward fill** operation onto a regular grid, or the target dates are simply the union of a specific schedule.
+    *   Let's look at the data values. The values in the source and target for matching dates appear identical. For example, Source `7/3/2015` vs Target `Thu 01/01/2015`? No, the dates are different.
+    *   Wait, the target sample shows dates starting from Jan 1, 2015. The source sample starts from July 3, 2015.
+    *   The target has 183 rows. The source has 182 rows.
+    *   The target dates in the sample are:
+        1.  01/01/2015
+        2.  01/17/2015
+        3.  02/03/2015
+        4.  02/19/2015
+        5.  03/08/2015
+        6.  03/24/2015
+        7.  04/10/2015
+        8.  04/26/2015
+        9.  05/13/2015
+        10. 05/29/2015
+        11. 06/15/2015
+        12. 07/02/2015
+    *   These are roughly every 14-17 days. This looks like a specific reporting schedule (e.g., bi-weekly payroll or similar).
+    *   Crucially, the problem states "Compute the result only from the source DataFrame". We cannot hardcode the target dates if they aren't derivable. But wait, if the target has dates *not* in the source (like Jan 2015), how can we compute them?
+    *   Re-reading the prompt: "The evaluation source contains different rows". "Infer a general transformation".
+    *   If the target contains dates outside the source range, and we can't access external files, there might be a misunderstanding of the schema.
+    *   Let's look at the `distinct` counts again. Source: 182 distinct dates. Target: 183 distinct dates.
+    *   Is it possible the target is just the source, but with one extra row? Or is the target a *complete* calendar that the source is a subset of?
+    *   If the evaluation source is different, it will likely have its own set of dates. The transformation must define *how* the target is derived from the source.
+    *   Hypothesis: The target is a **resampled** or **reindexed** version of the source. But to what index?
+    *   Alternative Hypothesis: The "Target" schema provided in the prompt is just a *sample* of the expected output format. The actual evaluation might map 1:1 if the source already contains the necessary dates, OR the source *always* contains a specific set of dates that needs to be sorted/reformatted.
+    *   Let's look at the column names. Source: `Hour 1` ... `Hour 24`. Target: `1:00` ... `24:00`. This is a simple rename.
+    *   Let's look at the `cst` column. It is formatted as `Ddd MM/DD/YYYY`.
+    *   Let's look at the row counts again. 182 vs 183. This is very close.
+    *   Maybe the target includes the *next* period? Or maybe the source is missing one date?
+    *   Actually, looking at the sample data provided:
+        *   Source Sample: 12 rows, dates from 7/3/2015 to 12/31/2015.
+        *   Target Sample: 12 rows, dates from 1/1/2015 to 7/2/2015.
+        *   These are completely disjoint sets of dates in the sample!
+        *   This implies that the "Source" and "Target" in the prompt description are showing *different* parts of the dataset to illustrate the schema, OR the transformation involves shifting dates?
+        *   If the transformation involves shifting dates (e.g., source date X becomes target date Y), we need a rule.
+        *   However, usually in these "schema-to-schema" tasks, if the dates are disjoint in the sample, it often means the **evaluation input** will have dates that map directly, or the task is simply **formatting** and **renaming**, and the sample dates in the prompt are just illustrative of the *format* rather than a direct row-by-row mapping for the specific evaluation instance.
+        *   BUT, the prompt says "Compute the result only from the source DataFrame". If the source has dates in July-Dec and the target expects Jan-July, I cannot create Jan-July data from July-Dec data without external knowledge.
+        *   Therefore, the most logical inference is that the **evaluation source** will contain the dates that correspond to the target structure. The sample provided in the prompt is likely just showing the *schema* (column types, name patterns) and *format* (date string format), using arbitrary or disjoint samples to avoid leaking specific data values.
+        *   So, the transformation is:
+            1.  Rename columns: `Hour N` -> `N:00`.
+            2.  Format the `date` column into `cst` with format `Ddd MM/DD/YYYY`.
+            3.  Sort? The target sample is sorted by date. The source sample is sorted by date. We should probably sort the result by date.
+            4.  What about the row count difference (182 vs 183)? If the evaluation source has 183 rows, the output will have 183. If it has 182, 182. The sample counts are just metadata for the specific samples shown. The instruction "never copy... row counts" supports this.
+            5.  Data Types: Ensure numeric columns retain their types (float/int) as seen in target. The source has mixed int/float for hours 9-16 (int) and others (float). The target preserves this. We should ensure we don't accidentally convert ints to floats if not needed, but pandas often promotes. The target schema says `int64` for 9-16. We should cast them.
+
+    *   **Refined Plan**:
+        1.  Parse `date` column to datetime.
+        2.  Create new column `cst` by formatting `date` as `%a %m/%d/%Y` (e.g., `Thu 01/01/2015`). Note: `%a` gives abbreviated weekday.
+        3.  Rename columns: `Hour 1` -> `1:00`, ..., `Hour 24` -> `24:00`.
+        4.  Drop the original `date` column.
+        5.  Ensure dtypes for columns `9:00` to `16:00` are `int64`. Others remain `float64`.
+        6.  Sort by `cst` (or the underlying datetime if we kept it, but we drop it. Sorting by string `cst` might not work perfectly for chronological order if not careful, but `%a %m/%d/%Y` isn't lexicographically sortable. Better to sort by the parsed datetime before dropping, or just sort by the original date column before transformation).
+        7.  Return the DataFrame.
+
+    *   **Check on Date Format**:
+        *   Target: `Thu 01/01/2015`
+        *   Python format: `%a %m/%d/%Y`
+        *   `pd.to_datetime('7/3/2015').strftime('%a %m/%d/%Y')` -> `Fri 07/03/2015`.
+        *   Target sample `Thu 01/01/2015` is a Thursday. `2015-01-01` was a Thursday. Correct.
+
+    *   **Check on Column Renaming**:
+        *   Source: `Hour 1`, `Hour 2`...
+        *   Target: `1:00`, `2:00`...
+        *   Map: `f"Hour {i}"` -> `f"{i}:00"` for i in 1..24.
+
+    *   **Check on Dtypes**:
+        *   Source `Hour 9`..`Hour 16` are `int64`.
+        *   Target `9:00`..`16:00` are `int64`.
+        *   Source `Hour 1`..`Hour 8`, `Hour 17`..`Hour 24` are `float64`.
+        *   Target same.
+        *   We should explicitly cast columns 9-16 to int to be safe, as pandas operations might coerce them to float if there are NaNs (though source nulls=0).
+
+    *   **Sorting**:
+        *   The target sample is chronologically sorted. The source sample is chronologically sorted.
+        *   It is good practice to sort the output by date.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse the date column to datetime for sorting and formatting
+    df = source.copy()
+    df['date_parsed'] = pd.to_datetime(df['date'])
+    
+    # 2. Sort by date to ensure chronological order
+    df = df.sort_values('date_parsed').reset_index(drop=True)
+    
+    # 3. Create the 'cst' column with the specific format "Ddd MM/DD/YYYY"
+    # %a gives abbreviated weekday name (e.g., Thu)
+    df['cst'] = df['date_parsed'].dt.strftime('%a %m/%d/%Y')
+    
+    # 4. Rename columns from "Hour N" to "N:00"
+    rename_map = {}
+    for i in range(1, 25):
+        rename_map[f'Hour {i}'] = f'{i}:00'
+    df = df.rename(columns=rename_map)
+    
+    # 5. Drop the helper and original date columns
+    df = df.drop(columns=['date', 'date_parsed'])
+    
+    # 6. Ensure correct dtypes
+    # Columns 9:00 to 16:00 should be int64, others float64
+    int_cols = [f'{i}:00' for i in range(9, 17)]
+    float_cols = [f'{i}:00' for i in range(1, 25) if i not in range(9, 17)]
+    
+    for col in int_cols:
+        if col in df.columns:
+            # Fill NaNs with 0 if necessary for int conversion, though source has 0 nulls
+            df[col] = df[col].fillna(0).astype('int64')
+            
+    for col in float_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').astype('float64')
+            
+    # 7. Reorder columns to match target schema: cst first, then hours 1:00 to 24:00
+    col_order = ['cst'] + [f'{i}:00' for i in range(1, 25)]
+    df = df[col_order]
+    
+    return df
+```

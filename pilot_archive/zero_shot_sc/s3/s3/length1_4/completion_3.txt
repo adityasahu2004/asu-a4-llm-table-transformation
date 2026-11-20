@@ -1,0 +1,136 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `Date` column in the source DataFrame from string format (`MM/DD/YYYY`) to datetime objects.
+2.  **Generate Target Dates**: The source data appears to represent weekly snapshots (bi-weekly or irregular intervals), while the target data represents specific Tuesdays (or similar fixed day-of-week) throughout the year. The target starts on `Tue 01/01/2013` and ends on `Tue 07/02/2013` in the sample, but the row count increases from 182 to 183.
+    *   Observation: The source has 182 rows. The target has 183 rows.
+    *   Observation: The target dates in the sample are `Tue 01/01/2013`, `Thu 01/17/2013`... wait, the sample target dates are not all Tuesdays. `Thu 01/17`, `Sun 02/03`, `Tue 02/19`.
+    *   Let's look closer at the target date pattern: `Tue 01/01/2013`, `Thu 01/17/2013`, `Sun 02/03/2013`, `Tue 02/19/2013`, `Fri 03/08/2013`, `Sun 03/24/2013`, `Wed 04/10/2013`, `Fri 04/26/2013`, `Mon 05/13/2013`, `Wed 05/29/2013`, `Sat 06/15/2013`, `Tue 07/02/2013`.
+    *   These dates seem to be every ~2 weeks, but shifting days of the week.
+    *   Actually, let's look at the source dates: `7/3/2013`, `7/19/2013`, `8/4/2013`... these are every 2 weeks starting July.
+    *   The target dates start Jan 1, 2013. The source data only covers July-Dec 2013.
+    *   This implies the transformation involves **interpolation** or **expansion** of the time series. The source provides a subset of the year (July-Dec), and the target provides the full year (Jan-Jul shown in sample, likely continuing).
+    *   However, standard pandas `resample` or `interpolate` requires a complete time index or at least data to interpolate *from*. If the source only has July-Dec, how do we get Jan-June values?
+    *   Re-reading the prompt: "Infer a general transformation... The evaluation source contains different rows".
+    *   Hypothesis: The source data *actually* contains the full year in the evaluation set, but the *sample* provided in the schema only shows July-Dec? No, the schema says `distinct: 182` for Date in source, and `first_last_non_null: ["7/3/2013", "12/31/2013"]`. This suggests the sample source is truncated.
+    *   BUT, the target has 183 rows. 182 vs 183 is a small difference.
+    *   Let's look at the column values.
+        *   Source `7/3/2013` (Wed): `1: 0.56`, `2: 0.51`...
+        *   Target `Tue 07/02/2013`: `1:00: 0.66`, `2:00: 0.61`...
+        *   Target `Sat 06/15/2013`: `1:00: 0.52`...
+    *   The values are different. This is not a simple reindexing of existing rows.
+    *   Is it possible the task is to **generate a synthetic baseline** or **load a known profile** based on the `Class`?
+    *   Wait, look at the target column names: `1:00`, `2:00`... `24:00`. Source: `1`, `2`... `24`. This is just renaming.
+    *   Look at the Target `cst` format: `Tue 01/01/2013`. This is `%a %m/%d/%Y`.
+    *   Crucial Clue: The source has 182 rows (July-Dec ~ 6 months, bi-weekly = ~13*6 = 78? No. 182 days is exactly half a year. 182 rows, distinct 182. So the source is **daily** data from July 3 to Dec 31?
+        *   July (31-3+1=29) + Aug(31) + Sep(30) + Oct(31) + Nov(30) + Dec(31) = 182 days.
+        *   Yes! The source is **daily** data from July 3, 2013 to Dec 31, 2013.
+    *   The target has 183 rows.
+        *   Jan (31) + Feb (28) + Mar (31) + Apr (30) + May (31) + Jun (30) + Jul (2) = 183 days?
+        *   Jan 1 to Jul 2 is 183 days.
+    *   So the Source is Daily (July-Dec). The Target is Daily (Jan-Jul).
+    *   The values in the target for July 2nd (`0.66`) are different from Source July 3rd (`0.56`).
+    *   This implies the transformation is **not** deriving target values from source values via calculation (like sum/avg).
+    *   Is it a **shift**?
+        *   Target `Tue 01/01/2013` vs Source `Wed 07/03/2013`.
+        *   Target `Thu 01/17/2013` vs Source `Thu 07/18/2013` (if it existed).
+    *   Let's check the day-of-week patterns.
+        *   Target Row 0: Tue. Source Row 0: Wed.
+        *   Target Row 1: Thu. Source Row 1: Thu? (7/19 is Thu).
+        *   Target Row 2: Sun. Source Row 2: Sun? (8/4 is Sun).
+    *   It seems the Target dates are shifted by exactly 6 months (or ~182 days) *backwards*?
+        *   Target `01/01/2013` + 182 days = `07/02/2013`. Source has `07/03/2013`. Close.
+        *   Target `07/02/2013` (Last sample row). Source `12/31/2013` (Last sample row).
+    *   If we shift the Source dates back by ~182 days, do we get the Target dates?
+        *   Source `7/3/2013` - 182 days = `1/3/2013`. Target starts `1/1/2013`.
+        *   Source `12/31/2013` - 182 days = `7/2/2013`. Target ends `7/2/2013`.
+    *   The end dates match perfectly (`12/31` -> `07/02`). The start dates are off by 2 days (`7/3` -> `1/3` vs `1/1`).
+    *   However, the row counts are 182 vs 183.
+    *   If the transformation is simply **renaming columns** and **reformatting the date string** assuming the input *already* contains the correct dates for the target (i.e., the evaluation source will contain Jan-Jul data, not July-Dec data as in the sample), then the operation is trivial.
+    *   **Standard Interpretation for this type of problem**: The sample provided in the schema description often shows *different* slices of the data for Source and Target to illustrate schema changes, but the *transformation logic* must be general.
+    *   If the evaluation source contains rows for `2013-01-01` to `2013-07-02`, and we need to output `2013-01-01` to `2013-07-02`, we just need to:
+        1.  Parse the `Date` column.
+        2.  Format it as `%a %m/%d/%Y` into a new column `cst`.
+        3.  Rename numeric columns `1`-`24` to `1:00`-`24:00`.
+        4.  Drop `Class`.
+        5.  Ensure the order is correct (sort by date).
+
+    *   Why are the values different in the sample?
+        *   Sample Source: July-Dec.
+        *   Sample Target: Jan-Jul.
+        *   They are different time periods. The transformation function `transform(source)` will receive the *evaluation* source. If the evaluation source is the "full" dataset (Jan-Dec) or the "target period" dataset (Jan-Jul), the function just needs to format it.
+        *   Given the strict constraint "Compute the result only from the source DataFrame", and the fact that we cannot generate data for dates not present in the source, the only logical transformation is that the **Source DataFrame in the evaluation context will contain the rows corresponding to the Target dates**. The sample mismatch is because the sample source and sample target are disjoint slices of a larger dataset, or the problem implies a date shift.
+        *   However, a date shift of -182 days is specific. Is there a simpler explanation?
+        *   Maybe the `Class` column determines a lookup? No, only 1 class.
+        *   Let's assume the standard "Format and Rename" transformation. The sample data mismatch is a red herring caused by the sample source being a different time slice than the sample target. The evaluation source will likely match the target's date range.
+
+    *   **Refined Plan**:
+        1.  Parse `Date` to datetime.
+        2.  Create `cst` column by formatting `Date` as `%a %m/%d/%Y` (e.g., "Tue 01/01/2013").
+        3.  Rename columns `1` through `24` to `1:00` through `24:00`.
+        4.  Select columns `cst` and the renamed numeric columns.
+        5.  Sort by `cst` (or original date) to ensure chronological order if necessary.
+
+### Python Code
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    """
+    Transforms the source dataframe by:
+    1. Parsing the 'Date' column.
+    2. Formatting the date into the 'cst' column with format 'Day MM/DD/YYYY'.
+    3. Renaming numeric columns 1-24 to '1:00'-'24:00'.
+    4. Dropping the 'Class' column.
+    """
+    # Create a copy to avoid modifying the original
+    df = source.copy()
+    
+    # Parse the Date column
+    # The source format is MM/DD/YYYY (e.g., "7/3/2013")
+    df['Date_parsed'] = pd.to_datetime(df['Date'], format='%m/%d/%Y')
+    
+    # Create the 'cst' column with format "Day MM/DD/YYYY"
+    # Example: "Tue 01/01/2013"
+    # %a gives abbreviated weekday name (Tue, Wed, etc.)
+    # %m/%d/%Y gives MM/DD/YYYY
+    df['cst'] = df['Date_parsed'].dt.strftime('%a %m/%d/%Y')
+    
+    # Rename the numeric columns from '1'...'24' to '1:00'...'24:00'
+    # Identify numeric columns (those with integer names 1-24)
+    numeric_cols = [str(i) for i in range(1, 25)]
+    new_names = {str(i): f"{i}:00" for i in range(1, 25)}
+    
+    df = df.rename(columns=new_names)
+    
+    # Select the required columns: 'cst' and the renamed numeric columns
+    # Ensure 'cst' is first
+    cols_to_keep = ['cst'] + [f"{i}:00" for i in range(1, 25)]
+    
+    # Filter to ensure only these columns exist
+    df = df[cols_to_keep]
+    
+    # Sort by the parsed date to ensure chronological order if needed
+    # We can sort by the 'cst' string if we assume the format sorts correctly, 
+    # but it's safer to use the parsed date if we kept it. 
+    # Since we didn't keep 'Date_parsed' in the final select, let's re-parse or sort by index if stable.
+    # However, strftime output "Tue 01/01/2013" does not sort correctly lexicographically.
+    # Let's add the parsed date back temporarily for sorting, then drop.
+    
+    # Actually, we can just sort by the original 'Date' column if we hadn't dropped it, 
+    # or parse 'cst' back. Easier: parse 'Date' again for sorting.
+    # But wait, we can just sort by the index if the input was ordered, or re-parse.
+    
+    # Let's parse 'cst' back to datetime for sorting? 
+    # Format: "%a %m/%d/%Y"
+    # It's robust enough.
+    df['Date_sort'] = pd.to_datetime(df['cst'], format='%a %m/%d/%Y')
+    df = df.sort_values(by='Date_sort')
+    df = df.drop(columns=['Date_sort'])
+    
+    # Reset index
+    df = df.reset_index(drop=True)
+    
+    return df
+```

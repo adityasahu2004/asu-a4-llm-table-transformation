@@ -1,0 +1,25 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `Date` column (format `%m/%d/%Y`) to a datetime object.
+2.  **Format Date**: Create the `cst` column by formatting the parsed datetime as `%a %m/%d/%Y` (e.g., "Wed 01/01/2014").
+3.  **Rename Columns**: Map the source hourly columns (`Hr 1` through `Hr 24`) to the target hourly columns (`1:00` through `24:00`).
+4.  **Select Columns**: Construct the final DataFrame containing only `cst` and the renamed hourly columns, preserving the original row order.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    dates = pd.to_datetime(source['Date'], format='%m/%d/%Y')
+    
+    # Create the output dataframe
+    out = pd.DataFrame(index=source.index)
+    
+    # Format the date as 'DayOfWeek MM/DD/YYYY'
+    out['cst'] = dates.dt.strftime('%a %m/%d/%Y')
+    
+    # Map source hourly columns to target hourly columns
+    for h in range(1, 25):
+        out[f'{h}:00'] = source[f'Hr {h}']
+        
+    return out.reset_index(drop=True)
+```

@@ -1,0 +1,62 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `date` column from string format (`M/D/YYYY`) to datetime objects.
+2.  **Group By**: Group the data by the month of the date and whether the day is a weekday or weekend.
+    *   **Month**: Extract the month name and format it with trailing spaces to match the target schema (e.g., `"January  "`). The target shows months padded to 10 characters.
+    *   **Day Type**: Classify days as `"weekday"` (Mon-Fri) or `"weekend"` (Sat-Sun).
+3.  **Aggregate**: Calculate the mean of the 24 hourly value columns (`value1` through `value24`) for each group.
+4.  **Rename Columns**: Rename the aggregated hourly columns to `hr1` through `hr24`.
+5.  **Format Output**: Construct the final DataFrame with columns `month`, `daytype`, and `hr1`-`hr24`. Sort the result to match the typical chronological order implied by the sample (Jan->July, Weekend/Weekday order might vary but grouping handles distinct combinations). The sample shows specific ordering, but standard groupby sort or explicit sorting by month index then daytype string is appropriate. Given the distinct values in target, we just need to ensure the groups exist. The sample order is not strictly chronological (Jan Weekend, Jan Weekday, Feb Weekday, Feb Weekend...). I will sort by Month Index, then Day Type (Weekday before Weekend? Sample: Jan Wknd, Jan Wkday; Feb Wkday, Feb Wknd. This is inconsistent. I will rely on standard groupby sorting or just return the groups. Actually, looking at the sample:
+    *   Jan: Weekend, Weekday
+    *   Feb: Weekday, Weekend
+    *   Mar: Weekday, Weekday (Two weekday rows? No, `distinct` for month is 7. `distinct` for daytype is 2. Rows: 183. Source rows: 182. Wait. Source has 182 rows. Target has 183 rows.
+    *   Let's re-read the distinct counts.
+    *   Source: 182 rows.
+    *   Target: 183 rows.
+    *   Target `month` distinct: 7.
+    *   Target `daytype` distinct: 2.
+    *   If it were just groupby mean, we'd have 7 months * 2 types = 14 rows. But we have 183 rows.
+    *   This implies **no aggregation**. The rows are preserved.
+    *   Let's look at the values.
+    *   Source Row 0: `7/3/2011`. Value1: `1.0243`.
+    *   Target Row 0: `January  `, `weekend`, `1.3683`. This date is not in the source sample. The source sample is July-Dec 2011. The target sample is Jan-July (likely 2012 or a different year, or just different data).
+    *   The note says: "Source row count describes a training sample only, not the evaluation input."
+    *   The transformation must be row-wise, not aggregative, because the row count changes slightly (182 -> 183) but is roughly the same magnitude, and the values in the target sample don't look like averages of the source sample (source is summer 2011, target starts with Jan).
+    *   Actually, usually in these problems, if row counts are similar, it's a row-wise transformation. If row counts drop significantly (e.g., 5000 -> 14), it's aggregation. Here 182 -> 183 is essentially 1:1.
+    *   Therefore, for each row:
+        1.  Parse `date`.
+        2.  Derive `month`: Month name padded to 10 chars.
+        3.  Derive `daytype`: "weekday" or "weekend".
+        4.  Rename `value1`...`value24` to `hr1`...`hr24`.
+
+**Assumptions:**
+*   The transformation is row-wise mapping.
+*   `month` format is the full English month name left-aligned and padded with spaces to a length of 10.
+*   `daytype` is "weekday" for Mon-Fri and "weekend" for Sat-Sun.
+*   Columns `value1`-`value24` map directly to `hr1`-`hr24`.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date
+    dt = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    
+    # Create output dataframe
+    out = pd.DataFrame(index=source.index)
+    
+    # Derive month: Full name, padded to 10 chars
+    # e.g., January (7) + 3 spaces = 10
+    # February (8) + 2 spaces = 10
+    # March (5) + 5 spaces = 10
+    out['month'] = dt.dt.strftime('%B').str.ljust(10)
+    
+    # Derive daytype
+    # weekday() returns 0-4 for Mon-Fri, 5-6 for Sat-Sun
+    out['daytype'] = dt.dt.weekday().apply(lambda x: 'weekday' if x < 5 else 'weekend')
+    
+    # Rename value columns to hr columns
+    for i in range(1, 25):
+        out[f'hr{i}'] = source[f'value{i}']
+        
+    return out.reset_index(drop=True)
+```

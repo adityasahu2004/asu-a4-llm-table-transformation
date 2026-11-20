@@ -1,0 +1,102 @@
+{
+  "case": "length7_4",
+  "length": 7,
+  "strategy": "s4",
+  "model": "qwen36-27b",
+  "is_demo": false,
+  "parameters": {
+    "output": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment",
+    "model": "qwen36-27b",
+    "base_url": "https://openai.rc.asu.edu/v1",
+    "max_tokens": 6000,
+    "reasoning_effort": "none",
+    "k": 5,
+    "sample_rows": 12,
+    "timeout": 120,
+    "api_timeout": 3600,
+    "replay_only": true,
+    "strategy": "s4",
+    "python": "3.14.4 (main, Apr  7 2026, 13:13:20) [Clang 21.0.0 (clang-2100.0.123.102)]",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "pandas": "3.1.1",
+    "held_out": [
+      "length1_1",
+      "length1_2",
+      "length1_3",
+      "length2_1",
+      "length3_1"
+    ],
+    "benchmark": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split"
+  },
+  "prompt_path": "logs/s4/length7_4/prompt.json",
+  "completion_path": "logs/s4/length7_4/response.json",
+  "execution": {
+    "status": "ok",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+    "seconds": 0.5553983330028132,
+    "shape": [
+      14,
+      26
+    ],
+    "fingerprint": "b5e5676749a55837763aa2a9d2c1fc600f96053f8329ece8d93672c3fbe0ea41"
+  },
+  "autopipeline": {
+    "accuracy": 0.0,
+    "is_correct": false,
+    "similarities": {},
+    "info": []
+  },
+  "hard_match": {
+    "accuracy": 0.0,
+    "is_correct": false,
+    "similarities": [
+      "Mismatch - DataFrames lengths differ (pred:14 v.s. gold:183)"
+    ],
+    "info": []
+  },
+  "hard_match_provenance": "course-provided hard_match.py and utils.py",
+  "exact_schema": true,
+  "generation": {
+    "request_hash": "4e4a9224b1403142204724b16f143160d1911ee15524e7ef9d77d5986b2f6d1d",
+    "usage": {
+      "completion_tokens": 6621,
+      "prompt_tokens": 46259,
+      "total_tokens": 52880,
+      "completion_tokens_details": null,
+      "prompt_tokens_details": {
+        "audio_tokens": null,
+        "cache_write_tokens": null,
+        "cached_tokens": 45696,
+        "image_tokens": null,
+        "text_tokens": null,
+        "created_cache_tokens": 0,
+        "multimodal_tokens": null
+      },
+      "co2_g": 1.207486,
+      "energy_wh": 3.583044
+    },
+    "latency_seconds": 121.90344991600068,
+    "api_attempts": 1,
+    "cached": true,
+    "candidate_count": 5,
+    "api_timeout_seconds": 600,
+    "reasoning_effort_header": "none",
+    "selected_index": 2,
+    "clusters": {
+      "55d1ffb158df612ebbb2a86d3ac2ed794f49cbfd1fdc297d7ce8ec9951916dd6": [
+        1
+      ],
+      "af8b350a60f7422446ad22522ff6e3cda5a75684bfc9b812f7af94600ed93b4c": [
+        2,
+        3
+      ],
+      "1e45588e413284fdfb76b9512128d02fb628123819a87014848941b1df88d815": [
+        4
+      ]
+    }
+  },
+  "wall_seconds": 125.41803491600149,
+  "replay_wall_seconds": 3.451375124997867
+}

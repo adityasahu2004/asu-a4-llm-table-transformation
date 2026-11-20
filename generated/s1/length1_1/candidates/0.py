@@ -1,0 +1,60 @@
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    """
+    Transforms the source DataFrame to match the target schema.
+    
+    Operations:
+    1. Parses DT_STRATA to datetime.
+    2. Formats date to 'cst' column as "Day MM/DD/YYYY".
+    3. Renames PCT_HOURLY_XXXX columns to H:00 format.
+    4. Selects and orders columns as per target.
+    """
+    
+    # 1. Parse the date column
+    # Source format is M/D/YYYY (e.g., "7/2/2016")
+    df = source.copy()
+    df['parsed_date'] = pd.to_datetime(df['DT_STRATA'], format='%m/%d/%Y')
+    
+    # 2. Create the 'cst' column with format "Fri 01/01/2016"
+    # %a gives abbreviated weekday (Fri), %m/%d/%Y gives date
+    df['cst'] = df['parsed_date'].dt.strftime('%a %m/%d/%Y')
+    
+    # 3. Rename hourly columns
+    # Source: PCT_HOURLY_0100 ... PCT_HOURLY_2400
+    # Target: 1:00 ... 24:00
+    
+    rename_map = {}
+    for col in df.columns:
+        if col.startswith('PCT_HOURLY_'):
+            # Extract the time part, e.g., '0100' from 'PCT_HOURLY_0100'
+            time_str = col.split('_')[-1]
+            # Convert to integer to handle leading zeros, e.g., 0100 -> 100
+            time_int = int(time_str)
+            # Calculate hour and minute
+            hour = time_int // 100
+            minute = time_int % 100
+            
+            # Format as H:00 or HH:00
+            # The target shows "1:00" for 0100 and "10:00" for 1000.
+            # So we just use the integer hour.
+            new_col_name = f"{hour}:{minute:02d}"
+            rename_map[col] = new_col_name
+            
+    df.rename(columns=rename_map, inplace=True)
+    
+    # 4. Select and order columns
+    # Target columns: cst, 1:00, 2:00, ..., 24:00
+    target_hour_cols = [f"{h}:00" for h in range(1, 25)]
+    final_columns = ['cst'] + target_hour_cols
+    
+    # Ensure all target columns exist (they should based on schema)
+    # Select only the required columns
+    result = df[final_columns]
+    
+    # Clean up temporary column if it was kept (it wasn't in final_columns, so it's dropped)
+    # But let's be explicit about dropping non-target columns just in case
+    # The selection above handles it.
+    
+    return result

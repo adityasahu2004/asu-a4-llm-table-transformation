@@ -1,0 +1,129 @@
+**Operator Plan:**
+
+1.  **Parse Dates:** Convert the `date` column from string format (`%m/%d/%Y`) to datetime objects.
+2.  **Map Hour Columns:** The source has 24 hour columns with non-standard names (e.g., "1:00 AM", "12:00 PM"). We need to map these to standard 24-hour integers (1-24) to aggregate by hour.
+    *   "1:00 AM" -> 1
+    *   "2:00 AM" -> 2
+    *   ...
+    *   "11:00 AM" -> 11
+    *   "12:00 PM" -> 12 (Note: Source has "12:00 PM" as the last column, distinct from "12:00 AM")
+    *   "1:00 PM" -> 13
+    *   ...
+    *   "11:00 PM" -> 23
+    *   "12:00 AM" -> 24 (Note: Source has "12:00 AM" in the middle, typically representing midnight/end of day in this context, or start. Looking at target, hour 24 exists. Usually 12:00 AM is 0 or 24. Let's verify mapping.
+        *   Source cols: `1:00 AM`...`11:00 AM`, `12:00 AM`, `1:00 PM`...`11:00 PM`, `12:00 PM`.
+        *   Standard 24h: 1, 2, ..., 11, 0/24, 13, ..., 23, 12.
+        *   Target `hour` values: 1 to 24.
+        *   Mapping logic:
+            *   `1:00 AM` -> 1
+            *   `2:00 AM` -> 2
+            *   ...
+            *   `11:00 AM` -> 11
+            *   `12:00 PM` -> 12
+            *   `1:00 PM` -> 13
+            *   ...
+            *   `11:00 PM` -> 23
+            *   `12:00 AM` -> 24
+3.  **Reshape Data:** Melt the DataFrame into long format with columns `date`, `hour`, and `value`.
+4.  **Extract Month:** Extract the month number from the parsed `date`.
+5.  **Aggregate:** Group by `hour` and `month`, calculating the mean of `value`.
+6.  **Pivot:** Pivot the aggregated data so that `hour` is the index, months are columns, and values are the means.
+7.  **Rename Columns:** Rename month numbers (1-12) to their lowercase names ("january", "february", etc.).
+8.  **Format Output:** Ensure the `hour` column is integer type. Fill NaNs if necessary (though target shows nulls for missing months, which pandas handles naturally). Sort by `hour` if required (target sample is not sorted, but usually deterministic output is preferred; however, looking at the target sample, it's not sorted. The target schema doesn't specify order. I will leave the order as resulting from pivot or sort by hour for determinism. The sample data is unordered. I will sort by hour for cleanliness, or just return as is. Given "deterministic", sorting is safer).
+
+**Detailed Mapping Check:**
+Source Columns:
+`1:00 AM`, `2:00 AM`, `3:00 AM`, `4:00 AM`, `5:00 AM`, `6:00 AM`, `7:00 AM`, `8:00 AM`, `9:00 AM`, `10:00 AM`, `11:00 AM`, `12:00 AM`, `1:00 PM`, `2:00 PM`, `3:00 PM`, `4:00 PM`, `5:00 PM`, `6:00 PM`, `7:00 PM`, `8:00 PM`, `9:00 PM`, `10:00 PM`, `11:00 PM`, `12:00 PM`
+
+Target Hours: 1, 2, ..., 24.
+
+Let's assume standard clock mapping where 12:00 PM is noon (12) and 12:00 AM is midnight (24 in 1-24 scale, or 0 in 0-23).
+*   1:00 AM = 1
+*   ...
+*   11:00 AM = 11
+*   12:00 PM = 12
+*   1:00 PM = 13
+*   ...
+*   11:00 PM = 23
+*   12:00 AM = 24
+
+This covers 1-24 uniquely.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse date
+    source = source.copy()
+    source['dt'] = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    source['month'] = source['dt'].dt.month
+    
+    # 2. Define hour mapping
+    hour_map = {
+        '1:00 AM': 1,
+        '2:00 AM': 2,
+        '3:00 AM': 3,
+        '4:00 AM': 4,
+        '5:00 AM': 5,
+        '6:00 AM': 6,
+        '7:00 AM': 7,
+        '8:00 AM': 8,
+        '9:00 AM': 9,
+        '10:00 AM': 10,
+        '11:00 AM': 11,
+        '12:00 PM': 12,
+        '1:00 PM': 13,
+        '2:00 PM': 14,
+        '3:00 PM': 15,
+        '4:00 PM': 16,
+        '5:00 PM': 17,
+        '6:00 PM': 18,
+        '7:00 PM': 19,
+        '8:00 PM': 20,
+        '9:00 PM': 21,
+        '10:00 PM': 22,
+        '11:00 PM': 23,
+        '12:00 AM': 24
+    }
+    
+    # 3. Melt the dataframe
+    # Identify hour columns
+    hour_cols = [c for c in source.columns if c in hour_map]
+    
+    melted = source.melt(
+        id_vars=['dt', 'month'], 
+        value_vars=hour_cols, 
+        var_name='hour_label', 
+        value_name='value'
+    )
+    
+    # Map labels to integers
+    melted['hour'] = melted['hour_label'].map(hour_map)
+    
+    # 4. Aggregate by hour and month
+    # Calculate mean for each hour-month combination
+    agg_df = melted.groupby(['hour', 'month'])['value'].mean().reset_index()
+    
+    # 5. Pivot to wide format
+    pivot_df = agg_df.pivot(index='hour', columns='month', values='value')
+    
+    # 6. Rename columns to month names
+    month_names = {
+        1: 'january', 2: 'february', 3: 'march', 4: 'april', 
+        5: 'may', 6: 'june', 7: 'july', 8: 'august', 
+        9: 'september', 10: 'october', 11: 'november', 12: 'december'
+    }
+    pivot_df.columns = [month_names.get(col, col) for col in pivot_df.columns]
+    
+    # Reset index to make 'hour' a column
+    pivot_df = pivot_df.reset_index()
+    
+    # Ensure hour is int64
+    pivot_df['hour'] = pivot_df['hour'].astype('int64')
+    
+    # Sort by hour for deterministic output
+    pivot_df = pivot_df.sort_values('hour').reset_index(drop=True)
+    
+    return pivot_df
+```

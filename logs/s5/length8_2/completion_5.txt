@@ -1,0 +1,107 @@
+Operator plan:
+1. Parse the `date` column into a datetime object.
+2. Extract the hour (`dt.hour`) and the month name (`dt.strftime('%B')`).
+3. Group by the extracted hour and month name.
+4. Aggregate the `zone_016` values. The target sample shows specific values (e.g., Hour 0 is 67.9, Hour 2 is 67.8) which correspond to the first available non-null value or a specific aggregation. Looking at the source sample:
+   - Hour 0 (0:11) -> 67.9. Target Hour 0 -> 67.9.
+   - Hour 2 (2:22) -> 67.9. Target Hour 2 -> 67.8. Wait, let's look closer.
+   - Source:
+     - 0:11 -> 67.9
+     - 2:22 -> 67.9
+     - 4:34 -> 67.6
+     - 6:46 -> 67.3
+     - 8:57 -> 67.1
+     - 11:09 -> 66.9
+     - 13:21 -> 66.8
+     - 15:33 -> 66.7
+     - 17:44 -> 66.9
+     - 19:56 -> 67.8
+     - 22:08 -> 68.5
+   - Target:
+     - Hour 0 -> 67.9
+     - Hour 2 -> 67.8
+     - Hour 4 -> 67.6
+     - Hour 6 -> 67.3
+     - Hour 8 -> 67.0
+     - Hour 10 -> 66.8
+     - Hour 12 -> 66.5
+     - Hour 14 -> 66.3
+     - Hour 16 -> 66.0
+     - Hour 18 -> 66.4
+     - Hour 20 -> 67.0
+     - Hour 23 -> 67.8
+
+   The target hours are even numbers (0, 2, 4...) except for the last one (23). The values in the target don't exactly match the single source rows provided in the sample snippet directly if we assume a simple 1-to-1 mapping for the whole dataset, but the sample snippet is just a *sample*. The target has 24 rows (Hours 0-23). The source has 1450 rows.
+   
+   Let's look at the aggregation. The target has one row per hour (0-23). The columns are months.
+   The target sample shows `January` values.
+   Hour 0: 67.9. Source 0:11 is 67.9.
+   Hour 2: 67.8. Source 2:22 is 67.9. This is a discrepancy.
+   Hour 4: 67.6. Source 4:34 is 67.6. Match.
+   Hour 6: 67.3. Source 6:46 is 67.3. Match.
+   Hour 8: 67.0. Source 8:57 is 67.1. Discrepancy (0.1 diff).
+   Hour 10: 66.8. Source 11:09 is 66.9. Discrepancy.
+   
+   It seems the target might be averaging or taking a specific value. Or perhaps the "Hour" in the target is derived differently?
+   Let's look at the target hours: 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 23.
+   Wait, the target sample only shows 12 rows. But the target schema says 24 rows. The sample is truncated.
+   
+   Let's re-read the target schema: `rows: 24`. `Hour` distinct: 24.
+   So the output must have 24 rows, one for each hour 0-23.
+   
+   The aggregation function is likely `mean` or `first`. Given the discrepancies (67.9 vs 67.8, 67.1 vs 67.0), `mean` is a strong candidate if there are multiple data points per hour in the full dataset. The sample only shows one point per hour for the first day, but the dataset has 1450 rows (approx 60 days * 24 hours = 1440). So there are multiple days.
+   
+   Therefore, the transformation is:
+   1. Parse date.
+   2. Extract Hour and Month Name.
+   3. Group by Hour and Month Name.
+   4. Aggregate `zone_016` using `mean`.
+   5. Pivot/Unstack so that Months become columns and Hours become the index.
+   6. Reset index to make Hour a column.
+   7. Ensure all 12 months are present as columns (filling with NaN if data is missing).
+   8. Ensure all 24 hours are present (0-23).
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    df = source.copy()
+    df['datetime'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract Hour and Month Name
+    df['Hour'] = df['datetime'].dt.hour
+    df['Month'] = df['datetime'].dt.strftime('%B')
+    
+    # Group by Hour and Month, and aggregate zone_016
+    # Using mean as the aggregation function based on typical time-series summarization
+    # and the discrepancies observed in the sample vs single source rows.
+    grouped = df.groupby(['Hour', 'Month'])['zone_016'].mean()
+    
+    # Unstack to create columns for each month
+    pivoted = grouped.unstack(level='Month')
+    
+    # Ensure all 12 months are present as columns
+    months = [
+        'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'
+    ]
+    
+    # Reindex columns to ensure all months are present, filling missing with NaN
+    pivoted = pivoted.reindex(columns=months)
+    
+    # Ensure all 24 hours are present in the index
+    pivoted = pivoted.reindex(range(24))
+    
+    # Reset index to make Hour a column
+    result = pivoted.reset_index()
+    
+    # Rename the index column to 'Hour' if it wasn't already named correctly after reset
+    # reset_index() names the index column 'Hour' because the index name was 'Hour'
+    
+    # Select and order columns as required
+    result = result[['Hour'] + months]
+    
+    return result
+```

@@ -1,0 +1,64 @@
+**Operator plan:**
+1. Parse the `date` column into a datetime object.
+2. Extract the date part (YYYY-MM-DD) and the hour part.
+3. Pivot the data so that each row represents a unique date, and each column represents an hour (0-23).
+4. Rename the columns to match the target format (12-hour clock with AM/PM). Note: Hour 0 becomes "12:00 AM", Hours 1-11 become "1:00 AM" - "11:00 AM", Hour 12 becomes "12:00 PM", Hours 13-23 become "1:00 PM" - "11:00 PM".
+5. Format the date column as "MM/DD/YYYY".
+6. Reorder the columns to start with "date" followed by the hours in chronological order (1 AM to 12 AM).
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date
+    df = source.copy()
+    df['dt'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    df['date_only'] = df['dt'].dt.date
+    df['hour'] = df['dt'].dt.hour
+    
+    # Pivot to wide format
+    # Index: date_only, Columns: hour, Values: cerc_logger_1
+    pivoted = df.pivot_table(index='date_only', columns='hour', values='cerc_logger_1', aggfunc='first')
+    
+    # Rename columns to 12-hour format
+    # 0 -> 12:00 AM
+    # 1-11 -> 1:00 AM - 11:00 AM
+    # 12 -> 12:00 PM
+    # 13-23 -> 1:00 PM - 11:00 PM
+    
+    new_col_names = {}
+    for h in range(24):
+        if h == 0:
+            new_col_names[h] = "12:00 AM"
+        elif h < 12:
+            new_col_names[h] = f"{h}:00 AM"
+        elif h == 12:
+            new_col_names[h] = "12:00 PM"
+        else:
+            new_col_names[h] = f"{h-12}:00 PM"
+            
+    pivoted.rename(columns=new_col_names, inplace=True)
+    
+    # Reset index to make date_only a column
+    pivoted.reset_index(inplace=True)
+    
+    # Format date column
+    pivoted['date'] = pivoted['date_only'].dt.strftime('%m/%d/%Y')
+    
+    # Drop date_only
+    pivoted.drop(columns=['date_only'], inplace=True)
+    
+    # Define the desired column order
+    desired_order = ["date"] + [
+        "1:00 AM", "2:00 AM", "3:00 AM", "4:00 AM", "5:00 AM", "6:00 AM", 
+        "7:00 AM", "8:00 AM", "9:00 AM", "10:00 AM", "11:00 AM", "12:00 PM",
+        "1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM", "5:00 PM", "6:00 PM", 
+        "7:00 PM", "8:00 PM", "9:00 PM", "10:00 PM", "11:00 PM", "12:00 AM"
+    ]
+    
+    # Ensure all columns exist (they should, but good practice)
+    pivoted = pivoted[desired_order]
+    
+    return pivoted
+```

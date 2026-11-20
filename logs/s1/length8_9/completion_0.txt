@@ -1,0 +1,82 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `Date` column from string format (`%m/%d/%Y`) to datetime objects to extract the month.
+2.  **Melt/Unpivot**: Transform the wide format (columns `Hr 1` to `Hr 24`) into a long format.
+    *   Create a new column `hour` from the column names (extracting the integer part).
+    *   Create a new column `value` containing the hourly data.
+    *   Keep `Date` (and potentially other identifiers, though they seem constant or irrelevant for the aggregation logic based on the target schema which only has `hour` and months).
+3.  **Extract Month**: Extract the month number (1-12) from the parsed `Date` column.
+4.  **Aggregate**: Group by `hour` and `month`. Calculate the sum of `value` for each group.
+    *   *Note*: The target has 24 rows (one for each hour) and 12 month columns. The values in the target sample (e.g., ~700-1200) are significantly larger than individual hourly values (~1-140). Given there are ~28-31 days per month, summing the hourly values across all days in a month for a specific hour seems to be the operation. For example, Hour 1 in January: Sum of `Hr 1` for all days in Jan.
+5.  **Pivot**: Reshape the aggregated data back to wide format.
+    *   Index: `hour`
+    *   Columns: Month numbers (1-12)
+    *   Values: Summed values
+6.  **Rename Columns**: Map month numbers (1-12) to lowercase month names (`january`, `february`, etc.).
+7.  **Sort and Format**: Sort by `hour` and ensure the `hour` column is integer type. Reset index to make `hour` a column.
+
+### Assumptions
+*   The aggregation function is `sum`. The magnitude of the target values supports this (e.g., ~28 days * ~25 avg value ≈ 700).
+*   The `Company`, `Rate`, and `Rate Code` columns are ignored for the aggregation, implying we aggregate across all rates/companies present in the source for the given date/hour. Since `Company` is constant and `Rate`/`Rate Code` vary, we sum across all rows matching the date and hour.
+*   The target `hour` column corresponds to the hour of the day (1-24).
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse Date
+    source = source.copy()
+    source['Date'] = pd.to_datetime(source['Date'], format='%m/%d/%Y')
+    
+    # 2. Melt the dataframe from wide to long
+    # Identify hour columns
+    hour_cols = [col for col in source.columns if col.startswith('Hr ')]
+    
+    melted = source.melt(
+        id_vars=['Date'], 
+        value_vars=hour_cols, 
+        var_name='hour_str', 
+        value_name='value'
+    )
+    
+    # 3. Extract hour integer from column name 'Hr X'
+    melted['hour'] = melted['hour_str'].str.extract(r'(\d+)').astype(int)
+    
+    # 4. Extract month from Date
+    melted['month'] = melted['Date'].dt.month
+    
+    # 5. Aggregate: Sum values for each hour and month
+    # We group by hour and month, then sum the values.
+    # This sums across all days in that month for that specific hour,
+    # and across all rates/companies if multiple exist for the same date/hour.
+    aggregated = melted.groupby(['hour', 'month'])['value'].sum().reset_index()
+    
+    # 6. Pivot to wide format
+    # Index: hour, Columns: month, Values: sum
+    pivoted = aggregated.pivot(index='hour', columns='month', values='value')
+    
+    # 7. Rename month columns to lowercase names
+    month_names = {
+        1: 'january', 2: 'february', 3: 'march', 4: 'april',
+        5: 'may', 6: 'june', 7: 'july', 8: 'august',
+        9: 'september', 10: 'october', 11: 'november', 12: 'december'
+    }
+    pivoted.rename(columns=month_names, inplace=True)
+    
+    # 8. Reset index to make 'hour' a column
+    result = pivoted.reset_index()
+    
+    # 9. Ensure correct column order and types
+    # The target schema specifies specific column order: hour, january, ..., december
+    target_cols = ['hour'] + [month_names[i] for i in range(1, 13)]
+    result = result[target_cols]
+    
+    # Ensure hour is int64
+    result['hour'] = result['hour'].astype('int64')
+    
+    # Sort by hour to match typical output expectations (though pivot usually preserves order)
+    result = result.sort_values('hour').reset_index(drop=True)
+    
+    return result
+```

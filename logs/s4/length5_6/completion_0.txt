@@ -1,0 +1,44 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `date` column from `MM/DD/YYYY` format to a datetime object.
+2.  **Format Date**: Convert the parsed datetime to the target string format `YYYY-MM-DD 00:00:00`.
+3.  **Map Hour Columns**: The source has 24 hourly columns with AM/PM labels (e.g., `1:00 AM`, `12:00 PM`). These need to be reordered and renamed to `value1` through `value24`.
+    *   The logical order of hours in a day is 1:00 AM (Hour 1), 2:00 AM (Hour 2), ..., 11:00 AM (Hour 11), 12:00 PM (Hour 12), 1:00 PM (Hour 13), ..., 11:00 PM (Hour 23), 12:00 AM (Hour 24 - representing midnight/end of day).
+    *   Construct a mapping list of source column names corresponding to `value1`...`value24`.
+4.  **Construct Result**: Create a new DataFrame with the formatted date and the 24 value columns in the correct order.
+5.  **Reset Index**: Ensure the final output has a clean integer index.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse and format the date column
+    # Source format: MM/DD/YYYY
+    # Target format: YYYY-MM-DD 00:00:00
+    dates = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    formatted_dates = dates.dt.strftime('%Y-%m-%d 00:00:00')
+    
+    # 2. Define the mapping from source AM/PM columns to target value1...value24
+    # Order: 1AM, 2AM, ..., 11AM, 12PM, 1PM, ..., 11PM, 12AM
+    hour_labels = []
+    # 1 AM to 11 AM
+    for h in range(1, 12):
+        hour_labels.append(f'{h}:00 AM')
+    # 12 PM (Noon)
+    hour_labels.append('12:00 PM')
+    # 1 PM to 11 PM
+    for h in range(1, 12):
+        hour_labels.append(f'{h}:00 PM')
+    # 12 AM (Midnight)
+    hour_labels.append('12:00 AM')
+    
+    # 3. Build the new dataframe
+    out = pd.DataFrame()
+    out['date'] = formatted_dates
+    
+    # Map source columns to value1...value24
+    for i, src_col in enumerate(hour_labels, start=1):
+        out[f'value{i}'] = source[src_col]
+        
+    # 4. Reset index to ensure clean integer index
+    return out.reset_index(drop=True)
+```

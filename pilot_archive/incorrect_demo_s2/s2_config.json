@@ -1,0 +1,23 @@
+{
+  "output": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment",
+  "model": "qwen36-27b",
+  "base_url": "https://openai.rc.asu.edu/v1",
+  "max_tokens": 6000,
+  "reasoning_effort": "none",
+  "k": 5,
+  "sample_rows": 12,
+  "timeout": 120,
+  "seed": 42,
+  "strategy": "s2",
+  "python": "3.14.4 (main, Apr  7 2026, 13:13:20) [Clang 21.0.0 (clang-2100.0.123.102)]",
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "pandas": "3.1.1",
+  "held_out": [
+    "length1_1",
+    "length1_2",
+    "length1_3",
+    "length2_1",
+    "length3_1"
+  ],
+  "benchmark": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split"
+}

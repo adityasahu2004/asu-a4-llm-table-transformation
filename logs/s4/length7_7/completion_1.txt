@@ -1,0 +1,278 @@
+Operator plan:
+1. Parse the `date` column into datetime objects.
+2. Derive `month` (full name) and `daytype` ("weekday" if Mon-Fri, "weekend" if Sat-Sun).
+3. Group by `month` and `daytype`.
+4. Aggregate the 24 hourly columns (`Hour 1` to `Hour 24`) by taking the **maximum** value for each group. This handles the sparse/zero nature of the source data to reconstruct the full profile for each month/daytype combination, matching the target row count (7 months * 2 daytypes = 14 rows? No, target has 183 rows. Wait. 183 rows in target vs 182 in source. Let's re-examine).
+
+Re-evaluating row count:
+Source: 182 rows.
+Target: 183 rows.
+Target distinct `month`: 7 (Jan-Jul).
+Target distinct `daytype`: 2.
+If it were a simple groupby max, we'd have 14 rows. We have 183.
+Let's look at the target sample data.
+The target sample shows rows like:
+`["January", "weekday", ...]`
+`["January", "weekend", ...]`
+`["February", "weekday", ...]`
+`["February", "weekday", ...]` (Duplicate month/daytype?)
+`["March", "weekend", ...]`
+`["March", "weekday", ...]`
+`["April", "weekday", ...]`
+`["April", "weekend", ...]`
+
+Wait, the target sample has 12 rows shown.
+Let's look at the source dates:
+Source dates range from 7/3/2015 to 12/31/2015.
+Target months are Jan, Feb, Mar, Apr, May, Jun, Jul.
+The source data is from the *second half* of 2015. The target months are the *first half* of 2016? Or is the year ignored?
+The target `month` column only contains the month name.
+The source `date` is `7/3/2015`.
+If we parse `7/3/2015`, the month is July.
+The target has "January", "February", etc.
+The source only has July, August, September, October, November, December.
+The target has January through July.
+This implies a shift or a mapping? Or perhaps the source data provided in the sample is just a subset, and the "evaluation source" contains different data?
+"Note: Source row count describes a training sample only, not the evaluation input."
+
+Let's look at the values.
+Source `Hour 1` is always `0.0002398657`.
+Target `hr1` is always `0.0002398657`.
+Source `Hour 6` has `0.0001199328` and `0.0002398657`.
+Target `hr6` has `0.0002398657`, `0.0001199328`, `0.0`.
+
+If the transformation is deterministic and based on schema, and the target has 183 rows while source has 182, and the target months are Jan-Jul while source months are Jul-Dec, there might be a year shift or the target is actually from a different dataset entirely in the sample view, but the *logic* must be inferred.
+
+However, usually these tasks involve aggregating or reshaping.
+Let's look at the target row count 183.
+Source 182.
+Maybe one row is added?
+Or maybe the target is simply the source data, but with columns renamed and derived, AND the dates are shifted?
+No, "January" is not in the source.
+
+Let's look at the distinct values in Target `month`: Jan, Feb, Mar, Apr, May, Jun, Jul.
+Source dates: Jul 2015 to Dec 2015.
+If we assume the source data provided in the `sample` block is just illustrative of the *schema* and not the actual content used for the logic inference (as per the note), we must infer the logic from the column names and types.
+
+Hypothesis: The task is to aggregate the hourly data by Month and Day Type.
+But why 183 rows?
+If the source has multiple years, grouping by Month and Day Type would result in at most 14 rows (7 months * 2 types).
+If it groups by Year-Month-DayType, it would be more.
+If the source has 182 rows, and target has 183, it's almost a 1-to-1 mapping with one extra row or a slight change.
+
+Let's look closer at the Target Sample Data.
+Row 1: Jan, weekday.
+Row 2: Jan, weekend.
+Row 3: Feb, weekday.
+Row 4: Feb, weekday.
+Row 5: Mar, weekend.
+Row 6: Mar, weekday.
+Row 7: Apr, weekday.
+Row 8: Apr, weekend.
+Row 9: May, weekday.
+Row 10: May, weekday.
+Row 11: Jun, weekday.
+Row 12: Jul, weekday.
+
+The values in the target rows are not identical.
+Row 1 `hr3`: 0.0002398657
+Row 5 `hr3`: 0.0
+Row 6 `hr3`: 0.0002398657
+
+This suggests that the Target is **not** a simple aggregation of the Source rows into 14 buckets. The Target has 183 rows.
+The Source has 182 rows.
+The difference is 1 row.
+
+Is it possible the Source data in the sample is from one year, and the Target is from another, and the transformation is just:
+1. Parse Date.
+2. Extract Month Name.
+3. Extract Day Type.
+4. Rename Columns `Hour X` to `hrX`.
+5. Sort/Order?
+
+But the Source Sample has Jul-Dec. Target Sample has Jan-Jul.
+If the transformation is just "Rename and Derive", then the evaluation source will have Jan-Jul dates?
+The note says: "Source row count describes a training sample only, not the evaluation input."
+This implies the *structure* of the transformation is what matters.
+If the evaluation input has dates in Jan-Jul, and we derive Month and DayType, we get the target columns.
+
+Let's check the row count difference again.
+Source: 182.
+Target: 183.
+Where does the extra row come from?
+Maybe the target includes a "Total" row? No, the sample doesn't show it.
+Maybe the target includes a row for a specific date that isn't in the source?
+Or maybe the source has a duplicate date that is merged? No, 182 distinct dates in source.
+
+Let's look at the Target `month` distinct values: 7.
+Target `daytype` distinct values: 2.
+If the target is just a projection of the source, why the row count change?
+Perhaps the source contains a date that is invalid or handled differently?
+Or perhaps the target adds a row for "Unknown"?
+
+Let's reconsider the aggregation.
+If the source has 182 rows (e.g., 182 days).
+If the target has 183 rows.
+Maybe the target is `source` + 1 row?
+Or maybe the source sample is missing a row in the display?
+
+Let's look at the values in the Target Sample again.
+`hr1` is constant `0.0002398657`.
+`hr9` to `hr16` are `0`.
+This matches the Source pattern where `Hour 9` to `Hour 16` are `0` (int) or `0.0`.
+
+The transformation seems to be:
+1. Parse `date`.
+2. Create `month` column with full month name.
+3. Create `daytype` column: "weekday" if weekday, "weekend" if weekend.
+4. Rename `Hour 1`...`Hour 24` to `hr1`...`hr24`.
+5. **Sort** the dataframe by `month` (chronologically?) and then `daytype`?
+6. Why 183 rows?
+
+Is it possible the source data *actually* has 183 rows in the evaluation set, and the sample just shows 182?
+"Source row count describes a training sample only".
+Target row count: 183.
+If the transformation is 1-to-1, the evaluation source must have 183 rows.
+The sample source has 182.
+The sample target has 12 rows (subset).
+
+If the transformation is 1-to-1, the code is:
+```python
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    df = source.copy()
+    df['date_dt'] = pd.to_datetime(df['date'])
+    df['month'] = df['date_dt'].dt.month_name()
+    df['daytype'] = df['date_dt'].apply(lambda x: 'weekend' if x.dayofweek >= 5 else 'weekday')
+    
+    # Rename columns
+    rename_map = {}
+    for i in range(1, 25):
+        rename_map[f'Hour {i}'] = f'hr{i}'
+        
+    df = df.rename(columns=rename_map)
+    
+    # Select and order columns
+    cols = ['month', 'daytype'] + [f'hr{i}' for i in range(1, 25)]
+    df = df[cols]
+    
+    # Sort? The target sample is sorted by Month (Jan, Jan, Feb, Feb...) then Daytype?
+    # Jan weekday, Jan weekend, Feb weekday, Feb weekday...
+    # It seems sorted by Date originally?
+    # The source sample is sorted by date.
+    # The target sample is sorted by Month name alphabetically? Jan, Feb, Mar...
+    # But within Feb, we have weekday, weekday.
+    
+    # If we sort by Month name, then Daytype, then Date?
+    # The target sample doesn't show dates, so we can't verify date order.
+    # However, standard practice is to preserve original order or sort by the new keys.
+    # Given the target sample starts with Jan, and source sample starts with July, 
+    # the target is likely sorted by Month.
+    
+    # Month order: January, February, March, April, May, June, July
+    # This is alphabetical AND chronological for the first half of the year.
+    
+    # Let's sort by Month, then DayType (weekday before weekend? or weekend before weekday?)
+    # Sample:
+    # Jan weekday
+    # Jan weekend
+    # Feb weekday
+    # Feb weekday
+    # Mar weekend
+    # Mar weekday
+    
+    # Wait, Mar weekend comes before Mar weekday in the sample?
+    # Row 5: Mar, weekend
+    # Row 6: Mar, weekday
+    
+    # If sorted by Month, then DayType, "weekday" < "weekend" alphabetically? No, 'w' is same. 'e' vs 'e'. 'e' vs 'e'. 'k' vs 'e'. 'e' < 'k'. So "weekend" < "weekday".
+    # So alphabetical sort of daytype would put weekend first.
+    # Sample: Jan (weekday, weekend). Weekday first.
+    # Mar (weekend, weekday). Weekend first.
+    # This is inconsistent for alphabetical sort.
+    
+    # Maybe it's sorted by the original Date?
+    # If the source dates for Jan were:
+    # Jan 1 (Fri, Weekend)
+    # Jan 2 (Sat, Weekend)
+    # Jan 3 (Sun, Weekend)
+    # Jan 4 (Mon, Weekday)
+    # Then sorted by date, we'd see weekends then weekdays.
+    # But Sample Jan shows Weekday then Weekend.
+    
+    # Let's assume the order is not strictly enforced or is based on original index.
+    # The safest bet for "Infer transformation" is to preserve the original row order unless a sort is obvious.
+    # But the Target Sample is clearly sorted by Month.
+    
+    # Let's try sorting by Month, then by DayType (Weekday, Weekend).
+    # Jan: Weekday, Weekend.
+    # Feb: Weekday, Weekday.
+    # Mar: Weekend, Weekday. -> This breaks the pattern if it's strictly Weekday then Weekend.
+    
+    # Actually, looking at the Target Sample again:
+    # 1. Jan, weekday
+    # 2. Jan, weekend
+    # 3. Feb, weekday
+    # 4. Feb, weekday
+    # 5. Mar, weekend
+    # 6. Mar, weekday
+    
+    # If the underlying dates for March were:
+    # Mar 1 (Wed, Weekday)
+    # Mar 2 (Thu, Weekday)
+    # Mar 3 (Fri, Weekday)
+    # Mar 4 (Sat, Weekend)
+    # Mar 5 (Sun, Weekend)
+    # If sorted by date, we'd see Weekdays then Weekends.
+    # The sample shows Weekend then Weekday for March.
+    
+    # This implies the sort might be by Month, then by something else, or the sample rows are not contiguous in the full target.
+    
+    # Given the ambiguity and the 1-to-1 nature (182 vs 183 is likely just a difference in the evaluation set size), I will perform the column transformations and sort by Month to match the visual grouping in the target sample. I will not assume a specific secondary sort if it's inconsistent.
+    
+    # However, 183 vs 182 is bothering me.
+    # If the source has 182 days, and target has 183, maybe one day is split? Or a header row?
+    # The target schema shows no nulls.
+    
+    # Let's assume the evaluation source has 183 rows.
+    
+    return df.sort_values(by=['month']).reset_index(drop=True)
+```
+
+One detail: `pd.to_datetime` format. Source `7/3/2015` is `m/d/Y` or `mm/dd/yyyy`.
+`pd.to_datetime` handles this automatically.
+
+Final check on column names:
+Source: `Hour 1`, `Hour 2`...
+Target: `hr1`, `hr2`...
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Create a copy to avoid modifying the original
+    df = source.copy()
+    
+    # Parse the date column
+    df['date_dt'] = pd.to_datetime(df['date'])
+    
+    # Derive month name
+    df['month'] = df['date_dt'].dt.month_name()
+    
+    # Derive day type: 'weekday' for Mon-Fri, 'weekend' for Sat-Sun
+    # dayofweek: 0=Mon, ..., 4=Fri, 5=Sat, 6=Sun
+    df['daytype'] = df['date_dt'].apply(lambda x: 'weekend' if x.dayofweek >= 5 else 'weekday')
+    
+    # Rename hourly columns from 'Hour X' to 'hrX'
+    rename_map = {f'Hour {i}': f'hr{i}' for i in range(1, 25)}
+    df = df.rename(columns=rename_map)
+    
+    # Select the required columns in the correct order
+    cols = ['month', 'daytype'] + [f'hr{i}' for i in range(1, 25)]
+    df = df[cols]
+    
+    # Sort by month to match the target sample grouping
+    # The target sample appears sorted by Month name (Jan, Feb, Mar...)
+    df = df.sort_values(by=['month']).reset_index(drop=True)
+    
+    return df
+```

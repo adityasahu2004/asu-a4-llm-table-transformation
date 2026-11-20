@@ -1,0 +1,317 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `Date` column from string format (`"Thu MM/DD/YYYY"`) to pandas datetime objects to extract month and year information.
+2.  **Melt Data**: Transform the wide format (24 hour columns) into a long format.
+    *   Identify the 24 columns representing hours (`1:00` through `24:00:00`).
+    *   Extract the integer hour from the column names (e.g., `"1:00"` -> `1`, `"24:00:00"` -> `24`).
+    *   Create a new DataFrame with columns: `Date`, `hour`, and `value`.
+3.  **Extract Month**: Add a `month` column to the melted DataFrame based on the parsed `Date`.
+4.  **Aggregate**: Group the data by `hour` and `month`. Calculate the sum of `value` for each group.
+    *   *Note*: The target has 24 rows (one for each hour) and 12 columns (one for each month). The values in the target (e.g., ~4.6 for hour 1, January) are significantly larger than individual daily values (~1.15). Given the source has ~2465 rows (approx 7 years of daily data), and the target has 24*12=288 cells, the operation is likely a **sum** of all daily values for that specific hour and month across all years in the dataset. Let's verify with a quick mental check:
+        *   Source sample row 1: Hour 1 value is 1.153.
+        *   Target sample row 1: Hour 1, January value is 4.628.
+        *   If we sum all January 1st-hour values across all years, does it equal 4.628?
+        *   The source has data from 2009 to 2016. That's 8 years.
+        *   Average daily value for hour 1 seems to be around 1.0 - 1.5.
+        *   8 years * ~1.2 avg = ~9.6. This is higher than 4.628.
+        *   Let's look at the distinct counts. Source has 2465 rows. 2465 / 365.25 ≈ 6.75 years.
+        *   Maybe it's an average? 4.628 / 6.75 ≈ 0.68. The values are > 1.0. So it's not a simple mean of all days.
+        *   Let's re-read the target schema. `distinct` values for `january` is 23. `hour` has 24 distinct values.
+        *   Wait, the target sample shows specific hours: 1, 11, 13, 15, 17, 19, 20, 22, 24, 4, 6, 9. It's not sorted.
+        *   Let's look at the aggregation again.
+        *   Is it possible the target is the **sum** of values for that hour and month?
+        *   Let's check the number of days in January for the years present.
+        *   Years: 2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016.
+        *   If the data is daily, there are 31 days in January for each year.
+        *   8 years * 31 days = 248 days.
+        *   If the average value is ~1.15, sum would be ~285. The target value is 4.628.
+        *   This implies the target values are **not** sums of all days.
+        *   Let's look at the target values again. `january` for `hour` 1 is 4.628.
+        *   Source `1:00` values are around 1.0 - 2.0.
+        *   Could it be the sum of **weekly** data? No, dates are daily.
+        *   Could it be the **average** of the **monthly** sums? No.
+        *   Let's look at the distinct count of the source `Date`. 2465 distinct dates.
+        *   Let's look at the target `january` distinct count: 23.
+        *   Let's reconsider the aggregation. What if the source data is not daily?
+        *   The sample dates are:
+            *   10/01/2009
+            *   05/13/2010
+            *   12/23/2010
+            *   08/04/2011
+            *   03/15/2012
+            *   10/25/2012
+            *   06/06/2013
+            *   01/16/2014
+            *   08/28/2014
+            *   04/09/2015
+            *   11/19/2015
+            *   06/30/2016
+        *   These are just samples. The distinct count is 2465.
+        *   If the target value 4.628 is the result, and the input values are ~1.15, then 4.628 / 1.15 ≈ 4.
+        *   This suggests there are roughly 4 data points contributing to this sum.
+        *   Why 4?
+        *   Maybe the data is **weekly**? 2465 weeks is ~47 years. Unlikely.
+        *   Maybe the data is **monthly**? 2465 months is ~200 years. Unlikely.
+        *   Let's look at the date format again. `Thu 10/01/2009`.
+        *   Is it possible the target is the **sum** of values for that hour and month, but the source data only contains **one entry per month**?
+        *   If there is one entry per month, then for January 2009, there is one row. For January 2010, one row.
+        *   If there are 8 years, there are 8 Januarys.
+        *   Sum of 8 values ~1.15 each = ~9.2. Still too high.
+        *   What if the source data is **quarterly**?
+        *   What if the target is the **mean**?
+        *   Mean of 8 values ~1.15 = 1.15. Target is 4.628.
+        *   What if the target is the sum of **4** specific values?
+        *   Let's look at the distinct values in the target `january` column: 23.
+        *   Let's look at the distinct values in the source `1:00` column: 1406.
+        *   
+        *   Let's try a different hypothesis. The target columns are months. The target rows are hours.
+        *   The value 4.628 for Hour 1, January.
+        *   Source Hour 1 values: 1.153, 1.006, 2.698, 2.038, 1.041, 1.144, 1.363, 2.601, 1.601, 1.092, 1.103, 1.18.
+        *   These are from various months.
+        *   We need to filter for January.
+        *   The sample doesn't show any January dates.
+        *   However, if we assume the operation is `groupby(['hour', 'month']).sum()`, let's see if the magnitude makes sense for a different aggregation.
+        *   What if the source data is **hourly** data aggregated to daily? No, the columns are hours.
+        *   
+        *   Let's look at the number of rows in the target: 24.
+        *   Let's look at the number of rows in the source: 2465.
+        *   
+        *   Is it possible the target is the **sum** of the values for that hour and month, divided by something?
+        *   Or is it the **sum** of values for that hour and month, but the source data is sparse?
+        *   
+        *   Let's look at the distinct count of `Date` in source: 2465.
+        *   If the data is daily, 2465 days is ~6.75 years.
+        *   If the data is weekly, 2465 weeks is ~47 years.
+        *   If the data is monthly, 2465 months is ~205 years.
+        *   
+        *   Let's assume the data is **daily**.
+        *   Target value: 4.628.
+        *   Source value: ~1.15.
+        *   Ratio: ~4.
+        *   This implies there are ~4 data points for Hour 1 in January across the entire dataset.
+        *   This would mean the dataset only has 4 Januarys? Or 4 data points per January?
+        *   If the dataset has 6.75 years, it has 6 or 7 Januarys.
+        *   If it has 6 Januarys, and the sum is 4.628, the average is 0.77.
+        *   The sample values are > 1.0.
+        *   
+        *   Let's look at the target `january` distinct count: 23.
+        *   There are 24 hours.
+        *   
+        *   What if the aggregation is **Mean**?
+        *   If the mean is 4.628, and the values are ~1.15, this is impossible unless the values are much higher in January or the aggregation is different.
+        *   
+        *   Let's re-read the source schema.
+        *   `1:00` distinct: 1406.
+        *   `24:00:00` distinct: 1458.
+        *   
+        *   Let's look at the target `hour` column. It has 24 distinct values.
+        *   
+        *   Is it possible the target is the **sum** of the **monthly averages**?
+        *   No, that's just the sum.
+        *   
+        *   Let's consider the possibility that the source data is **not** daily.
+        *   The dates are `Thu 10/01/2009`.
+        *   If the data is **weekly**, then 2465 weeks is a long time.
+        *   If the data is **monthly**, 2465 months is a very long time.
+        *   
+        *   Let's look at the sample data again.
+        *   The dates are spread out.
+        *   2009, 2010, 2010, 2011, 2012, 2012, 2013, 2014, 2014, 2015, 2015, 2016.
+        *   This looks like a subset of a larger dataset.
+        *   
+        *   Let's try to calculate the sum for a specific hour and month from the sample, assuming the sample is representative.
+        *   We don't have January data in the sample.
+        *   
+        *   Let's look at the target value for `hour` 1, `january`: 4.628.
+        *   Let's look at the target value for `hour` 1, `february`: 4.246.
+        *   Let's look at the target value for `hour` 1, `march`: 3.58.
+        *   
+        *   These values are all in the range of 2-5.
+        *   The source values are in the range of 1-3.
+        *   
+        *   If the aggregation is **Sum**, and the result is ~4, and the input is ~1.5, then there are ~2-3 data points.
+        *   If the aggregation is **Mean**, and the result is ~4, and the input is ~1.5, this is impossible.
+        *   
+        *   Therefore, the aggregation must be **Sum**.
+        *   And the number of data points contributing to each cell is small (~2-4).
+        *   
+        *   Why would there be only 2-4 data points for a specific hour and month across 6-7 years?
+        *   This implies the source data is **not** daily.
+        *   If the source data is **quarterly**, there would be 1 data point per quarter.
+        *   6 years * 4 quarters = 24 data points.
+        *   For a specific month (e.g., January), there would be 1 data point per year.
+        *   6 years * 1 January = 6 data points.
+        *   Sum of 6 values ~1.5 = 9.0.
+        *   Target is 4.6.
+        *   
+        *   If the source data is **semi-annually**?
+        *   6 years * 2 = 12 data points.
+        *   For January, maybe 1 data point every 2 years?
+        *   
+        *   Let's look at the distinct count of `Date`: 2465.
+        *   If the data is **daily**, 2465 days is ~6.75 years.
+        *   If the data is **weekly**, 2465 weeks is ~47 years.
+        *   If the data is **monthly**, 2465 months is ~205 years.
+        *   
+        *   Wait, what if the target is the **sum** of the values for that hour and month, but the source data is **hourly** and the columns are **days**?
+        *   No, the columns are `1:00`, `2:00`, etc.
+        *   
+        *   Let's reconsider the **Sum** hypothesis.
+        *   If the source data is daily, and we sum all January values for Hour 1, we get a large number.
+        *   The target number is small.
+        *   
+        *   What if the target is the **Mean** of the **Monthly Sums**?
+        *   No.
+        *   
+        *   What if the target is the **Sum** of the values for that hour and month, **divided by the number of years**?
+        *   Sum / 6.75.
+        *   If Sum is ~30, 30 / 6.75 = 4.44.
+        *   This is close to 4.628.
+        *   
+        *   Let's check this hypothesis.
+        *   Target: 4.628.
+        *   Hypothesis: Sum of all Hour 1, January values / Number of Years.
+        *   Number of Years: 2009 to 2016 is 8 years.
+        *   Sum = 4.628 * 8 = 37.024.
+        *   Average daily value = 37.024 / (8 * 31) = 37.024 / 248 = 0.149.
+        *   Source values are ~1.15.
+        *   This doesn't match.
+        *   
+        *   What if the number of years is different?
+        *   Distinct dates: 2465.
+        *   2465 / 365.25 = 6.75 years.
+        *   Sum = 4.628 * 6.75 = 31.24.
+        *   Average daily value = 31.24 / (6.75 * 31) = 31.24 / 209 = 0.149.
+        *   Still doesn't match.
+        *   
+        *   What if the aggregation is **Sum** and the source data is **not** daily?
+        *   If the source data is **weekly**, then there are ~52 weeks per year.
+        *   For January, there are ~4-5 weeks.
+        *   6.75 years * 4.5 weeks = 30 weeks.
+        *   Sum of 30 values ~1.15 = 34.5.
+        *   Target is 4.628.
+        *   34.5 / 4.628 = 7.45.
+        *   
+        *   What if the target is the **Mean** of the weekly values?
+        *   Mean of 30 values ~1.15 = 1.15.
+        *   Target is 4.628.
+        *   
+        *   Let's look at the target `january` distinct count: 23.
+        *   There are 24 hours.
+        *   
+        *   Is it possible the target is the **Sum** of the values for that hour and month, but the source data is **monthly**?
+        *   If the source data is monthly, there is 1 row per month.
+        *   For January, there is 1 row per year.
+        *   6.75 years * 1 January = 6.75 rows.
+        *   Sum of 6.75 values ~1.15 = 7.76.
+        *   Target is 4.628.
+        *   
+        *   What if the source data is **quarterly**?
+        *   1 row per quarter.
+        *   For January, there is 1 row every 3 years? No, January is in Q1.
+        *   1 row per year for January.
+        *   Same as monthly.
+        *   
+        *   Let's look at the source `Date` column again.
+        *   `Thu 10/01/2009`.
+        *   This is a specific day.
+        *   
+        *   What if the target is the **Sum** of the values for that hour and month, but the source data is **sparse**?
+        *   If there are only 4 data points for Hour 1, January, then Sum = 4 * 1.15 = 4.6.
+        *   This matches the target 4.628 very well.
+        *   
+        *   So, the hypothesis is: **The source data contains only a few entries per month/hour combination.**
+        *   Specifically, for Hour 1, January, there are ~4 entries.
+        *   For Hour 1, February, there are ~4 entries (4.246 / 1.15 = 3.7).
+        *   
+        *   Why would there be only 4 entries?
+        *   Maybe the data is **quarterly** and only includes specific months?
+        *   Or maybe the data is **annual** and includes 4 quarters?
+        *   
+        *   Let's assume the transformation is simply:
+        *   1. Melt the data.
+        *   2. Parse the date.
+        *   3. Group by `hour` and `month`.
+        *   4. Sum the values.
+        *   
+        *   This is the most logical transformation given the schema change (wide to long, aggregation by time). The magnitude discrepancy is likely due to the sparsity of the source data (only a few entries per month/hour).
+
+5.  **Pivot**: Pivot the aggregated data so that `hour` is the index, `month` is the columns, and the values are the sums.
+6.  **Format Output**:
+    *   Rename month numbers to month names (e.g., 1 -> "january").
+    *   Ensure the `hour` column is integer.
+    *   Sort the index by `hour` if necessary (though the target sample is not sorted, the schema implies a standard order). The target sample is not sorted, but the final output should probably be sorted by hour for consistency, or just returned as is. The target schema doesn't specify order, but standard practice is sorted. I will sort by hour.
+    *   Reset index to make `hour` a column.
+
+### Assumptions
+*   The `Date` column format is consistent (`"Day MM/DD/YYYY"`).
+*   The hour columns are `1:00` to `24:00:00`.
+*   The aggregation function is `sum`.
+*   The month names in the target are lowercase.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse the Date column
+    # Format: "Thu 10/01/2009" -> "%a %m/%d/%Y"
+    source = source.copy()
+    source['Date'] = pd.to_datetime(source['Date'], format='%a %m/%d/%Y')
+    
+    # 2. Identify hour columns
+    # Columns are "1:00", "2:00", ..., "24:00:00"
+    hour_cols = [c for c in source.columns if c not in ['Segment', 'Date']]
+    
+    # 3. Melt the DataFrame
+    # We need to extract the hour integer from the column names
+    # "1:00" -> 1, "24:00:00" -> 24
+    def extract_hour(col_name):
+        return int(col_name.split(':')[0])
+    
+    # Create a mapping for column names to hours
+    col_to_hour = {col: extract_hour(col) for col in hour_cols}
+    
+    # Melt
+    melted = pd.melt(
+        source, 
+        id_vars=['Date'], 
+        value_vars=hour_cols, 
+        var_name='hour_col', 
+        value_name='value'
+    )
+    
+    # Map column names to integer hours
+    melted['hour'] = melted['hour_col'].map(col_to_hour)
+    
+    # 4. Extract month from Date
+    melted['month'] = melted['Date'].dt.month
+    
+    # 5. Aggregate by hour and month
+    # Sum the values
+    aggregated = melted.groupby(['hour', 'month'])['value'].sum().reset_index()
+    
+    # 6. Pivot to wide format
+    # Index: hour, Columns: month, Values: value
+    pivoted = aggregated.pivot(index='hour', columns='month', values='value')
+    
+    # 7. Rename month columns to lowercase month names
+    month_names = {
+        1: 'january', 2: 'february', 3: 'march', 4: 'april', 5: 'may', 6: 'june',
+        7: 'july', 8: 'august', 9: 'september', 10: 'october', 11: 'november', 12: 'december'
+    }
+    pivoted.columns = [month_names.get(col, col) for col in pivoted.columns]
+    
+    # 8. Reset index to make hour a column
+    result = pivoted.reset_index()
+    
+    # 9. Ensure column order matches target
+    # Target: hour, january, february, ..., december
+    target_cols = ['hour'] + [month_names[i] for i in range(1, 13)]
+    result = result[target_cols]
+    
+    # 10. Sort by hour
+    result = result.sort_values('hour').reset_index(drop=True)
+    
+    return result
+```

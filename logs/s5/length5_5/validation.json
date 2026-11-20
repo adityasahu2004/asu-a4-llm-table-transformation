@@ -1,0 +1,212 @@
+{
+  "case": "length5_5",
+  "length": 5,
+  "strategy": "s5",
+  "model": "qwen36-27b",
+  "is_demo": false,
+  "parameters": {
+    "output": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment",
+    "model": "qwen36-27b",
+    "base_url": "https://openai.rc.asu.edu/v1",
+    "max_tokens": 6000,
+    "reasoning_effort": "none",
+    "k": 5,
+    "sample_rows": 12,
+    "timeout": 120,
+    "api_timeout": 3600,
+    "replay_only": false,
+    "strategy": "s5",
+    "python": "3.14.4 (main, Apr  7 2026, 13:13:20) [Clang 21.0.0 (clang-2100.0.123.102)]",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "pandas": "3.1.1",
+    "held_out": [
+      "length1_1",
+      "length1_2",
+      "length1_3",
+      "length2_1",
+      "length3_1"
+    ],
+    "benchmark": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split"
+  },
+  "prompt_path": "logs/s5/length5_5/prompt.json",
+  "completion_path": "logs/s5/length5_5/response.json",
+  "execution": {
+    "status": "ok",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:19: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+    "seconds": 0.6538961670012213,
+    "shape": [
+      53,
+      25
+    ],
+    "fingerprint": "b5c077e8e7d366f5a7369abed67e6ca3ec3a94eeecdba0d364998c9f704ab63c"
+  },
+  "autopipeline": {
+    "accuracy": 1.0,
+    "is_correct": true,
+    "similarities": {},
+    "info": [
+      "date",
+      "value1",
+      "value1",
+      "value1",
+      "value1",
+      "value1",
+      "value1",
+      "value1",
+      "value1",
+      "value1",
+      "value1",
+      "value11",
+      "value11",
+      "value11",
+      "value11",
+      "value11",
+      "value11",
+      "value11",
+      "value11",
+      "value11",
+      "value11",
+      "value11",
+      "value11",
+      "value1",
+      "value1"
+    ]
+  },
+  "hard_match": {
+    "accuracy": 1.0,
+    "is_correct": true,
+    "similarities": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "info": [
+      "date",
+      "value1",
+      "value2",
+      "value3",
+      "value4",
+      "value5",
+      "value6",
+      "value7",
+      "value8",
+      "value9",
+      "value10",
+      "value11",
+      "value12",
+      "value13",
+      "value14",
+      "value15",
+      "value16",
+      "value17",
+      "value18",
+      "value19",
+      "value20",
+      "value21",
+      "value22",
+      "value23",
+      "value24"
+    ]
+  },
+  "hard_match_provenance": "course-provided hard_match.py and utils.py",
+  "exact_schema": true,
+  "generation": {
+    "candidate_count": 6,
+    "selected_index": 1,
+    "baseline_index": 1,
+    "selection_reason": "SC winner retained: no strict constraint improvement",
+    "constraints": {
+      "columns": [
+        "date",
+        "value1",
+        "value2",
+        "value3",
+        "value4",
+        "value5",
+        "value6",
+        "value7",
+        "value8",
+        "value9",
+        "value10",
+        "value11",
+        "value12",
+        "value13",
+        "value14",
+        "value15",
+        "value16",
+        "value17",
+        "value18",
+        "value19",
+        "value20",
+        "value21",
+        "value22",
+        "value23",
+        "value24"
+      ],
+      "relations": []
+    },
+    "policy": {
+      "version": "schema-weekday-v1",
+      "pool": "five few-shot SC samples + one greedy few-shot sample",
+      "constraints": [
+        "exact target schema",
+        "uniquely identified date-to-weekday relation"
+      ],
+      "target_rows": "the same 12-row prompt sample as the baselines",
+      "output_rows": "up to 128 evenly spaced training-output rows",
+      "selection": "strictly lower lexicographic constraint loss; preserve SC winner on ties",
+      "forbidden_inputs": [
+        "test_0.csv",
+        "validator results",
+        "case-specific rules",
+        "target row counts"
+      ]
+    },
+    "usage": {
+      "prompt_tokens": 82932,
+      "completion_tokens": 21743,
+      "total_tokens": 104675
+    },
+    "api_attempts": 2,
+    "marginal_api_attempts": 0,
+    "latency_seconds": 370.07374558300216,
+    "inherited_api_seconds": 370.07374558300216,
+    "clusters": {
+      "ec8d0936cdd70d9a329d58b942153e60be3c8192f9c01a2e6685d2ce0732e46b": [
+        1
+      ],
+      "87db8963326b761b9246383aa3fb99b99e38a5eee57c2467a6e78f0a1a0ae6a1": [
+        2
+      ],
+      "b2d1fe58b5977b6ae2a8737cf4636629e6342e338662414fa15cc77272e6bdea": [
+        3
+      ]
+    },
+    "cost_basis": "standalone logical pool cost; reused requests have zero marginal API cost"
+  },
+  "wall_seconds": 374.7649949580009
+}

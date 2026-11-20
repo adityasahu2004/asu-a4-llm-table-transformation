@@ -1,0 +1,265 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `date` column from string format (`M/D/YYYY`) to pandas datetime objects.
+2.  **Shift Dates**: The target dates are shifted by -6 months relative to the source dates (e.g., Source `7/3/2014` -> Target `2014-01-01` is not a direct match, but looking at the pattern:
+    *   Source `7/3/2014` (July) -> Target starts `2014-01-01`.
+    *   Source `12/31/2014` (Dec) -> Target ends `2014-07-02`.
+    *   Let's check the offset more carefully.
+    *   Source `7/3/2014` is the first row in sample. Target first row is `2014-01-01`.
+    *   Source `12/31/2014` is the last row in sample. Target last row is `2014-07-02`.
+    *   Difference between `2014-01-01` and `2014-07-02` is roughly 6 months.
+    *   Difference between `7/3/2014` and `12/31/2014` is roughly 6 months.
+    *   It appears the target date is `source_date - 6 months`. Let's verify with `pd.DateOffset(months=-6)`.
+    *   `2014-07-03` - 6 months = `2014-01-03`. The target is `2014-01-01`. This doesn't match exactly.
+    *   Let's look at the distinct counts. Source has 182 rows. Target has 183 rows.
+    *   Let's look at the values.
+        *   Source Row 0 (`7/3/2014`): `1:00 AM` = 1.035932.
+        *   Target Row 0 (`2014-01-01`): `Hour 1` = 0.401886.
+        *   These values do not match directly. The rows are likely reordered or the mapping is different.
+    *   Let's look at the column mapping.
+        *   Source columns: `1:00 AM`, `2:00 AM`, ..., `12:00 AM`, `1:00 PM`, ..., `12:00 PM`.
+        *   Target columns: `Hour 1`, `Hour 2`, ..., `Hour 24`.
+        *   Standard mapping:
+            *   `1:00 AM` -> `Hour 1`
+            *   `2:00 AM` -> `Hour 2`
+            *   ...
+            *   `11:00 AM` -> `Hour 11`
+            *   `12:00 PM` (Noon) -> `Hour 12`
+            *   `1:00 PM` -> `Hour 13`
+            *   ...
+            *   `11:00 PM` -> `Hour 23`
+            *   `12:00 AM` (Midnight) -> `Hour 24`
+    *   Let's check if the values match this mapping for a specific row.
+        *   Source Row 0 (`7/3/2014`):
+            *   `1:00 AM`: 1.035932
+            *   `12:00 AM`: 0.153621
+        *   Target Row 0 (`2014-01-01`):
+            *   `Hour 1`: 0.401886
+            *   `Hour 24`: 1.149117
+        *   No match.
+    *   Let's check if the target rows correspond to different source rows.
+        *   Target `2014-01-01` has `Hour 1` = 0.401886.
+        *   Search Source for `1:00 AM` = 0.401886.
+        *   Source Row 1 (`7/19/2014`): `1:00 AM` = 1.07502. No.
+        *   Source Row 2 (`8/4/2014`): `1:00 AM` = 0.536586. No.
+        *   Source Row 3 (`8/21/2014`): `1:00 AM` = 0.307012. No.
+        *   Source Row 4 (`9/6/2014`): `1:00 AM` = 0.370688. No.
+        *   Source Row 5 (`9/23/2014`): `1:00 AM` = 0.380244. No.
+        *   Source Row 6 (`10/9/2014`): `1:00 AM` = 0.413312. No.
+        *   Source Row 7 (`10/26/2014`): `1:00 AM` = 0.577044. No.
+        *   Source Row 8 (`11/11/2014`): `1:00 AM` = 0.251101. No.
+        *   Source Row 9 (`11/28/2014`): `1:00 AM` = 0.432581. No.
+        *   Source Row 10 (`12/14/2014`): `1:00 AM` = 0.375951. No.
+        *   Source Row 11 (`12/31/2014`): `1:00 AM` = 0.133762. No.
+    *   Wait, the sample data provided in the prompt is just a *sample*. The source has 182 rows, the sample shows 12. The target has 183 rows, the sample shows 12.
+    *   The note says: "Source row count describes a training sample only, not the evaluation input."
+    *   However, usually in these problems, the transformation is structural.
+    *   Let's look at the date shift again.
+        *   Source `7/3/2014` -> Target `2014-01-01`?
+        *   Source `12/31/2014` -> Target `2014-07-02`?
+        *   If we subtract 6 months from `7/3/2014`, we get `1/3/2014`.
+        *   If we subtract 6 months from `12/31/2014`, we get `6/30/2014` or `7/1/2014`.
+        *   The target dates are `2014-01-01` and `2014-07-02`.
+        *   This looks like `source_date - 6 months` might be close, but the days are off.
+        *   Let's look at the distinct values. Source `date` has 182 distinct values. Target `date` has 183 distinct values.
+        *   This implies a row was added or the date range expanded.
+        *   Let's look at the `DSL` column in source. It has values `0.0` and `0.119509`. It is not in the target.
+        *   The target has 24 hour columns. The source has 24 hour columns.
+        *   The mapping of columns is almost certainly:
+            *   `1:00 AM` -> `Hour 1`
+            *   `2:00 AM` -> `Hour 2`
+            *   ...
+            *   `11:00 AM` -> `Hour 11`
+            *   `12:00 PM` -> `Hour 12`
+            *   `1:00 PM` -> `Hour 13`
+            *   ...
+            *   `11:00 PM` -> `Hour 23`
+            *   `12:00 AM` -> `Hour 24`
+    *   Let's re-examine the date transformation.
+        *   Source: `7/3/2014` to `12/31/2014`.
+        *   Target: `2014-01-01` to `2014-07-02`.
+        *   The target range is exactly 6 months prior to the source range, but shifted by a few days?
+        *   `7/3/2014` - 6 months = `1/3/2014`. Target is `1/1/2014`.
+        *   `12/31/2014` - 6 months = `6/30/2014` (or `7/1/2014`). Target is `7/2/2014`.
+        *   This suggests the target date is `source_date - 6 months` but then adjusted? Or maybe the source dates in the sample are not the first/last of the full dataset?
+        *   The schema says Source has 182 rows. The sample has 12.
+        *   The schema says Target has 183 rows. The sample has 12.
+        *   If the transformation is simply `date - 6 months`, the number of rows should be the same. Here it increases by 1.
+        *   Perhaps the target includes an extra day?
+        *   Let's look at the values again.
+        *   Target `2014-01-01` `Hour 1` = 0.401886.
+        *   Is there a source row with `1:00 AM` = 0.401886?
+        *   I didn't find it in the sample.
+        *   However, if I assume the transformation is `date - 6 months`, I need to handle the row count difference.
+        *   Maybe the source dates are not contiguous?
+        *   Source distinct dates: 182.
+        *   Target distinct dates: 183.
+        *   This is tricky. Let's look at the `DSL` column. It's dropped.
+        *   Let's assume the standard column rename and date shift.
+        *   Date shift: `pd.to_datetime(df['date']) - pd.DateOffset(months=6)`.
+        *   Format: `YYYY-MM-DD 00:00:00`.
+        *   Why the extra row?
+        *   Maybe the source data has gaps and the target fills them? Or vice versa?
+        *   Or maybe the "182" and "183" are just artifacts of the sample generation and the real transformation is 1-to-1?
+        *   Let's look at the first and last dates again.
+        *   Source: `7/3/2014` ... `12/31/2014`.
+        *   Target: `2014-01-01` ... `2014-07-02`.
+        *   If I take `7/3/2014` and subtract 6 months, I get `1/3/2014`.
+        *   If I take `12/31/2014` and subtract 6 months, I get `6/30/2014` (in pandas, `DateOffset(months=6)` on `12/31` might go to `6/30` or `7/1` depending on implementation, usually `6/30` if day doesn't exist, but `12/31` - 6 months is `6/30`? No, `12/31` - 6 months is `6/30` in some libs, `7/1` in others? Pandas `DateOffset(months=6)` on `2014-12-31` results in `2014-06-30`? Let's check. `2014-12-31` - 6 months. `12-6=6`. Day 31. June has 30 days. So it becomes `2014-06-30`.
+        *   Target ends at `2014-07-02`.
+        *   This is a 2-3 day difference.
+        *   Is it possible the shift is not 6 months?
+        *   `7/3/2014` to `1/1/2014` is 183 days.
+        *   `12/31/2014` to `7/2/2014` is 182 days.
+        *   This looks like a shift of roughly 6 months, but specifically `date - 6 months` might not be the exact formula if the days are off.
+        *   However, `183` days is exactly 6 months (approx).
+        *   Let's look at the row count. 182 -> 183.
+        *   If the source is `7/3` to `12/31`, that's 182 days?
+        *   July (31-3+1=29) + Aug (31) + Sep (30) + Oct (31) + Nov (30) + Dec (31) = 182 days.
+        *   So the source contains every day from `7/3/2014` to `12/31/2014`.
+        *   The target contains every day from `1/1/2014` to `7/2/2014`?
+        *   Jan (31) + Feb (28) + Mar (31) + Apr (30) + May (31) + Jun (30) + Jul (2) = 183 days.
+        *   So the target is a contiguous range of 183 days.
+        *   The source is a contiguous range of 182 days.
+        *   The transformation maps the source range `7/3/2014`...`12/31/2014` to `1/1/2014`...`7/2/2014`?
+        *   This is a shift of -6 months AND a shift of -2 days?
+        *   `7/3/2014` - 6 months = `1/3/2014`. `1/3/2014` - 2 days = `1/1/2014`.
+        *   `12/31/2014` - 6 months = `6/30/2014`. `6/30/2014` + 2 days = `7/2/2014`.
+        *   This is inconsistent.
+        *   Let's try `date - 6 months` and see if the row count matches.
+        *   If I just shift the dates, I get 182 rows. The target has 183.
+        *   Where does the extra row come from?
+        *   Maybe the source data in the *evaluation* will have 183 rows?
+        *   The note says: "Source row count describes a training sample only, not the evaluation input."
+        *   This implies the evaluation input might have a different number of rows.
+        *   However, the transformation must be general.
+        *   If the source has 182 rows and target has 183, and the dates are contiguous, maybe the target is generated by shifting the source dates by -6 months, and then *adding* a row? Or maybe the source is missing a day?
+        *   Let's look at the values again.
+        *   If I can't match the values, I can't be sure of the row mapping.
+        *   But the column mapping is clear.
+        *   The date mapping is likely `source_date - 6 months`.
+        *   The extra row in the target sample might be due to the source sample being truncated or the target sample including an extra day from a different part of the dataset?
+        *   Actually, look at the target first date: `2014-01-01`.
+        *   Look at the source first date: `7/3/2014`.
+        *   If the source started at `7/1/2014`, `7/1/2014` - 6 months = `1/1/2014`.
+        *   If the source ended at `12/31/2014`, `12/31/2014` - 6 months = `6/30/2014`.
+        *   The target ends at `7/2/2014`.
+        *   This is very confusing.
+        *   Let's reconsider the `DSL` column. It has 2 distinct values.
+        *   Maybe the data is split by `DSL`?
+        *   No, the target doesn't have `DSL`.
+        *   Let's assume the simplest transformation:
+            1.  Rename columns.
+            2.  Shift date by -6 months.
+            3.  Format date.
+            4.  Drop `DSL`.
+        *   If the row count differs in the sample, it might be an artifact of the sample selection (e.g., target sample includes a row from a different month not in the source sample, or vice versa).
+        *   Given the instruction "Infer a general transformation", and the strong signal of the column names and the 6-month offset in the date ranges, I will proceed with:
+            *   `date` = `pd.to_datetime(df['date']) - pd.DateOffset(months=6)`
+            *   Rename hour columns.
+            *   Drop `DSL`.
+            *   Sort by date? The target seems sorted.
+            *   Format date as `YYYY-MM-DD 00:00:00`.
+
+    *   Wait, let's look at the target date format: `2014-01-01 00:00:00`.
+    *   Source date format: `7/3/2014`.
+    *   The target date is a string.
+
+    *   One more check: Is it possible the shift is `date - 6 months` and the extra row is because the source *evaluation* data will have 183 rows?
+    *   The note says "Source row count describes a training sample only". This suggests the evaluation source might have a different count. If the evaluation source has 183 rows, and the transformation is 1-to-1, the target will have 183 rows.
+    *   The sample target has 183 rows. The sample source has 182.
+    *   This discrepancy in the *sample* might be because the sample source is missing one day (e.g., `7/1/2014` or `7/2/2014`) that is present in the full training set, and the target sample includes the corresponding shifted date.
+    *   If the source sample starts at `7/3/2014`, and the full source starts at `7/1/2014`, then `7/1/2014` - 6 months = `1/1/2014`.
+    *   If the source sample ends at `12/31/2014`, and the full source ends at `12/31/2014`, then `12/31/2014` - 6 months = `6/30/2014`.
+    *   But the target sample ends at `7/2/2014`.
+    *   This implies the source might go up to `1/1/2015`? `1/1/2015` - 6 months = `7/1/2014`.
+    *   Or `1/2/2015` - 6 months = `7/2/2014`.
+    *   If the source is `7/1/2014` to `1/2/2015`, that's 186 days.
+    *   This is getting too speculative.
+    *   The most robust transformation is:
+        1.  Parse `date`.
+        2.  Subtract 6 months.
+        3.  Rename columns.
+        4.  Drop `DSL`.
+        5.  Format `date` as string.
+        6.  Sort by `date`.
+
+    *   Let's check the column order in target: `Hour 1` to `Hour 24`.
+    *   Source columns: `1:00 AM` ... `12:00 PM`.
+    *   Mapping:
+        *   `1:00 AM` -> `Hour 1`
+        *   `2:00 AM` -> `Hour 2`
+        *   `3:00 AM` -> `Hour 3`
+        *   `4:00 AM` -> `Hour 4`
+        *   `5:00 AM` -> `Hour 5`
+        *   `6:00 AM` -> `Hour 6`
+        *   `7:00 AM` -> `Hour 7`
+        *   `8:00 AM` -> `Hour 8`
+        *   `9:00 AM` -> `Hour 9`
+        *   `10:00 AM` -> `Hour 10`
+        *   `11:00 AM` -> `Hour 11`
+        *   `12:00 PM` -> `Hour 12`
+        *   `1:00 PM` -> `Hour 13`
+        *   `2:00 PM` -> `Hour 14`
+        *   `3:00 PM` -> `Hour 15`
+        *   `4:00 PM` -> `Hour 16`
+        *   `5:00 PM` -> `Hour 17`
+        *   `6:00 PM` -> `Hour 18`
+        *   `7:00 PM` -> `Hour 19`
+        *   `8:00 PM` -> `Hour 20`
+        *   `9:00 PM` -> `Hour 21`
+        *   `10:00 PM` -> `Hour 22`
+        *   `11:00 PM` -> `Hour 23`
+        *   `12:00 AM` -> `Hour 24`
+
+    *   This mapping is standard.
+
+    *   Final Plan:
+        1.  Create a copy of the source dataframe.
+        2.  Parse the `date` column to datetime.
+        3.  Subtract 6 months from the `date` column.
+        4.  Format the `date` column as `YYYY-MM-DD 00:00:00`.
+        5.  Rename the hour columns according to the mapping.
+        6.  Drop the `DSL` column.
+        7.  Sort by `date` to ensure order (though source seems sorted, target is sorted).
+        8.  Return the dataframe.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Create a copy to avoid modifying the original
+    df = source.copy()
+    
+    # Parse the date column
+    df['date'] = pd.to_datetime(df['date'], format='%m/%d/%Y')
+    
+    # Shift the date by -6 months
+    df['date'] = df['date'] - pd.DateOffset(months=6)
+    
+    # Format the date as string
+    df['date'] = df['date'].dt.strftime('%Y-%m-%d 00:00:00')
+    
+    # Define the column mapping
+    col_mapping = {
+        '1:00 AM': 'Hour 1',
+        '2:00 AM': 'Hour 2',
+        '3:00 AM': 'Hour 3',
+        '4:00 AM': 'Hour 4',
+        '5:00 AM': 'Hour 5',
+        '6:00 AM': 'Hour 6',
+        '7:00 AM': 'Hour 7',
+        '8:00 AM': 'Hour 8',
+        '9:00 AM': 'Hour 9',
+        '10:00 AM': 'Hour 10',
+        '11:00 AM': 'Hour 11',
+        '12:00 PM': 'Hour 12',
+        '1:00 PM': 'Hour 13',
+        '2:00 PM': 'Hour 14',
+        '3:00 PM': 'Hour 15',
+        '4:00 PM': 'Hour 16',
+        '5:00 PM': 'Hour 17',
+        '6:00 PM': 'Hour 18',
+        '7:00 PM': 'Hour 19',
+        '8:00 PM': 'Hour

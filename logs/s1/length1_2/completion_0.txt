@@ -1,0 +1,65 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `date` column from string format (`M/D/YYYY`) to pandas datetime objects.
+2.  **Generate Full Date Range**: The source data contains sparse dates (e.g., bi-weekly samples). The target data contains a dense daily range. We need to generate a complete date range covering the minimum and maximum dates found in the source data.
+3.  **Interpolate Missing Dates**: Since the target has more rows (183) than the source (182) and covers a continuous period, we must interpolate the hourly values for the missing dates. We will set the parsed date as the index, sort by date, and use linear interpolation (`method='time'` or standard linear interpolation on the sorted index) to fill in the missing days for all `value1` through `value24` columns.
+4.  **Format Date Column**: Create a new column `cst` from the index (datetime) formatted as `"DayOfWeek MM/DD/YYYY"` (e.g., "Sat 01/01/2011"). Note: The sample shows "Sat 01/01/2011", which corresponds to `%a %m/%d/%Y`.
+5.  **Rename Value Columns**: Rename `value1` to `1:00`, `value2` to `2:00`, ..., `value24` to `24:00`.
+6.  **Select and Order Columns**: Select only the `cst` column and the renamed hour columns, ensuring the order matches the target schema (`cst`, `1:00`, `2:00`, ... `24:00`).
+7.  **Reset Index**: Ensure the result is a standard DataFrame with a default integer index.
+
+### Assumptions
+*   The source data represents a time series where missing dates should be linearly interpolated to create a daily record.
+*   The `value1`...`value24` columns correspond to hours 1 through 24 respectively.
+*   The date format in the target `cst` column is `%a %m/%d/%Y` (abbreviated weekday name, zero-padded month, zero-padded day, 4-digit year).
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    """
+    Transforms sparse hourly load data into a dense daily time series with interpolated values.
+    """
+    # 1. Parse the date column
+    df = source.copy()
+    df['date'] = pd.to_datetime(df['date'], format='%m/%d/%Y')
+    
+    # 2. Set date as index and sort to ensure proper interpolation
+    df = df.set_index('date').sort_index()
+    
+    # 3. Identify value columns
+    value_cols = [f'value{i}' for i in range(1, 25)]
+    
+    # 4. Generate a complete date range from min to max date in the source
+    # The target has 183 rows, source has 182. The range likely covers the full span.
+    # We create a daily frequency range.
+    min_date = df.index.min()
+    max_date = df.index.max()
+    full_date_range = pd.date_range(start=min_date, end=max_date, freq='D')
+    
+    # 5. Reindex to the full date range to introduce NaNs for missing days
+    df = df.reindex(full_date_range)
+    
+    # 6. Interpolate the value columns linearly
+    # Using linear interpolation on the datetime index
+    df[value_cols] = df[value_cols].interpolate(method='time')
+    
+    # 7. Create the 'cst' column with the specific format: "DayOfWeek MM/DD/YYYY"
+    # Example: "Sat 01/01/2011"
+    # %a gives abbreviated weekday (Sat), %m gives zero-padded month, %d zero-padded day, %Y 4-digit year
+    df['cst'] = df.index.strftime('%a %m/%d/%Y')
+    
+    # 8. Rename value columns to hour format "H:00"
+    rename_map = {f'value{i}': f'{i}:00' for i in range(1, 25)}
+    df = df.rename(columns=rename_map)
+    
+    # 9. Select and order columns as per target schema
+    # Target columns: cst, 1:00, 2:00, ..., 24:00
+    hour_cols = [f'{i}:00' for i in range(1, 25)]
+    final_cols = ['cst'] + hour_cols
+    
+    result = df[final_cols].reset_index(drop=True)
+    
+    return result
+```

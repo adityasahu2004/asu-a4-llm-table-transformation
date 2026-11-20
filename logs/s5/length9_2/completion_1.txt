@@ -1,0 +1,287 @@
+**Operator plan:**
+1.  **Construct Date/Time:** Combine `YEAR`, `MONTH`, and `DAY` into a datetime object to determine the day of the week.
+2.  **Derive `season`:** Map `MONTH` values to seasons (Winter: 12,1,2; Spring: 3,4,5; Summer: 6,7,8; Fall: 9,10,11).
+3.  **Derive `daytype`:** Check the day of the week from the constructed date. If Saturday (5) or Sunday (6), label "WEEKEND", else "WEEKDAY".
+4.  **Select `hour`:** Copy the `HOUR` column.
+5.  **Calculate `temperature_range`:** Compute `HIGH_1 - LOW_1`. Note that `LOW_1` is constant -999 and `HIGH_1` varies, but the target shows a constant `100998.0`. Wait, looking at the target sample, `temperature_range` is always `100998.0`. Let's check the source. `HIGH_1` has distinct values. `LOW_1` is -999. `99999 - (-999) = 100998`. It seems the target `temperature_range` is simply the difference between the global max high (`99999`) and the global min low (`-999`), or perhaps it's a fixed constant derived from the range limits of the first bin? Actually, looking at the target schema, `temperature_range` has only 1 distinct value: `100998.0`. This suggests it is a constant column calculated as `99999.0 - (-999.0)`.
+6.  **Flatten Ranges and Coefficients:** The source has multiple ranges (`LOW_1`/`HIGH_1`, `LOW_2`/`HIGH_2`, etc.) and coefficients (`COEFF_1`, `COEFF_2`, etc.) with a `CONSTANT` term. The target has single columns `low_end`, `high_end`, `constant`, and `coefficient`.
+    *   The target `low_end` is always `-999.0`.
+    *   The target `high_end` is always `99999.0`.
+    *   The target `constant` and `coefficient` seem to be aggregated or selected. However, looking at the source, `NUMBER_OF_RANGES` indicates how many ranges are active. The source data is "long" format with multiple coefficients per row if `NUMBER_OF_RANGES > 1`. The target has the same number of rows (`105132`). This implies we are not pivoting. We are likely selecting the first range/coefficient or aggregating.
+    *   Let's look closer. Source `CONSTANT` and `COEFF_1` are present for all rows. `COEFF_2` is null if `NUMBER_OF_RANGES` < 2.
+    *   In the target, `constant` and `coefficient` have 2305 distinct values. Source `CONSTANT` has 2304. Source `COEFF_1` has 2304.
+    *   Wait, the target `constant` values in the sample (e.g., `36.18...`) do not match the source `CONSTANT` values (e.g., `444.09...`) for the corresponding rows (MP1, Jan 1, Hour 100).
+    *   Let's re-examine the mapping.
+        *   Source Row 1: MP1, Jan 1, Hour 100. `CONSTANT`=444.09, `COEFF_1`=-5.38.
+        *   Target Row 1: Hour 100. `constant`=36.18, `coefficient`=-0.25.
+        *   These don't match. Is there an aggregation?
+        *   Let's check the `LOSS_FACTOR`. Source `LOSS_FACTOR` is 1.0536... for MP1.
+        *   Maybe `constant` and `coefficient` are derived from `CONSTANT`, `COEFF_1`, ..., `COEFF_5` and `LOSS_FACTOR`?
+        *   Or maybe the target is not row-aligned with the source in a simple 1:1 way? But the row counts are identical.
+        *   Let's look at the `temperature_range` again. It is constant `100998`.
+        *   Let's look at `low_end` and `high_end`. They are constant `-999` and `99999`.
+        *   This implies the target represents a single "global" range or the first range, but flattened.
+        *   Why are the values different?
+        *   Let's check if `constant` in target is `CONSTANT` * `LOSS_FACTOR`?
+            *   444.09137003 * 1.05364821 ≈ 467.9. No.
+        *   Let's check if it's related to the ranges.
+        *   Actually, let's look at the distinct counts. Source `CONSTANT` distinct: 2304. Target `constant` distinct: 2305.
+        *   Source `COEFF_1` distinct: 2304. Target `coefficient` distinct: 2305.
+        *   This small difference suggests a calculation involving another variable that adds a unique value or modifies the set.
+        *   Let's look at the sample target data again.
+            *   Row 1: Hour 100. Constant 36.18.
+            *   Row 2: Hour 500. Constant 168.69.
+            *   Row 3: Hour 900. Constant 3065.74.
+        *   Let's look at the source for these hours.
+            *   Source Hour 100: MP1, Jan 1. Constant 444.09.
+            *   Source Hour 500: MT1, Feb 3. Constant 198.53.
+            *   Source Hour 900: OP3, Mar 8. Constant 384.87.
+        *   There is no obvious arithmetic link between 444->36 or 198->168.
+        *   Wait, is it possible the target columns `constant` and `coefficient` are actually `LOW_1` and `HIGH_1`? No, `low_end` and `high_end` are separate.
+        *   Is it possible the target is using `COEFF_1` and `CONSTANT` but from a different row? No, row count is same.
+        *   Let's look at `LOSS_FACTOR`.
+            *   Row 1: 1.0536.
+            *   Row 2: 1.0268.
+            *   Row 3: 1.0804.
+        *   Let's try `CONSTANT / LOSS_FACTOR`?
+            *   444.09 / 1.0536 ≈ 421.
+        *   Let's try `COEFF_1 * LOSS_FACTOR`?
+            *   -5.38 * 1.0536 ≈ -5.66.
+        
+        *   Let's look at the `temperature_range` calculation again. `99999 - (-999) = 100998`. This is constant.
+        *   The target `low_end` is -999. `high_end` is 99999.
+        *   This suggests the target is collapsing all ranges into the first one's boundaries? Or just fixed boundaries.
+        
+        *   Let's reconsider the `constant` and `coefficient` values.
+        *   Maybe the target `constant` is `COEFF_1`? No, distinct counts differ slightly.
+        *   Maybe the target `coefficient` is `CONSTANT`? No.
+        
+        *   Let's look at the provided sample data more carefully.
+        *   Source Row 0: `CONSTANT`=444.09137003, `COEFF_1`=-5.3809266.
+        *   Target Row 0: `constant`=36.18491546, `coefficient`=-0.25655314.
+        
+        *   Is there a relationship between the Source `COEFF`s and Target `constant`/`coefficient`?
+        *   Maybe `constant` = `COEFF_1` + `COEFF_2`...? No, `COEFF_2` is null for Row 0.
+        
+        *   Let's look at the `LOSS_FACTOR` again.
+        *   Row 0: 1.05364821.
+        *   Row 1: 1.0268241.
+        *   Row 2: 1.08047231.
+        
+        *   Let's try: `Target Constant` = `Source CONSTANT` / `Source LOSS_FACTOR`?
+            *   444.09 / 1.0536 = 421.5. No.
+        *   Let's try: `Target Constant` = `Source CONSTANT` * `Source LOSS_FACTOR`?
+            *   444.09 * 1.0536 = 467.9. No.
+            
+        *   Let's try: `Target Coefficient` = `Source COEFF_1` / `Source LOSS_FACTOR`?
+            *   -5.38 / 1.0536 = -5.10. No.
+            
+        *   Let's look at the values:
+            *   T_Const: 36.18. S_Const: 444.09. Ratio: 0.081.
+            *   T_Coef: -0.256. S_Coef: -5.38. Ratio: 0.047.
+            
+        *   Is it possible the target is not derived from the source rows directly in a 1:1 mathematical way, but rather the source provided is a *training* sample and the target is the *result* of a model or a specific aggregation that I cannot reverse-engineer purely from these 12 rows without more context?
+        *   However, usually these problems are deterministic transformations.
+        *   Let's look at `NUMBER_OF_RANGES`.
+        *   Row 0: 2.
+        *   Row 1: 1.
+        *   Row 2: 2.
+        
+        *   Let's look at `LOW_1`, `HIGH_1`.
+        *   Row 0: -999, 22.25.
+        *   Row 1: -999, 99999.
+        *   Row 2: -999, 45.93.
+        
+        *   Target `low_end` is always -999. Target `high_end` is always 99999.
+        *   Target `temperature_range` is always 100998.
+        
+        *   This implies the target structure is "flattening" the multi-range profile into a single "global" profile or simply ignoring the specific ranges and using the max possible range.
+        
+        *   What about `constant` and `coefficient`?
+        *   If we ignore the specific ranges, maybe we sum the coefficients?
+        *   Row 0: `COEFF_1`=-5.38, `COEFF_2`=0.83. Sum = -4.55. Target Coef = -0.25.
+        *   Row 1: `COEFF_1`=-0.71. Target Coef = -1.68.
+        
+        *   Let's try: `Target Constant` = `Source CONSTANT` + `Source COEFF_1` * `Source HIGH_1`?
+            *   Row 0: 444.09 + (-5.38 * 22.25) = 444.09 - 119.7 = 324.39. No.
+            
+        *   Let's try: `Target Constant` = `Source CONSTANT` / `Source NUMBER_OF_RANGES`?
+            *   444.09 / 2 = 222. No.
+            
+        *   Let's look at the distinct values again.
+        *   Source `CONSTANT` distinct: 2304.
+        *   Target `constant` distinct: 2305.
+        *   Source `COEFF_1` distinct: 2304.
+        *   Target `coefficient` distinct: 2305.
+        
+        *   This is very specific. 2304 vs 2305.
+        *   There are 12 profile classes. 12 months. 25 hours. 12 * 12 * 25 = 3600.
+        *   But `DAY` is also in the source.
+        *   The source has 105132 rows.
+        *   The target has 105132 rows.
+        
+        *   Let's look at the `LOSS_FACTOR` distinct values: 3.
+        *   Let's look at `PROFILE_CLASS` distinct values: 12.
+        
+        *   Is it possible that `constant` and `coefficient` in the target are actually `LOW_1` and `HIGH_1`?
+            *   Target `constant` distinct: 2305. `LOW_1` distinct: 1. No.
+            *   Target `constant` distinct: 2305. `HIGH_1` distinct: 1517. No.
+            
+        *   Let's look at the sample values again.
+        *   Target `constant` for Row 0: 36.18491546.
+        *   Source `COEFF_1` for Row 0: -5.3809266.
+        *   Source `COEFF_2` for Row 0: 0.831064.
+        
+        *   Wait, look at Row 1 (MT1).
+        *   Source `CONSTANT`: 198.53. `COEFF_1`: -0.71.
+        *   Target `constant`: 168.69. `coefficient`: -1.68.
+        
+        *   Look at Row 2 (OP3).
+        *   Source `CONSTANT`: 384.87. `COEFF_1`: -1.25. `COEFF_2`: 2.08.
+        *   Target `constant`: 3065.74. `coefficient`: -25.87.
+        
+        *   There is a huge jump in Row 2's target constant (3065 vs 384).
+        
+        *   Let's check if the target values correspond to *other* columns in the source.
+        *   Source `HIGH_1` Row 2: 45.93.
+        *   Source `HIGH_2` Row 2: 99999.
+        
+        *   Let's check `LOSS_FACTOR` Row 2: 1.08047231.
+        
+        *   Is it possible the target `constant` is `Source CONSTANT` * `Source LOSS_FACTOR` * `Source NUMBER_OF_RANGES`?
+            *   Row 0: 444.09 * 1.0536 * 2 = 935. No.
+            
+        *   Let's try: `Target Constant` = `Source CONSTANT` + `Source COEFF_1` * 100?
+            *   444 + (-5.38 * 100) = 444 - 538 = -94. No.
+            
+        *   Let's try: `Target Coefficient` = `Source COEFF_1` * `Source LOSS_FACTOR`?
+            *   Row 0: -5.38 * 1.0536 = -5.66. Target: -0.25.
+            
+        *   Let's try: `Target Coefficient` = `Source COEFF_1` / `Source LOSS_FACTOR`?
+            *   -5.38 / 1.0536 = -5.10.
+            
+        *   Let's try: `Target Constant` = `Source CONSTANT` / `Source LOSS_FACTOR`?
+            *   444 / 1.0536 = 421.
+            
+        *   What if `constant` and `coefficient` in the target are actually `COEFF_1` and `CONSTANT` from a *different* row? No, row count is preserved.
+        
+        *   Let's look at the `temperature_range` again. `100998`.
+        *   `low_end`: `-999`.
+        *   `high_end`: `99999`.
+        
+        *   These three columns (`temperature_range`, `low_end`, `high_end`) are clearly derived from the fixed bounds of the first range (or global bounds).
+        *   `low_end` = `LOW_1` (which is always -999).
+        *   `high_end` = `HIGH_1`? No, `HIGH_1` varies. But `high_end` in target is always 99999.
+        *   `temperature_range` = `high_end` - `low_end` = 99999 - (-999) = 100998.
+        
+        *   So, `low_end` = -999.0.
+        *   `high_end` = 99999.0.
+        *   `temperature_range` = 100998.0.
+        
+        *   Now, `constant` and `coefficient`.
+        *   If `high_end` is fixed at 99999, maybe `constant` and `coefficient` are adjusted to reflect this global range?
+        *   In the source, the coefficients apply to specific ranges.
+        *   Maybe `constant` = `Source CONSTANT` + `Source COEFF_1` * (`Source HIGH_1` - `Source LOW_1`)?
+            *   Row 0: 444.09 + (-5.38 * (22.25 - (-999))) = 444.09 + (-5.38 * 1021.25) = 444.09 - 5494 = -5050. No.
+            
+        *   Maybe `constant` = `Source CONSTANT` + `Source COEFF_1` * (`Target HIGH_END` - `Source LOW_1`)?
+            *   Row 0: 444.09 + (-5.38 * (99999 - (-999))) = 444.09 + (-5.38 * 100998) = 444.09 - 543369 = -542925. No.
+            
+        *   Let's look at the values again.
+        *   Row 0 Target Constant: 36.18.
+        *   Row 0 Source Constant: 444.09.
+        *   Row 0 Source Coeff1: -5.38.
+        
+        *   Row 1 Target Constant: 168.69.
+        *   Row 1 Source Constant: 198.53.
+        *   Row 1 Source Coeff1: -0.71.
+        
+        *   Row 2 Target Constant: 3065.74.
+        *   Row 2 Source Constant: 384.87.
+        *   Row 2 Source Coeff1: -1.25.
+        
+        *   Row 3 Target Constant: 14726.97.
+        *   Row 3 Source Constant: 4.20.
+        *   Row 3 Source Coeff1: -0.05.
+        
+        *   Row 4 Target Constant: 7.17.
+        *   Row 4 Source Constant: 1.73.
+        *   Row 4 Source Coeff1: -0.01.
+        
+        *   Row 5 Target Constant: 0.85.
+        *   Row 5 Source Constant: -0.36.
+        *   Row 5 Source Coeff1: 0.03.
+        
+        *   Row 6 Target Constant: 8.10.
+        *   Row 6 Source Constant: 0.51.
+        *   Row 6 Source Coeff1: 0.001.
+        
+        *   Row 7 Target Constant: 118.25.
+        *   Row 7 Source Constant: -19.50.
+        *   Row 7 Source Coeff1: -0.11.
+        
+        *   Row 8 Target Constant: 1385.67.
+        *   Row 8 Source Constant: 6.50.
+        *   Row 8 Source Coeff1: -0.08.
+        
+        *   Row 9 Target Constant: 5830.97.
+        *   Row 9 Source Constant: 5.60.
+        *   Row 9 Source Coeff1: -0.08.
+        
+        *   Row 10 Target Constant: 15924.71.
+        *   Row 10 Source Constant: 2.02.
+        *   Row 10 Source Coeff1: -0.01.
+        
+        *   Row 11 Target Constant: 412.91.
+        *   Row 11 Source Constant: 6.54.
+        *   Row 11 Source Coeff1: -0.0007.
+        
+        *   There is no obvious linear relationship between Source Constant and Target Constant.
+        *   However, notice that `Target Constant` seems to be much larger than `Source Constant` in many cases, or smaller.
+        *   Also, `Target Coefficient` is much smaller than `Source Coeff1`.
+        
+        *   Let's check if `Target Constant` = `Source CONSTANT` * `Source LOSS_FACTOR`?
+            *   Row 0: 444 * 1.05 = 466. No.
+        *   Let's check if `Target Constant` = `Source COEFF_1` * `Source LOSS_FACTOR`?
+            *   Row 0: -5.38 * 1.05 = -5.6. No.
+            
+        *   Let's check if `Target Constant` = `Source CONSTANT` + `Source COEFF_1`?
+            *   Row 0: 444 - 5.38 = 438. No.
+            
+        *   Let's check if `Target Constant` = `Source CONSTANT` * `Source NUMBER_OF_RANGES`?
+            *   Row 0: 444 * 2 = 888. No.
+            
+        *   Let's check if `Target Constant` = `Source HIGH_1`?
+            *   Row 0: 22.25. No.
+            
+        *   Let's check if `Target Constant` = `Source HIGH_1` * `Source LOSS_FACTOR`?
+            *   Row 0: 22.25 * 1.05 = 23. No.
+            
+        *   Let's check if `Target Constant` = `Source CONSTANT` / `Source NUMBER_OF_RANGES`?
+            *   Row 0: 222. No.
+            
+        *   Let's look at the `coefficient` column in the target.
+        *   Row 0: -0.256.
+        *   Row 1: -1.687.
+        *   Row 2: -25.87.
+        *   Row 3: -107.31.
+        *   Row 4: -0.087.
+        *   Row 5: 0.010.
+        *   Row 6: 0.140.
+        *   Row 7: 0.854.
+        *   Row 8: -3.12.
+        *   Row 9: -3.36.
+        *   Row 10: -139.35.
+        *   Row 11: -4.29.
+        
+        *   Let's compare Target Coefficient to Source Coefficients.
+        *   Row 0: S_C1=-5.38, S_C2=0.83. T_C=-0.25.
+        *   Row 1: S_C1=-0.71. T_C=-1.68.
+        *   Row 2: S_C1=-1.25, S_C2=2.08. T_C=-25.87.
+        *   Row 3: S_C1=-0.05, S_C2=-0.02, S_C3=0.005. T_C=-107.31.
+        
+        *   This is extremely confusing. The values don't seem to map directly.
+        *   However, the problem statement says "Infer the transformation".
+        *   Maybe `constant` and `coefficient` are just `CONSTANT` and `COEFF_1` from the source, but I am misreading the sample alignment?
+        *   The sample data in the target is just 12 rows. The source sample is 12 rows.
+        *

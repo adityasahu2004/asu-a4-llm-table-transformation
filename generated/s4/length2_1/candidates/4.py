@@ -1,0 +1,24 @@
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse CST: "Sat 12/01/2012" -> datetime
+    dates = pd.to_datetime(source['CST'], format='%a %m/%d/%Y')
+    
+    out = pd.DataFrame(index=source.index)
+    
+    # dt_strata: MM/DD/YYYY
+    out['dt_strata'] = dates.dt.strftime('%m/%d/%Y')
+    
+    # dow: 1=Monday ... 7=Sunday
+    out['dow'] = dates.dt.dayofweek + 1
+    
+    # Map hourly columns
+    for h in range(1, 25):
+        src_col = f'{h}:00' if h < 24 else '24:00:00'
+        tgt_col = f'pct_hourly_{h:02d}00'
+        out[tgt_col] = source[src_col]
+        
+    # Append constant 0 for the 25th hour
+    out['pct_hourly_2500'] = 0
+    
+    return out.reset_index(drop=True)

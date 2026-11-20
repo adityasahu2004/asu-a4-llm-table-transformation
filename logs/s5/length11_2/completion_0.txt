@@ -1,0 +1,170 @@
+**Operator Plan:**
+
+1.  **Parse Timestamp**: Convert `local_15min` to a datetime object to extract `month` and `hour`.
+2.  **Aggregate by Month and Hour**: Group the data by the extracted `month` and `hour`.
+3.  **Sum Columns**: For each group, sum the specific source columns corresponding to the target categories. Since the source contains `_sum` columns (which likely represent energy/power sums for that 15-min interval), we sum these up to get the total for the hour.
+    *   `hvac`: `air1_sum` + `air2_sum` + `air3_sum` + `airwindowunit1_sum` + `furnace1_sum` + `furnace2_sum` + `heater1_sum` + `heater2_sum` + `heater3_sum` + `housefan1_sum` + `jacuzzi1_sum` + `pool1_sum` + `pool2_sum` + `poolpump1_sum` + `pump1_sum` + `sprinkler1_sum` + `utilityroom1_sum` + `venthood1_sum` + `waterheater1_sum` + `waterheater2_sum` + `wellpump1_sum` + `sumppump1_sum` + `sewerpump1_sum` + `circpump1_sum`
+        *   *Correction/Refinement*: Looking at the target schema and typical ALFRED/REDD datasets, "hvac" usually aggregates air conditioners, furnaces, heaters, and fans. "water_heating" aggregates water heaters. "pool_spa_pumps" aggregates pool pumps. "pool_spa_heater" aggregates pool heaters.
+        *   Let's map strictly based on common appliance mapping in these datasets:
+            *   `hvac`: `air1_sum`, `air2_sum`, `air3_sum`, `airwindowunit1_sum`, `furnace1_sum`, `furnace2_sum`, `heater1_sum`, `heater2_sum`, `heater3_sum`, `housefan1_sum`, `jacuzzi1_sum` (often HVAC or spa pump, but jacuzzi is often separate, let's look at `pool_spa_heater`), `sprinkler1_sum` (exterior, maybe not hvac), `utilityroom1_sum` (fan?), `venthood1_sum` (fan), `sumppump1_sum`, `sewerpump1_sum`, `circpump1_sum`.
+            *   Actually, a simpler heuristic often used in these transformations if exact mapping isn't provided is to look at the column names.
+            *   `hvac`: `air1_sum`, `air2_sum`, `air3_sum`, `airwindowunit1_sum`, `furnace1_sum`, `furnace2_sum`, `heater1_sum`, `heater2_sum`, `heater3_sum`, `housefan1_sum`, `venthood1_sum`, `jacuzzi1_sum` (Spa/Jacuzzi is often HVAC/Pool related).
+            *   `water_heating`: `waterheater1_sum`, `waterheater2_sum`.
+            *   `refrigerator`: `refrigerator1_sum`, `refrigerator2_sum`, `freezer1_sum`, `icemaker1_sum`, `winecooler1_sum`.
+            *   `clothes_washer`: `clotheswasher1_sum`, `clotheswasher_dryg1_sum` (Wait, `clotheswasher_dryg1` sounds like dryer gas? Or washer with dryer? Usually `drye1` or `dryg1` is dryer). Let's assume `clotheswasher1_sum` is washer.
+            *   `clothes_dryer`: `drye1_sum`, `dryg1_sum`, `clotheswasher_dryg1_sum` (if it's a combo).
+            *   `dishwasher`: `dishwasher1_sum`.
+            *   `cooking_range`: `oven1_sum`, `oven2_sum`, `range1_sum`, `microwave1_sum`, `disposal1_sum` (Garbage disposal is often grouped with cooking/kitchen).
+            *   `pool_spa_pumps`: `poolpump1_sum`, `jacuzzi1_sum` (if not in hvac), `pool1_sum`, `pool2_sum`.
+            *   `interior_lighting`: `lights_plugs1_sum` through `lights_plugs6_sum`? No, `lights_plugs` are plugs. Interior lighting: `kitchen1_sum`, `kitchen2_sum`, `bathroom1_sum`, `bathroom2_sum`, `bedroom1_sum`, `bedroom2_sum`, `bedroom3_sum`, `bedroom4_sum`, `bedroom5_sum`, `diningroom1_sum`, `diningroom2_sum`, `livingroom1_sum`, `livingroom2_sum`, `office1_sum`, `garage1_sum`, `garage2_sum`, `shed1_sum`.
+            *   `exterior_lighting`: `outsidelights_plugs1_sum`, `outsidelights_plugs2_sum`, `poollight1_sum`.
+            *   `lighting`: Sum of `interior_lighting` and `exterior_lighting`? Or just a specific subset? The target has `lighting` as a separate column. Often `lighting` = `interior_lighting` + `exterior_lighting`.
+            *   `plug`: `kitchenapp1_sum`, `kitchenapp2_sum`, `lights_plugs1_sum` through `lights_plugs6_sum`, `car1_sum`, `car2_sum`, `battery1_sum`, `aquarium1_sum`, `security1_sum`.
+            *   `pool_spa_heater`: `jacuzzi1_sum` (if not pump), `pool1_sum` (if heater), `pool2_sum` (if heater).
+
+    *   *Alternative Strategy*: The problem asks to *infer* the transformation. Without a definitive mapping document, I must rely on standard naming conventions in smart home datasets (like AMPds or similar).
+        *   **HVAC**: `air1_sum`, `air2_sum`, `air3_sum`, `airwindowunit1_sum`, `furnace1_sum`, `furnace2_sum`, `heater1_sum`, `heater2_sum`, `heater3_sum`, `housefan1_sum`, `venthood1_sum`.
+        *   **Water Heating**: `waterheater1_sum`, `waterheater2_sum`.
+        *   **Refrigerator**: `refrigerator1_sum`, `refrigerator2_sum`, `freezer1_sum`, `icemaker1_sum`, `winecooler1_sum`.
+        *   **Clothes Washer**: `clotheswasher1_sum`.
+        *   **Clothes Dryer**: `drye1_sum`, `dryg1_sum`.
+        *   **Dishwasher**: `dishwasher1_sum`.
+        *   **Cooking Range**: `oven1_sum`, `oven2_sum`, `range1_sum`, `microwave1_sum`, `disposal1_sum`.
+        *   **Pool/Spa Pumps**: `poolpump1_sum`, `jacuzzi1_sum` (Jacuzzi pump), `pool1_sum` (Pool pump), `pool2_sum` (Pool pump), `sprinkler1_sum` (Irrigation pump), `sumppump1_sum`, `sewerpump1_sum`, `circpump1_sum`.
+        *   **Interior Lighting**: `kitchen1_sum`, `kitchen2_sum`, `bathroom1_sum`, `bathroom2_sum`, `bedroom1_sum`, `bedroom2_sum`, `bedroom3_sum`, `bedroom4_sum`, `bedroom5_sum`, `diningroom1_sum`, `diningroom2_sum`, `livingroom1_sum`, `livingroom2_sum`, `office1_sum`, `garage1_sum`, `garage2_sum`, `shed1_sum`, `utilityroom1_sum` (if lights).
+        *   **Exterior Lighting**: `outsidelights_plugs1_sum`, `outsidelights_plugs2_sum`, `poollight1_sum`.
+        *   **Lighting**: Sum of Interior and Exterior.
+        *   **Plug**: `kitchenapp1_sum`, `kitchenapp2_sum`, `lights_plugs1_sum`, `lights_plugs2_sum`, `lights_plugs3_sum`, `lights_plugs4_sum`, `lights_plugs5_sum`, `lights_plugs6_sum`, `car1_sum`, `car2_sum`, `battery1_sum`, `aquarium1_sum`, `security1_sum`.
+        *   **Pool/Spa Heater**: `jacuzzi1_sum` (if heater), `pool1_sum` (if heater). *Note: In many datasets, `jacuzzi1` is the pump/heater combo. If `jacuzzi1` is in HVAC, it might be excluded from Pool Heater. Let's assume `jacuzzi1` is HVAC (fan/pump) or separate. Given `pool_spa_heater` exists, `jacuzzi1` is a strong candidate if it's not in HVAC. However, `jacuzzi` is often distinct. Let's look at `pool1` and `pool2`. Often one is pump, one is heater. Without distinct labels, this is ambiguous. However, `jacuzzi1` is frequently the main spa load. Let's tentatively put `jacuzzi1` in HVAC as it's a major mechanical load, or Pool Spa Pump. If `pool_spa_heater` is a separate target, it might be empty or derived from specific columns. Let's assume `jacuzzi1` is HVAC/Pool Pump. If `pool_spa_heater` is non-null in samples, we need a source. `heater1/2/3` are HVAC. `jacuzzi1` is likely the spa heater/pump. Let's assign `jacuzzi1` to `pool_spa_heater` if it's not in HVAC. But `jacuzzi` is often grouped with HVAC in broad categories. Let's look at the sample data.
+        *   Sample 1: `jacuzzi1_sum` is 9.54. `pool_spa_heater` target is 0.0. `hvac` target is null (because row 1 in target sample is all nulls? No, row 1 in target sample is `12, 23, null...`. Row 3 is `9, 19, null, null, 4.141... pool_spa_heater 0.0`.
+        *   This implies `pool_spa_heater` is 0 in those rows.
+        *   Let's refine the mapping based on common AMPds/REDD mappings:
+            *   **HVAC**: `air1`, `air2`, `air3`, `airwindowunit1`, `furnace1`, `furnace2`, `heater1`, `heater2`, `heater3`, `housefan1`, `venthood1`.
+            *   **Water Heating**: `waterheater1`, `waterheater2`.
+            *   **Refrigerator**: `refrigerator1`, `refrigerator2`, `freezer1`, `icemaker1`, `winecooler1`.
+            *   **Clothes Washer**: `clotheswasher1`.
+            *   **Clothes Dryer**: `drye1`, `dryg1`.
+            *   **Dishwasher**: `dishwasher1`.
+            *   **Cooking Range**: `oven1`, `oven2`, `range1`, `microwave1`, `disposal1`.
+            *   **Pool/Spa Pumps**: `poolpump1`, `jacuzzi1` (pump), `pool1` (pump), `pool2` (pump), `sprinkler1`, `sumppump1`, `sewerpump1`, `circpump1`.
+            *   **Interior Lighting**: `kitchen1`, `kitchen2`, `bathroom1`, `bathroom2`, `bedroom1`, `bedroom2`, `bedroom3`, `bedroom4`, `bedroom5`, `diningroom1`, `diningroom2`, `livingroom1`, `livingroom2`, `office1`, `garage1`, `garage2`, `shed1`, `utilityroom1`.
+            *   **Exterior Lighting**: `outsidelights_plugs1`, `outsidelights_plugs2`, `poollight1`.
+            *   **Lighting**: `interior_lighting` + `exterior_lighting`.
+            *   **Plug**: `kitchenapp1`, `kitchenapp2`, `lights_plugs1`, `lights_plugs2`, `lights_plugs3`, `lights_plugs4`, `lights_plugs5`, `lights_plugs6`, `car1`, `car2`, `battery1`, `aquarium1`, `security1`.
+            *   **Pool/Spa Heater**: `jacuzzi1` (if not pump), `pool1` (if heater). *Correction*: In many datasets, `jacuzzi1` is the heater. `poolpump1` is the pump. `pool1`/`pool2` might be other pumps. If `jacuzzi1` is in HVAC, then `pool_spa_heater` might be empty. However, `jacuzzi` is often distinct. Let's try putting `jacuzzi1` in `pool_spa_heater`. If `jacuzzi1` is in HVAC, `pool_spa_heater` might be `pool1` or `pool2`. Given the ambiguity, and `jacuzzi` being a spa, `jacuzzi1` -> `pool_spa_heater` is a reasonable guess if it's not in HVAC. But `jacuzzi` often runs a pump too. Let's look at the `hvac` definition again. If `jacuzzi1` is not in HVAC, it must be in Pool Spa Heater or Pump. `pool_spa_pumps` usually includes `poolpump1`. `jacuzzi1` is likely the heater.
+
+    *   *Self-Correction on `lighting`*: The target has `interior_lighting`, `exterior_lighting`, AND `lighting`. `lighting` is likely the sum of the two.
+
+    *   *Self-Correction on `pool_spa_heater`*: If `jacuzzi1` is the heater, and `poolpump1` is the pump, then `pool_spa_pumps` = `poolpump1` + `pool1` + `pool2` + `sprinkler1` + `sumppump1` + `sewerpump1` + `circpump1`. And `pool_spa_heater` = `jacuzzi1`.
+
+    *   *Self-Correction on `hvac`*: `jacuzzi1` is excluded from HVAC if it's in `pool_spa_heater`.
+
+    *   *Final Mapping Hypothesis*:
+        *   `hvac`: `air1_sum`, `air2_sum`, `air3_sum`, `airwindowunit1_sum`, `furnace1_sum`, `furnace2_sum`, `heater1_sum`, `heater2_sum`, `heater3_sum`, `housefan1_sum`, `venthood1_sum`.
+        *   `water_heating`: `waterheater1_sum`, `waterheater2_sum`.
+        *   `refrigerator`: `refrigerator1_sum`, `refrigerator2_sum`, `freezer1_sum`, `icemaker1_sum`, `winecooler1_sum`.
+        *   `clothes_washer`: `clotheswasher1_sum`.
+        *   `clothes_dryer`: `drye1_sum`, `dryg1_sum`.
+        *   `dishwasher`: `dishwasher1_sum`.
+        *   `cooking_range`: `oven1_sum`, `oven2_sum`, `range1_sum`, `microwave1_sum`, `disposal1_sum`.
+        *   `pool_spa_pumps`: `poolpump1_sum`, `pool1_sum`, `pool2_sum`, `sprinkler1_sum`, `sumppump1_sum`, `sewerpump1_sum`, `circpump1_sum`.
+        *   `interior_lighting`: `kitchen1_sum`, `kitchen2_sum`, `bathroom1_sum`, `bathroom2_sum`, `bedroom1_sum`, `bedroom2_sum`, `bedroom3_sum`, `bedroom4_sum`, `bedroom5_sum`, `diningroom1_sum`, `diningroom2_sum`, `livingroom1_sum`, `livingroom2_sum`, `office1_sum`, `garage1_sum`, `garage2_sum`, `shed1_sum`, `utilityroom1_sum`.
+        *   `exterior_lighting`: `outsidelights_plugs1_sum`, `outsidelights_plugs2_sum`, `poollight1_sum`.
+        *   `lighting`: `interior_lighting` + `exterior_lighting`.
+        *   `plug`: `kitchenapp1_sum`, `kitchenapp2_sum`, `lights_plugs1_sum`, `lights_plugs2_sum`, `lights_plugs3_sum`, `lights_plugs4_sum`, `lights_plugs5_sum`, `lights_plugs6_sum`, `car1_sum`, `car2_sum`, `battery1_sum`, `aquarium1_sum`, `security1_sum`.
+        *   `pool_spa_heater`: `jacuzzi1_sum`.
+
+4.  **Construct Result**: Create a DataFrame with `month`, `hour`, and the calculated sums.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the timestamp
+    source = source.copy()
+    source['local_15min'] = pd.to_datetime(source['local_15min'], format='%m/%d/%Y %H:%M')
+    source['month'] = source['local_15min'].dt.month
+    source['hour'] = source['local_15min'].dt.hour
+    
+    # Define column mappings for aggregation
+    hvac_cols = ['air1_sum', 'air2_sum', 'air3_sum', 'airwindowunit1_sum', 
+                 'furnace1_sum', 'furnace2_sum', 'heater1_sum', 'heater2_sum', 'heater3_sum',
+                 'housefan1_sum', 'venthood1_sum']
+    
+    water_heating_cols = ['waterheater1_sum', 'waterheater2_sum']
+    
+    refrigerator_cols = ['refrigerator1_sum', 'refrigerator2_sum', 'freezer1_sum', 
+                         'icemaker1_sum', 'winecooler1_sum']
+    
+    clothes_washer_cols = ['clotheswasher1_sum']
+    
+    clothes_dryer_cols = ['drye1_sum', 'dryg1_sum']
+    
+    dishwasher_cols = ['dishwasher1_sum']
+    
+    cooking_range_cols = ['oven1_sum', 'oven2_sum', 'range1_sum', 'microwave1_sum', 'disposal1_sum']
+    
+    pool_spa_pumps_cols = ['poolpump1_sum', 'pool1_sum', 'pool2_sum', 'sprinkler1_sum',
+                           'sumppump1_sum', 'sewerpump1_sum', 'circpump1_sum']
+    
+    interior_lighting_cols = ['kitchen1_sum', 'kitchen2_sum', 'bathroom1_sum', 'bathroom2_sum',
+                              'bedroom1_sum', 'bedroom2_sum', 'bedroom3_sum', 'bedroom4_sum', 'bedroom5_sum',
+                              'diningroom1_sum', 'diningroom2_sum', 'livingroom1_sum', 'livingroom2_sum',
+                              'office1_sum', 'garage1_sum', 'garage2_sum', 'shed1_sum', 'utilityroom1_sum']
+    
+    exterior_lighting_cols = ['outsidelights_plugs1_sum', 'outsidelights_plugs2_sum', 'poollight1_sum']
+    
+    plug_cols = ['kitchenapp1_sum', 'kitchenapp2_sum', 'lights_plugs1_sum', 'lights_plugs2_sum',
+                 'lights_plugs3_sum', 'lights_plugs4_sum', 'lights_plugs5_sum', 'lights_plugs6_sum',
+                 'car1_sum', 'car2_sum', 'battery1_sum', 'aquarium1_sum', 'security1_sum']
+    
+    pool_spa_heater_cols = ['jacuzzi1_sum']
+
+    # Group by month and hour and sum the respective columns
+    grouped = source.groupby(['month', 'hour'])
+    
+    def safe_sum(cols):
+        if not cols:
+            return pd.Series(dtype='float64')
+        return grouped[cols].sum()
+
+    hvac = safe_sum(hvac_cols)
+    water_heating = safe_sum(water_heating_cols)
+    refrigerator = safe_sum(refrigerator_cols)
+    clothes_washer = safe_sum(clothes_washer_cols)
+    clothes_dryer = safe_sum(clothes_dryer_cols)
+    dishwasher = safe_sum(dishwasher_cols)
+    cooking_range = safe_sum(cooking_range_cols)
+    pool_spa_pumps = safe_sum(pool_spa_pumps_cols)
+    interior_lighting = safe_sum(interior_lighting_cols)
+    exterior_lighting = safe_sum(exterior_lighting_cols)
+    plug = safe_sum(plug_cols)
+    pool_spa_heater = safe_sum(pool_spa_heater_cols)
+    
+    # Combine into a DataFrame
+    result = pd.DataFrame({
+        'hvac': hvac.values if isinstance(hvac, pd.Series) else hvac,
+        'water_heating': water_heating.values if isinstance(water_heating, pd.Series) else water_heating,
+        'refrigerator': refrigerator.values if isinstance(refrigerator, pd.Series) else refrigerator,
+        'clothes_washer': clothes_washer.values if isinstance(clothes_washer, pd.Series) else clothes_washer,
+        'clothes_dryer': clothes_dryer.values if isinstance(clothes_dryer, pd.Series) else clothes_dryer,
+        'dishwasher': dishwasher.values if isinstance(dishwasher, pd.Series) else dishwasher,
+        'cooking_range': cooking_range.values if isinstance(cooking_range, pd.Series) else cooking_range,
+        'pool_spa_pumps': pool_spa_pumps.values if isinstance(pool_spa_pumps, pd.Series) else pool_spa_pumps,
+        'interior_lighting': interior_lighting.values if isinstance(interior_lighting, pd.Series) else interior_lighting,
+        'exterior_lighting': exterior_lighting.values if isinstance(exterior_lighting, pd.Series) else exterior_lighting,
+        'plug': plug.values if isinstance(plug, pd.Series) else plug,
+        'pool_spa_heater': pool_spa_heater.values if isinstance(pool_spa_heater, pd.Series) else pool_spa_heater
+    })
+    
+    # Calculate total lighting
+    result['lighting'] = result['interior_lighting'] + result['exterior_lighting']
+    
+    # Ensure correct column order
+    cols = ['month', 'hour', 'hvac', 'water_heating', 'refrigerator', 'clothes_washer', 
+            'clothes_dryer', 'dishwasher', 'cooking_range', 'pool_spa_pumps', 
+            'interior_lighting', 'exterior_lighting', 'lighting', 'plug', 'pool_spa_heater']
+    
+    return result[cols].reset_index()
+```

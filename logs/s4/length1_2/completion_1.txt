@@ -1,0 +1,27 @@
+**Operator Plan:**
+
+1.  **Parse Date**: Convert the `date` column (format `%m/%d/%Y`) into a pandas datetime object.
+2.  **Format CST**: Create the `cst` column by formatting the parsed datetime as `%a %m/%d/%Y` (e.g., "Sat 01/01/2011").
+3.  **Rename Hourly Columns**: Map the source columns `value1` through `value24` to target columns `1:00` through `24:00`.
+4.  **Select and Order**: Construct the final DataFrame with `cst` followed by the renamed hourly columns, ensuring the correct column order.
+5.  **Reset Index**: Return a clean DataFrame with a default integer index.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    dates = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    
+    # Create the output dataframe
+    out = pd.DataFrame(index=source.index)
+    
+    # Format CST column
+    out['cst'] = dates.dt.strftime('%a %m/%d/%Y')
+    
+    # Map value1...value24 to 1:00...24:00
+    for h in range(1, 25):
+        out[f'{h}:00'] = source[f'value{h}']
+        
+    return out.reset_index(drop=True)
+```

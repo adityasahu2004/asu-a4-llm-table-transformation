@@ -1,0 +1,197 @@
+Operator plan:
+1. Parse the `timestamp` column into a datetime object to extract `month` and `hour`.
+2. Filter out rows where the data is invalid (represented by the sentinel value `32767.0` in the total building column or other key columns, though the target schema implies aggregated valid data). Note: The target has 288 rows (12 months * 24 hours), implying an aggregation.
+3. Define the mapping of source columns to target categories:
+    - `HVAC`: Sum of `AC COMPRESSOR WHS [emon ch3,4]` and `AIR HANDLER WHS [emon ch5,6]`.
+    - `domestic_water_heating`: `WATER HEATER WHS [emon ch7,8]`.
+    - `major_appliances`: Sum of `DRYER WHS (1-CT) [emon ch9]`, `RANGE WHS (1-CT) [emon ch10]`, `DISH WASHER WHS [emon ch11]`, `Primary Fridge WHS [emon ch12]`, `2nd Fridge WHS [emon ch13]`.
+    - `lighting`: Constant 0 (as per target distinct values).
+    - `miscellaneous_plug_loads`: Sum of `SPARE1 WHS (1-CT) [emon ch14]`, `SPARE2 WHS (1-CT) [xpod chA-1]`, `SPARE3 WHS (1-CT) [xpod chA-2]`, `SPARE4 WHS (2-CTs) [xpod chA-5,6]`, `Minisplit WHS (2-CTs) [xpod chA-7,8]`, `Dryer WHS (2-CTs) [xpod chA-9,10]`. *Note: Minisplit is often HVAC, but in this specific mapping context for "miscellaneous" or "plug loads" in some datasets, it might be included or excluded. However, looking at the target values, `miscellaneous_plug_loads` is float, others are int. Let's look closer. The target `miscellaneous_plug_loads` has decimal values. The source columns are float. The other target columns are int64. This suggests `miscellaneous_plug_loads` might be a direct sum or mean that retains float precision, or perhaps it's `Calculated Unmeasured loads`? No, "Unmeasured" is distinct. Let's look at the columns again.
+    - Let's re-evaluate the categories based on standard energy disaggregation:
+        - HVAC: AC Compressor + Air Handler.
+        - Water Heating: Water Heater.
+        - Major Appliances: Dryer, Range, Dish Washer, Fridges.
+        - Lighting: Often not measured separately here, set to 0.
+        - Misc Plug Loads: Spare channels, potentially Minisplit if not HVAC, but Minisplit is usually HVAC. However, `SPARE1`..`SPARE4` are plug loads.
+        - Total: Sum of all measured loads or `TOTAL BLDG WHS`. The target `Total` is int64.
+    
+    Let's check the aggregation. 288 rows = 12 months * 24 hours. This implies a `groupby` on month and hour, summing the energy values.
+    
+    Mapping refinement:
+    - `HVAC`: `AC COMPRESSOR WHS [emon ch3,4]` + `AIR HANDLER WHS [emon ch5,6]`
+    - `domestic_water_heating`: `WATER HEATER WHS [emon ch7,8]`
+    - `major_appliances`: `DRYER WHS (1-CT) [emon ch9]` + `RANGE WHS (1-CT) [emon ch10]` + `DISH WASHER WHS [emon ch11]` + `Primary Fridge WHS [emon ch12]` + `2nd Fridge WHS [emon ch13]`
+    - `lighting`: 0
+    - `miscellaneous_plug_loads`: `SPARE1 WHS (1-CT) [emon ch14]` + `SPARE2 WHS (1-CT) [xpod chA-1]` + `SPARE3 WHS (1-CT) [xpod chA-2]` + `SPARE4 WHS (2-CTs) [xpod chA-5,6]` + `Minisplit WHS (2-CTs) [xpod chA-7,8]` + `Dryer WHS (2-CTs) [xpod chA-9,10]`. *Wait, Minisplit is HVAC. Dryer (2-CT) is major appliance? Or is it a different dryer?* The source has `DRYER WHS (1-CT)` and `Dryer WHS (2-CTs)`. Usually, we sum all instances of a category. If `Dryer (2-CT)` is a different dryer, it goes to Major Appliances. If `Minisplit` is HVAC, it goes to HVAC.
+    
+    Let's look at the target `miscellaneous_plug_loads` dtype: `float64`. Others are `int64`. This is a strong hint. Which columns are floats in source? All are float64. Why would one sum be float and others int? Perhaps `miscellaneous_plug_loads` is not a sum of integers but includes a decimal component from a specific column, or it's a mean? No, energy sums are usually large integers.
+    
+    Actually, looking at the source sample, `Calculated Unmeasured loads (Whr)` has decimals (e.g., 175.0, 59.0, 429.0, 197.6). `miscellaneous_plug_loads` in target has decimals (e.g., 110685071.2). This suggests `miscellaneous_plug_loads` might include `Calculated Unmeasured loads` or be derived from it. However, "Unmeasured" is not "Plug Load".
+    
+    Let's reconsider the standard categories.
+    HVAC: AC + Air Handler.
+    Water: Water Heater.
+    Major: Dryer(1), Range, Dish, Fridge1, Fridge2.
+    Lighting: 0.
+    Misc Plug: Spare1, Spare2, Spare3, Spare4.
+    
+    What about `Minisplit`? It's HVAC.
+    What about `Dryer (2-CTs)`? It's Major Appliance.
+    
+    If we sum these, we get integers (mostly). Why is `miscellaneous_plug_loads` float?
+    Maybe `miscellaneous_plug_loads` corresponds to `Calculated Unmeasured loads`? No, that's "Unmeasured".
+    
+    Let's look at the `Total` column in target. It is `int64`.
+    `TOTAL BLDG WHS` in source is `float64` but values are `.0`.
+    
+    Hypothesis:
+    `HVAC` = Sum(AC, Air Handler)
+    `domestic_water_heating` = Sum(Water Heater)
+    `major_appliances` = Sum(Dryer1, Range, Dish, Fridge1, Fridge2, Dryer2)
+    `lighting` = 0
+    `miscellaneous_plug_loads` = Sum(Spare1, Spare2, Spare3, Spare4, Minisplit??)
+    
+    If Minisplit is included in Misc, it might explain the float if Minisplit has decimals? In sample, Minisplit is 32767.0 or 0.0.
+    
+    Let's look at `Calculated Energy Use (Whr)`.
+    
+    Alternative: The target `miscellaneous_plug_loads` is simply the sum of the "Spare" channels.
+    
+    Let's try to infer from the name "miscellaneous_plug_loads".
+    Columns:
+    - SPARE1
+    - SPARE2
+    - SPARE3
+    - SPARE4
+    
+    Let's assume:
+    HVAC = AC + Air Handler
+    Water = Water Heater
+    Major = Dryer1 + Range + Dish + Fridge1 + Fridge2 + Dryer2
+    Lighting = 0
+    Misc Plug = Spare1 + Spare2 + Spare3 + Spare4
+    
+    What about Minisplit? If it's not HVAC, where does it go? It's a plug-in AC usually. If it's not in HVAC, it might be in Misc.
+    
+    Let's check the `Total`.
+    Total = HVAC + Water + Major + Lighting + Misc Plug + Unmeasured?
+    Or Total = TOTAL BLDG WHS?
+    
+    The target `Total` is `int64`. `TOTAL BLDG WHS` sums to integer-like values.
+    
+    The key differentiator is `miscellaneous_plug_loads` being float.
+    In the source, `Calculated Unmeasured loads (Whr)` has decimals (197.6).
+    If `miscellaneous_plug_loads` includes `Calculated Unmeasured loads`, it would be float. But semantically, "Unmeasured" != "Plug Load".
+    
+    However, if `miscellaneous_plug_loads` is just the sum of Spares, and Spares are integers in the sample (0.0, 32767.0, 64.0, etc.), the sum would be integer.
+    
+    Is there another column?
+    `Wattsup Energy Ent.Ctr (WHS)`?
+    `Wattsup Energy Washer (WHS)`?
+    
+    Let's look at the target sample value: `110685071.2`. The `.2` implies a sum of numbers ending in `.2` or `.4` etc.
+    `Calculated Unmeasured loads` has `197.6`.
+    
+    Maybe `miscellaneous_plug_loads` IS `Calculated Unmeasured loads`? The name is misleading in the target schema compared to source, or the source "Unmeasured" is actually the "Misc Plug" bucket in the target definition. Given the float nature, this is the strongest candidate for the decimal part.
+    
+    Let's assume:
+    `miscellaneous_plug_loads` = `Calculated Unmeasured loads (Whr)`
+    
+    Let's verify the other sums.
+    `HVAC`: AC + Air Handler.
+    `domestic_water_heating`: Water Heater.
+    `major_appliances`: Dryer1 + Range + Dish + Fridge1 + Fridge2 + Dryer2.
+    `lighting`: 0.
+    `Total`: Sum of above + `miscellaneous_plug_loads`? Or `TOTAL BLDG WHS`?
+    
+    If `Total` is `int64`, and `misc` is float, `Total` cannot be the simple sum if it includes `misc`.
+    Unless `Total` is `TOTAL BLDG WHS` (which is integer-valued float).
+    
+    Let's proceed with this mapping:
+    1. Filter valid rows (Total Bldg != 32767).
+    2. Create month, hour.
+    3. Compute sums.
+    4. Group by month, hour.
+    5. Sum the values.
+    6. Cast to appropriate types.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse timestamp
+    source['dt'] = pd.to_datetime(source['timestamp'])
+    source['month'] = source['dt'].dt.month
+    source['hour'] = source['dt'].dt.hour
+    
+    # Define columns for each category
+    hvac_cols = [
+        'AC COMPRESSOR WHS [emon ch3,4]',
+        'AIR HANDLER WHS [emon ch5,6]'
+    ]
+    
+    water_cols = [
+        'WATER HEATER WHS [emon ch7,8]'
+    ]
+    
+    major_cols = [
+        'DRYER WHS (1-CT) [emon ch9]',
+        'RANGE WHS (1-CT) [emon ch10]',
+        'DISH WASHER WHS [emon ch11]',
+        'Primary Fridge WHS [emon ch12]',
+        '2nd Fridge WHS [emon ch13]',
+        'Dryer WHS (2-CTs) [xpod chA-9,10]'
+    ]
+    
+    # Lighting is 0
+    
+    # Miscellaneous Plug Loads: 
+    # Based on float dtype in target, and source 'Calculated Unmeasured loads' having decimals,
+    # and 'Spare' columns being integers, we map 'Calculated Unmeasured loads' to misc.
+    # Alternatively, if 'Minisplit' is considered misc, it's integer.
+    # Let's stick with 'Calculated Unmeasured loads (Whr)' for the float characteristic.
+    misc_cols = [
+        'Calculated Unmeasured loads (Whr)'
+    ]
+    
+    # Total: Use TOTAL BLDG WHS
+    total_col = 'TOTAL BLDG WHS [emon ch1,2]'
+    
+    # Filter out invalid data (32767 is a common sentinel for missing/bad data in emon/wattsup)
+    # We check the total column for validity
+    valid_mask = source[total_col] != 32767.0
+    
+    df_valid = source[valid_mask].copy()
+    
+    # Calculate component sums
+    df_valid['HVAC'] = df_valid[hvac_cols].sum(axis=1)
+    df_valid['domestic_water_heating'] = df_valid[water_cols].sum(axis=1)
+    df_valid['major_appliances'] = df_valid[major_cols].sum(axis=1)
+    df_valid['lighting'] = 0
+    df_valid['miscellaneous_plug_loads'] = df_valid[misc_cols].sum(axis=1)
+    df_valid['Total'] = df_valid[total_col]
+    
+    # Aggregate by month and hour
+    agg_df = df_valid.groupby(['month', 'hour'], as_index=False).agg(
+        HVAC=('HVAC', 'sum'),
+        domestic_water_heating=('domestic_water_heating', 'sum'),
+        major_appliances=('major_appliances', 'sum'),
+        lighting=('lighting', 'sum'),
+        miscellaneous_plug_loads=('miscellaneous_plug_loads', 'sum'),
+        Total=('Total', 'sum')
+    )
+    
+    # Ensure correct dtypes
+    agg_df['HVAC'] = agg_df['HVAC'].astype('int64')
+    agg_df['domestic_water_heating'] = agg_df['domestic_water_heating'].astype('int64')
+    agg_df['major_appliances'] = agg_df['major_appliances'].astype('int64')
+    agg_df['lighting'] = agg_df['lighting'].astype('int64')
+    # miscellaneous_plug_loads stays float64
+    agg_df['Total'] = agg_df['Total'].astype('int64')
+    
+    # Sort to match potential expected order (not strictly required but good practice)
+    agg_df = agg_df.sort_values(['month', 'hour']).reset_index(drop=True)
+    
+    return agg_df
+```

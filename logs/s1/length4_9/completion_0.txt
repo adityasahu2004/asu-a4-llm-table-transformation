@@ -1,0 +1,148 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `date` column from string format (`M/D/YYYY H:MM`) to datetime objects.
+2.  **Extract Components**:
+    *   Extract the calendar date (year, month, day) to group rows by day.
+    *   Extract the hour of the day to determine the target column.
+3.  **Map Hours to 12-Hour Format**:
+    *   The target columns are labeled in 12-hour format with AM/PM (e.g., "1:00 AM", "12:00 PM").
+    *   Map 24-hour clock hours (0-23) to these labels:
+        *   Hour 0 -> "12:00 AM"
+        *   Hours 1-11 -> "1:00 AM" to "11:00 AM"
+        *   Hour 12 -> "12:00 PM"
+        *   Hours 13-23 -> "1:00 PM" to "11:00 PM"
+4.  **Pivot/Reshape**:
+    *   Group by the extracted calendar date.
+    *   For each group, assign the `zone_016` value to the corresponding hour column.
+    *   Since the source data appears to have one entry per hour per day (based on the distinct count and sample), we can pivot the data. If multiple entries exist for the same hour/day, we might need an aggregation (like mean or first), but given the "distinct: 24" for zone_016 and the regular 2-hour intervals in the sample, it looks like a direct mapping or simple aggregation. The sample shows 12 rows for Jan 2nd, but the target has 24 columns. Wait, looking closely at the source sample:
+        *   `1/2/2018 0:11` -> 67.9
+        *   `1/2/2018 2:22` -> 67.9
+        *   ...
+        *   The source has entries every ~2 hours.
+        *   The target has entries for *every* hour (1:00 AM, 2:00 AM, etc.).
+        *   Let's re-examine the target values for `01/01/2018` (which corresponds to source `1/2/2018`? No, `1/2/2018` is Jan 2nd. `01/01/2018` is Jan 1st. The source sample starts at `1/2/2018`. The target sample has `01/02/2018` and `01/01/2018`.
+        *   Source `1/2/2018` maps to Target `01/02/2018`.
+        *   Source `1/2/2018 0:11` (Hour 0) has value 67.9. Target `01/02/2018` has `12:00 AM` = 67.9.
+        *   Source `1/2/2018 2:22` (Hour 2) has value 67.9. Target `01/02/2018` has `2:00 AM` = null? No, wait.
+        *   Let's look at the target row for `01/02/2018`:
+            *   `12:00 AM`: 67.9
+            *   All others: null.
+        *   Let's look at the target row for `01/01/2018`:
+            *   `1:00 AM`: 67.9
+            *   `2:00 AM`: 67.8
+            *   ...
+            *   `12:00 AM`: 67.9
+        *   This implies that the source data for `1/1/2018` (Jan 1st) is not shown in the first few rows of the sample, but the transformation logic must handle all hours.
+        *   Crucially, the source data has timestamps like `0:11`, `2:22`, `4:34`. These are not exact hours.
+        *   The target columns are exact hours (`1:00 AM`, etc.).
+        *   The mapping seems to be: Round the source time to the nearest hour? Or floor?
+            *   Source `0:11` (Hour 0) -> Target `12:00 AM` (Hour 0).
+            *   Source `2:22` (Hour 2) -> Target `2:00 AM` (Hour 2).
+            *   Source `4:34` (Hour 4) -> Target `4:00 AM` (Hour 4).
+            *   It seems we simply take the hour component of the source timestamp.
+        *   Why are most values null for `01/02/2018` in the target?
+            *   The source sample only shows 12 rows for `1/2/2018`.
+            *   The target shows only `12:00 AM` populated for `01/02/2018`.
+            *   This suggests that for the specific evaluation input or the full dataset, there might only be data for certain hours, or the sample provided in the prompt is truncated.
+            *   However, for `01/01/2018`, all 24 hours are populated. This implies the source data for Jan 1st had entries for all 24 hours (or close enough to map to them).
+            *   The transformation is: **Pivot** the data such that rows are dates, columns are hours (formatted as 12-hour AM/PM), and values are `zone_016`.
+            *   Since source times are not exact hours, we extract the hour integer from the datetime.
+            *   We must handle the case where multiple source rows might map to the same hour (unlikely given the 2-hour spacing, but possible if data is denser). If multiple, we likely take the first or mean. Given the "distinct: 24" in source schema for `zone_016` and the regular spacing, it's likely 1-to-1 or sparse.
+            *   Actually, looking at `01/01/2018` target:
+                *   `1:00 AM`: 67.9
+                *   `2:00 AM`: 67.8
+                *   Source `1/2/2018 0:11` is 67.9.
+                *   Source `1/2/2018 2:22` is 67.9.
+                *   This doesn't match the `01/01/2018` target values directly. The `01/01/2018` target values are different. This confirms we are transforming the *structure*, not copying values.
+            *   The key is: **Group by Date, Pivot by Hour**.
+
+5.  **Formatting**:
+    *   Format the date index/column as `MM/DD/YYYY`.
+    *   Ensure all 24 hour columns are present, even if null.
+    *   Order columns: `date`, then `1:00 AM` through `12:00 AM` (chronological order of the day).
+
+6.  **Refinement on Hour Mapping**:
+    *   Hour 0 -> "12:00 AM"
+    *   Hour 1 -> "1:00 AM"
+    *   ...
+    *   Hour 11 -> "11:00 AM"
+    *   Hour 12 -> "12:00 PM"
+    *   Hour 13 -> "1:00 PM"
+    *   ...
+    *   Hour 23 -> "11:00 PM"
+
+7.  **Implementation Steps**:
+    *   Parse `date` to datetime.
+    *   Create `date_str` column formatted as `MM/DD/YYYY`.
+    *   Create `hour` column from datetime.
+    *   Create `hour_label` column mapping hour int to string.
+    *   Pivot: `index=date_str`, `columns=hour_label`, `values=zone_016`.
+    *   Reindex columns to ensure all 24 hours are present in correct order.
+    *   Reset index to make `date` a column.
+    *   Sort by date (descending? The target sample shows `01/02/2018` then `01/01/2018`. This is descending date order).
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse the date column
+    # Format is M/D/YYYY H:MM
+    df = source.copy()
+    df['datetime'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # 2. Extract date string for grouping and hour for pivoting
+    df['date_str'] = df['datetime'].dt.strftime('%m/%d/%Y')
+    df['hour'] = df['datetime'].dt.hour
+    
+    # 3. Map hour to 12-hour format labels
+    def get_hour_label(h):
+        if h == 0:
+            return "12:00 AM"
+        elif h < 12:
+            return f"{h}:00 AM"
+        elif h == 12:
+            return "12:00 PM"
+        else:
+            return f"{h-12}:00 PM"
+            
+    df['hour_label'] = df['hour'].apply(get_hour_label)
+    
+    # 4. Pivot the data
+    # We use 'first' aggregation in case there are multiple entries for the same hour/day,
+    # though the sample suggests sparse or unique entries.
+    pivoted = df.pivot_table(
+        index='date_str', 
+        columns='hour_label', 
+        values='zone_016', 
+        aggfunc='first'
+    )
+    
+    # 5. Define the expected column order
+    hour_labels = []
+    # 1 AM to 11 AM
+    for h in range(1, 12):
+        hour_labels.append(f"{h}:00 AM")
+    # 12 PM
+    hour_labels.append("12:00 PM")
+    # 1 PM to 11 PM
+    for h in range(1, 12):
+        hour_labels.append(f"{h}:00 PM")
+    # 12 AM
+    hour_labels.append("12:00 AM")
+    
+    # 6. Reindex columns to ensure all 24 hours are present and in order
+    pivoted = pivoted.reindex(columns=hour_labels)
+    
+    # 7. Reset index to make date a column
+    result = pivoted.reset_index()
+    
+    # 8. Rename index column to 'date'
+    result = result.rename(columns={'date_str': 'date'})
+    
+    # 9. Sort by date descending as per target sample (01/02/2018 before 01/01/2018)
+    # The target sample shows 01/02/2018 first, then 01/01/2018.
+    result = result.sort_values(by='date', ascending=False).reset_index(drop=True)
+    
+    return result
+```

@@ -1,0 +1,49 @@
+**Operator Plan:**
+1.  **Parse Dates**: Convert the `date` column from string format (`%m/%d/%Y`) to datetime objects to extract month and day-of-week information.
+2.  **Generate Rows**: The target schema indicates an aggregation or grouping by `month` and `daytype` (weekday/weekend). However, the row count in the target (183) is slightly higher than the source (182), and the distinct values for hours suggest we are looking at a summary statistic (likely mean) per group, but the input has unique dates. Wait, looking closely at the target sample data, the values are aggregates (means) of the source data for that specific month and day type. For example, "January weekend" would be the average of all weekend days in January.
+    *   *Correction*: The source has 182 rows (July-Dec 2011). The target has 183 rows. The target sample shows months from January to July. This implies the transformation is likely generating a profile based on the source data, but the sample data in the target description seems to come from a different dataset (Jan-July) than the source sample (July-Dec).
+    *   *Re-evaluation*: In these types of problems, if the row counts don't match 1:1 and the target has fewer distinct dates but grouped labels like "month" and "daytype", it usually implies a `groupby` aggregation. The target has 183 rows. The source has 182 rows. This is odd. Let's look at the distinct values.
+    *   Source `date`: 182 distinct dates.
+    *   Target `month`: 7 distinct months.
+    *   Target `daytype`: 2 distinct types.
+    *   If we group by Month and DayType, we would have at most $7 \times 2 = 14$ rows. But the target has 183 rows.
+    *   Let's look at the target sample again. It lists "January weekend", "January weekday", "February weekday", etc. There are only 12 rows in the target sample.
+    *   Wait, the target `rows` count is 183. The target `columns` for hours have ~180 distinct values. This suggests the output is **not** an aggregate summary (which would reduce rows), but rather a **projection/reformatting** of the original rows, where the `date` is replaced by `month` and `daytype` derived from it.
+    *   Why 183 rows vs 182 source rows? The note says "Source row count describes a training sample only". The evaluation input might have different row counts. The transformation must be row-wise.
+    *   Therefore, the operation is:
+        1.  Parse `date`.
+        2.  Create `month` column: Format the month name padded to 10 characters (e.g., "January   ").
+        3.  Create `daytype` column: "weekday" if Mon-Fri, "weekend" if Sat-Sun.
+        4.  Rename `value1`...`value24` to `hr1`...`hr24`.
+        5.  Select only these columns.
+
+**Assumptions:**
+*   `month` format is the full month name left-aligned/padded to 10 spaces (observed in sample: "January  ", "February ").
+*   `daytype` is derived from the day of the week of the `date`.
+*   `valueN` maps directly to `hrN`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    dt = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    
+    # Create the output dataframe
+    out = pd.DataFrame(index=source.index)
+    
+    # Derive month: Full name, padded to 10 chars (e.g., "January   ")
+    # Python's %B gives full month name. We pad right with spaces to length 10.
+    out['month'] = dt.dt.strftime('%B').str.pad(10, side='right')
+    
+    # Derive daytype: 0=Mon, 6=Sun. 5,6 are weekend.
+    dow = dt.dt.dayofweek # 0=Mon, 1=Tue, ..., 4=Fri, 5=Sat, 6=Sun
+    out['daytype'] = np.where(dow < 5, 'weekday', 'weekend')
+    
+    # Map value1...value24 to hr1...hr24
+    for i in range(1, 25):
+        out[f'hr{i}'] = source[f'value{i}']
+        
+    return out.reset_index(drop=True)
+```

@@ -1,0 +1,78 @@
+**Operator plan:**
+1.  **Date Formatting**: Parse the `date` column from the source format (`%m/%d/%Y`) into datetime objects. Format them as ISO 8601 strings (`YYYY-MM-DD 00:00:00`) for the target `date` column.
+2.  **Column Renaming**: Map the source hourly columns (`Hour 1` to `Hour 24`) to the target 12-hour clock format with AM/PM suffixes.
+    *   Source `Hour 1` -> `1:00 AM`
+    *   Source `Hour 2` -> `2:00 AM`
+    *   ...
+    *   Source `Hour 11` -> `11:00 AM`
+    *   Source `Hour 12` -> `12:00 AM` (Note: Target schema shows `12:00 AM` for source hour 12, which is technically midnight, but we follow the target schema labels strictly. Wait, looking at the target sample data: Source `Hour 12` is 0. Target `12:00 AM` is 0. Source `Hour 24` is `0.0002398657`. Target `12:00 PM` is `0.0002398657`.
+    *   Let's verify the mapping logic based on standard 24h to 12h conversion vs target labels:
+        *   H1 (1:00) -> 1:00 AM
+        *   H2 (2:00) -> 2:00 AM
+        *   ...
+        *   H11 (11:00) -> 11:00 AM
+        *   H12 (12:00) -> 12:00 PM usually, but target label is `12:00 AM`. Let's look closer. The target column `12:00 AM` has distinct values `[0]`. Source `Hour 12` has distinct values `[0]`.
+        *   H13 (13:00) -> 1:00 PM
+        *   ...
+        *   H23 (23:00) -> 11:00 PM
+        *   H24 (24:00/00:00 next day) -> 12:00 PM usually? Or 12:00 AM?
+        *   Let's check the target sample data values against source sample data values.
+        *   Source Row 0: `Hour 12` is `0`. Target Row 0: `12:00 AM` is `0`.
+        *   Source Row 0: `Hour 24` is `0.0002398657`. Target Row 0: `12:00 PM` is `0.0002398657`.
+        *   Therefore, the mapping is:
+            *   Source `Hour 1` -> `1:00 AM`
+            *   Source `Hour 2` -> `2:00 AM`
+            *   ...
+            *   Source `Hour 11` -> `11:00 AM`
+            *   Source `Hour 12` -> `12:00 AM` (This is an unusual label for noon/midnight, but we must match the target schema name exactly).
+            *   Source `Hour 13` -> `1:00 PM`
+            *   ...
+            *   Source `Hour 23` -> `11:00 PM`
+            *   Source `Hour 24` -> `12:00 PM`
+3.  **Ordering**: The target columns are ordered: `date`, `1:00 AM`, ..., `11:00 AM`, `12:00 AM`, `1:00 PM`, ..., `11:00 PM`, `12:00 PM`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Format the date
+    # Source format: "7/3/2015" -> Target format: "2015-01-01 00:00:00" (ISO with time)
+    dt = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    out_date = dt.strftime('%Y-%m-%d 00:00:00')
+    
+    # 2. Define the mapping from Source Hour columns to Target Column Names
+    # Source: Hour 1 ... Hour 24
+    # Target: 1:00 AM ... 11:00 AM, 12:00 AM, 1:00 PM ... 11:00 PM, 12:00 PM
+    
+    target_cols = []
+    target_col_names = []
+    
+    # Hours 1-11 map to 1:00 AM - 11:00 AM
+    for h in range(1, 12):
+        target_cols.append(f'Hour {h}')
+        target_col_names.append(f'{h}:00 AM')
+        
+    # Hour 12 maps to 12:00 AM (based on target schema/sample alignment)
+    target_cols.append('Hour 12')
+    target_col_names.append('12:00 AM')
+    
+    # Hours 13-23 map to 1:00 PM - 11:00 PM
+    for h in range(13, 24):
+        target_cols.append(f'Hour {h}')
+        target_col_names.append(f'{h-12}:00 PM')
+        
+    # Hour 24 maps to 12:00 PM
+    target_cols.append('Hour 24')
+    target_col_names.append('12:00 PM')
+    
+    # 3. Construct the output DataFrame
+    # Initialize with the date column
+    result = pd.DataFrame({'date': out_date}, index=source.index)
+    
+    # Add the hourly columns in the specified order
+    for src_col, tgt_col in zip(target_cols, target_col_names):
+        result[tgt_col] = source[src_col]
+        
+    return result.reset_index(drop=True)
+```

@@ -1,0 +1,284 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `date` column from string format (`%m/%d/%Y`) to pandas datetime objects.
+2.  **Extract Features**:
+    *   Create a `month` column by extracting the full month name (e.g., "January") from the parsed dates.
+    *   Create a `daytype` column by checking if the day of the week is a weekend (Saturday=5, Sunday=6). Map to "weekend" or "weekday".
+3.  **Rename Columns**: Rename the hourly columns from `"Hour N"` to `"hrN"` (lowercase, no space).
+4.  **Aggregate**: Group the data by `month` and `daytype`. Since the target has one row per unique combination of month and daytype, and the source has multiple dates per month/daytype, we need to aggregate the hourly values. Looking at the target data, the values are not simple sums or means of the source rows (e.g., source has many rows with 0.0002398657, target has 0.0002398657). However, looking closely at the distinct values in the target vs source:
+    *   Source `Hour 1` is always `0.0002398657`. Target `hr1` is always `0.0002398657`.
+    *   Source `Hour 9` is always `0`. Target `hr9` is always `0`.
+    *   Source `Hour 6` varies. Target `hr6` varies.
+    *   The target row count (183) is significantly larger than the source row count (182) in the sample description, but the target sample shows 12 rows for 7 months. Wait, the target sample has 12 rows. The source sample has 12 rows.
+    *   Let's re-examine the row counts. Source: 182 rows. Target: 183 rows.
+    *   The target distinct months are Jan-Jul (7 months).
+    *   The target distinct daytypes are weekday/weekend.
+    *   If we group by month and daytype, we would get at most 14 rows (7 months * 2 types). The target has 183 rows. This implies the target is **not** an aggregation of the source rows into monthly buckets.
+    *   Let's look at the target sample data again.
+        *   Row 1: January, weekday
+        *   Row 2: January, weekend
+        *   Row 3: February, weekday
+        *   Row 4: February, weekday
+        *   Row 5: March, weekend
+        *   Row 6: March, weekday
+        *   ...
+    *   The target has 183 rows. The source has 182 rows.
+    *   The source dates range from 7/3/2015 to 12/31/2015.
+    *   The target months are January to July. This is a mismatch in time period. The source is H2 2015. The target is H1 2015 (Jan-Jul).
+    *   **Crucial Observation**: The problem statement says "Infer the transformation... The evaluation source contains different rows". The sample provided is just a schema/sample block. The *actual* transformation must be general.
+    *   However, the target columns `month` and `daytype` are derived from the date. The hourly columns are renamed.
+    *   Why are there 183 rows in the target vs 182 in the source? And why are the months Jan-Jul in the target sample while the source sample is Jul-Dec?
+    *   It is highly likely that the **evaluation source** will contain dates corresponding to the target months, or the transformation is simply:
+        1. Parse date.
+        2. Extract month name.
+        3. Extract daytype.
+        4. Rename hour columns.
+        5. **Sort** or **Reindex**?
+    *   Let's look at the values. The values in the target sample for `hr1` are `0.0002398657`. The source sample `Hour 1` is `0.0002398657`.
+    *   The values in the target sample for `hr6` vary.
+    *   If the transformation is just a row-wise mapping (parse date, rename cols), the row count should remain the same (182 -> 182). The target has 183.
+    *   Is it possible the target includes a header or an extra row? No, `nulls: 0`.
+    *   Is it possible the source has a duplicate date or the target splits a day?
+    *   Let's look at the distinct values in the target `month`: Jan, Feb, Mar, Apr, May, Jun, July.
+    *   Let's look at the source `date`: 7/3/2015 to 12/31/2015.
+    *   There is a complete disconnect between the sample source data (Jul-Dec) and sample target data (Jan-Jul). This suggests the sample data provided in the JSON is **not** a direct transformation of the specific rows shown, but rather illustrates the *schema* and *format*. The "evaluation source" will likely have dates in Jan-Jul 2015 (or similar) that map to the target.
+    *   The row count difference (182 vs 183) might be due to the evaluation source having 183 rows.
+    *   Therefore, the transformation is likely **row-wise**:
+        1.  Parse `date`.
+        2.  Create `month` (full name).
+        3.  Create `daytype` ("weekday"/"weekend").
+        4.  Rename `Hour N` to `hrN`.
+        5.  Select/Order columns: `month`, `daytype`, `hr1`...`hr24`.
+        6.  Sort by `month` (chronologically) and then `daytype`? The target sample is sorted by Month (Jan, Jan, Feb, Feb...) and then Daytype (weekday, weekend). Note: Jan weekday comes before Jan weekend. Feb weekday comes before Feb weekend.
+        7.  Wait, the target sample has:
+            *   Jan, weekday
+            *   Jan, weekend
+            *   Feb, weekday
+            *   Feb, weekday (Two weekdays for Feb?)
+            *   Mar, weekend
+            *   Mar, weekday
+        *   This sorting is not strictly alphabetical or chronological if we just sort by month name. "January" < "February".
+        *   If we sort by the original date, we get chronological order.
+        *   Let's check if the target sample is sorted by date.
+            *   Jan weekday (e.g., Jan 1)
+            *   Jan weekend (e.g., Jan 3)
+            *   Feb weekday (e.g., Feb 2)
+            *   Feb weekday (e.g., Feb 9)
+            *   Mar weekend (e.g., Mar 7)
+            *   Mar weekday (e.g., Mar 2) -> This would be out of order if sorted by date.
+        *   Actually, let's look at the target sample order again:
+            1. Jan, weekday
+            2. Jan, weekend
+            3. Feb, weekday
+            4. Feb, weekday
+            5. Mar, weekend
+            6. Mar, weekday
+            7. Apr, weekday
+            8. Apr, weekend
+            9. May, weekday
+            10. May, weekday
+            11. Jun, weekday
+            12. Jul, weekday
+        *   This looks like it might be sorted by `month` (chronologically) and then `daytype` (weekday before weekend? No, Jan has weekday then weekend. Feb has weekday then weekday. Mar has weekend then weekday. This is inconsistent).
+        *   Actually, if we sort by the **original date** in the source, and the source dates are unique, the output order will be chronological.
+        *   Let's assume the standard operation: **Row-wise transformation**.
+        *   Steps:
+            1.  `df['date'] = pd.to_datetime(df['date'], format='%m/%d/%Y')`
+            2.  `df['month'] = df['date'].dt.strftime('%B')`
+            3.  `df['daytype'] = df['date'].dt.dayofweek.apply(lambda x: 'weekend' if x >= 5 else 'weekday')`
+            4.  Rename columns: `{'Hour 1': 'hr1', ..., 'Hour 24': 'hr24'}`
+            5.  Drop original `date` column? The target schema does not have `date`.
+            6.  Select columns: `['month', 'daytype', 'hr1', ..., 'hr24']`.
+            7.  Sort? The target sample seems to be sorted by Month (Jan->Jul) and then potentially by the original date within that month? Or just by the original date?
+            8.  If I sort by `month` (using a custom order for months) and then `daytype`, does it match?
+                *   Jan: weekday, weekend.
+                *   Feb: weekday, weekday.
+                *   Mar: weekend, weekday.
+                *   This implies the sort is primarily by the **original date**. If the source is sorted by date, the output will be sorted by date. The target sample shows Jan dates, then Feb dates, etc. Within Jan, it shows a weekday then a weekend. This is consistent with chronological order (e.g., Jan 1 is Wed, Jan 3 is Fri? No. Jan 1 2015 was Thursday. Jan 3 was Saturday. So Jan 1 (weekday) comes before Jan 3 (weekend). This matches).
+                *   Feb: Feb 2 (Mon, weekday), Feb 9 (Mon, weekday). Matches.
+                *   Mar: Mar 7 (Sat, weekend), Mar 2 (Mon, weekday). Wait. Mar 2 is before Mar 7. If sorted by date, Mar 2 (weekday) should come before Mar 7 (weekend). But the sample shows Mar weekend then Mar weekday.
+                *   Let's re-read the sample carefully.
+                *   Row 5: March, weekend
+                *   Row 6: March, weekday
+                *   If the source was sorted by date, Mar 2 (weekday) would be before Mar 7 (weekend).
+                *   Unless the source is **not** sorted by date, or the target is sorted by `month` then `daytype`?
+                *   If sorted by `month` then `daytype` (weekday < weekend alphabetically? No, 'w' < 'w'. 'weekday' < 'weekend').
+                *   If sorted by Month, then Daytype (weekday first):
+                    *   Jan: weekday, weekend. (Matches)
+                    *   Feb: weekday, weekday. (Matches)
+                    *   Mar: weekday, weekend. (Sample has weekend, weekday). **Mismatch**.
+                *   If sorted by Month, then Daytype (weekend first?):
+                    *   Jan: weekend, weekday. (Sample has weekday, weekend). **Mismatch**.
+                *   Let's look at the values.
+                    *   Mar weekend: hr3 is 0.0.
+                    *   Mar weekday: hr3 is 0.0002398657.
+                *   Is it possible the target is sorted by `month` and then by the **first hour value**? Unlikely.
+                *   Let's reconsider the "Mar weekend, Mar weekday" order.
+                *   Maybe the source data for March had the weekend date first?
+                *   If the transformation preserves the source order, and the source was not sorted by date, then the output order depends on the source order.
+                *   However, usually, these problems imply a canonical sort.
+                *   Let's look at the distinct months in target: Jan, Feb, Mar, Apr, May, Jun, July.
+                *   Let's look at the source sample dates: 7/3, 7/19, 8/4...
+                *   The source sample is sorted by date.
+                *   The target sample is sorted by Month (Jan->Jul).
+                *   Within March, why is weekend before weekday?
+                *   Maybe the sort key is `month` (chronological) and then `daytype` where `weekend` < `weekday`?
+                    *   Jan: weekday, weekend. (If weekend < weekday, it would be weekend, weekday). Mismatch.
+                *   Maybe the sort key is `month` and then `date`?
+                    *   If the source dates for March were Mar 7 (weekend) and Mar 2 (weekday), and the source was sorted by date, Mar 2 would be first.
+                    *   If the source was **not** sorted, and we just output in source order, we can't guarantee the target order without knowing the source order.
+                    *   BUT, the target sample is provided as a "specification". It likely implies a specific sort order.
+                    *   Let's look at April: Weekday, Weekend.
+                    *   May: Weekday, Weekday.
+                    *   June: Weekday.
+                    *   July: Weekday.
+                    *   The only anomaly is March.
+                    *   Is it possible `daytype` sorting is `weekday` < `weekend`?
+                        *   Jan: Wkday, Wkend. (OK)
+                        *   Feb: Wkday, Wkday. (OK)
+                        *   Mar: Wkend, Wkday. (NOT OK)
+                        *   Apr: Wkday, Wkend. (OK)
+                    *   Is it possible `daytype` sorting is `weekend` < `weekday`?
+                        *   Jan: Wkend, Wkday. (NOT OK)
+                    *   What if the sort is by `month` and then by the **value of hr1**?
+                        *   All hr1 are 0.0002398657.
+                    *   What if the sort is by `month` and then by `hr6`?
+                        *   Mar weekend hr6: 0.0002398657.
+                        *   Mar weekday hr6: 0.0002398657.
+                    *   What if the sort is by `month` and then by `hr7`?
+                        *   Mar weekend hr7: 0.0002398657.
+                        *   Mar weekday hr7: 0.0001199328.
+                        *   If sorted ascending by hr7: Weekday (0.0001...) then Weekend (0.0002...). Sample has Weekend then Weekday.
+                        *   If sorted descending by hr7: Weekend then Weekday. Matches March.
+                        *   Check Jan:
+                            *   Jan weekday hr7: 0.0002398657.
+                            *   Jan weekend hr7: 0.0002398657.
+                            *   Tie.
+                        *   Check Apr:
+                            *   Apr weekday hr7: 0.0001199328.
+                            *   Apr weekend hr7: 0.0.
+                            *   Descending: Weekday (0.0001) then Weekend (0.0). Matches April.
+                        *   Check Feb:
+                            *   Feb weekday 1 hr7: 0.0002398657.
+                            *   Feb weekday 2 hr7: 0.0001199328.
+                            *   Descending: 0.0002... then 0.0001...
+                            *   Sample: Feb weekday (hr7 0.0002...), Feb weekday (hr7 0.0001...). Matches.
+                    *   This seems like a very complex and unlikely sort key (descending hr7).
+
+    *   Alternative Theory: The target is sorted by `month` (chronological) and then by the **original date**.
+        *   If the source data for March had the weekend date *before* the weekday date in the source DataFrame, and we preserve order, it would match.
+        *   But the source sample is sorted by date.
+        *   However, the prompt says "The evaluation source contains different rows". The sample source is just a sample. The evaluation source might not be sorted.
+        *   BUT, we must produce a deterministic transformation. If we don't sort, the output order depends on the input order. If the evaluation input is not sorted, the output won't match the target sample's implied order (if the target sample is sorted).
+        *   Usually, if the target has a specific order, we should sort.
+        *   Let's look at the March anomaly again.
+        *   Target:
+            *   Mar, weekend
+            *   Mar, weekday
+        *   If we sort by `month` (Jan=1, Feb=2...) and then `daytype` with `weekend` < `weekday`?
+            *   Jan: Weekend, Weekday. (Sample: Weekday, Weekend). Fail.
+        *   If we sort by `month` and then `daytype` with `weekday` < `weekend`?
+            *   Mar: Weekday, Weekend. (Sample: Weekend, Weekday). Fail.
+
+    *   Let's check the distinct values of `month` in the target: `['January', 'February', 'March', 'April', 'May', 'June', 'July']`.
+    *   Let's check the distinct values of `daytype`: `['weekday', 'weekend']`.
+    *   Is it possible the target is sorted by `month` and then by the **index** of the day in the month?
+    *   Let's assume the simplest case: **Sort by Month (chronologically) and then by Daytype (Weekday before Weekend)**.
+        *   Why did March fail?
+        *   Maybe I misidentified the daytype of the March rows in the sample?
+        *   Row 5: March, weekend.
+        *   Row 6: March, weekday.
+        *   If the sort was Weekday < Weekend, Row 6 should be before Row 5.
+        *   Is it possible the sample target is **not** sorted by a simple key, but rather reflects the **source order**?
+        *   If the transformation is just "Map and Rename", and the evaluation source is provided in a specific order, we should preserve it.
+        *   However, the target sample shows a clear grouping by Month. The source sample is grouped by Date (which implies Month).
+        *   If the evaluation source is sorted by Date, the output will be sorted by Date.
+        *   If the evaluation source is **not** sorted, and we want to match the target sample's structure (grouped by month), we should sort by Month.
+        *   What about the secondary sort?
+        *   If we sort by Month, then by Date, we get chronological order.
+        *   If the March dates in the evaluation source are Mar 7 (Weekend) and Mar 2 (Weekday), and the source is sorted by Date, Mar 2 comes first.
+        *   If the target sample has Mar Weekend first, then either:
+            1.  The target sample is NOT sorted by date.
+            2.  The target sample is sorted by Month, then by something else.
+            3.  The target sample corresponds to a source where Mar 7 came before Mar 2.
+
+    *   Given the ambiguity and the likelihood that "Sort by Month" is the primary intent to group the data, and the secondary sort is less clear, I will **sort by Month (chronologically) and then by Daytype (Weekday before Weekend)**.
+    *   Wait, let's look at the March case again.
+        *   If I sort by Month, then Daytype (Weekday < Weekend), I get Weekday, Weekend.
+        *   The sample has Weekend, Weekday.
+        *   If I sort by Month, then Daytype (Weekend < Weekday), I get Weekend, Weekday.
+        *   But Jan has Weekday, Weekend.
+        *   This contradiction suggests that **sorting by Daytype is not the correct secondary key**.
+        *   The only key that consistently explains Jan (Wkday, Wkend), Feb (Wkday, Wkday), Mar (Wkend, Wkday), Apr (Wkday, Wkend) is **Chronological Date**.
+        *   Jan 1 (Wkday) < Jan 3 (Wkend).
+        *   Feb 2 (Wkday) < Feb 9 (Wkday).
+        *   Mar 7 (Wkend) < Mar 2 (Wkday)? **No**, Mar 2 < Mar 7.
+        *   So if the sample has Mar Weekend before Mar Weekday, and it's sorted by date, then the Weekend date must be earlier than the Weekday date.
+        *   Mar 7 is a Saturday. Mar 2 is a Monday.
+        *   Is there a Weekend date in March earlier than Mar 2?
+        *   Mar 1 (Sun), Mar 2 (Mon).
+        *   If the March Weekend row is Mar 1, and the March Weekday row is Mar 2, then Mar 1 < Mar 2.
+        *   Let's check the values for Mar 1 vs Mar 2.
+        *   We don't have the exact dates in the target sample, only "March".
+        *   However, if we assume the target sample is sorted by **Date**, then the transformation should **preserve the source order** (if the source is sorted by date) or **sort by date**.
+        *   Since the source sample is sorted by date, and the target sample appears to be sorted by date (assuming the March weekend is Mar 1 and weekday is Mar 2), the safest transformation is:
+            1.  Parse Date.
+            2.  Extract Month/Daytype.
+            3.  Rename Cols.
+            4.  **Sort by Date**.
+
+    *   Let's verify this hypothesis.
+        *   If I sort by Date, the output is chronological.
+        *   The target sample is chronological (Jan -> Jul).
+        *   Within Jan, Weekday (Jan 1) -> Weekend (Jan 3). Chronological.
+        *   Within Feb, Weekday (Feb 2) -> Weekday (Feb 9). Chronological.
+        *   Within Mar, Weekend (Mar 1) -> Weekday (Mar 2). Chronological.
+        *   Within Apr, Weekday (Apr 1) -> Weekend (Apr 4). Chronological.
+        *   This fits perfectly.
+
+    *   **Conclusion**: The transformation is row-wise mapping, followed by sorting by the original date.
+
+5.  **Final Steps**:
+    *   Parse `date`.
+    *   Create `month` and `daytype`.
+    *   Rename `Hour N` to `hrN`.
+    *   Drop `date`.
+    *   Sort by the original `date` (which we can keep temporarily for sorting, or sort by `month` and `dayofyear`? No, just sort by the parsed date column before dropping it).
+    *   Select final columns.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Create a copy to avoid modifying the original
+    df = source.copy()
+    
+    # Parse the date column
+    df['date_parsed'] = pd.to_datetime(df['date'], format='%m/%d/%Y')
+    
+    # Extract month name
+    df['month'] = df['date_parsed'].dt.strftime('%B')
+    
+    # Extract daytype: weekday or weekend
+    # dayofweek: 0=Mon, ..., 5=Sat, 6=Sun
+    df['daytype'] = df['date_parsed'].dt.dayofweek.apply(
+        lambda x: 'weekend' if x >= 5 else 'weekday'
+    )
+    
+    # Rename hour columns from "Hour N" to "hrN"
+    rename_map = {f'Hour {i}': f'hr{i}' for i in range(1, 25)}
+    df = df.rename(columns=rename_map)
+    
+    # Sort by the original date to ensure chronological order
+    df = df.sort_values(by='date_parsed')
+    
+    # Select the target columns in the correct order
+    # month, daytype, hr1...hr24
+    hour_cols = [f'hr{i}' for i in range(1, 25)]
+    final_cols = ['month', 'daytype'] + hour_cols
+    
+    result = df[final_cols].reset_index(drop=True)
+    
+    return result
+```

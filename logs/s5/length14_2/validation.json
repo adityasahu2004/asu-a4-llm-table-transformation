@@ -1,0 +1,154 @@
+{
+  "case": "length14_2",
+  "length": 14,
+  "strategy": "s5",
+  "model": "qwen36-27b",
+  "is_demo": false,
+  "parameters": {
+    "output": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment",
+    "model": "qwen36-27b",
+    "base_url": "https://openai.rc.asu.edu/v1",
+    "max_tokens": 6000,
+    "reasoning_effort": "none",
+    "k": 5,
+    "sample_rows": 12,
+    "timeout": 120,
+    "api_timeout": 3600,
+    "replay_only": false,
+    "strategy": "s5",
+    "python": "3.14.4 (main, Apr  7 2026, 13:13:20) [Clang 21.0.0 (clang-2100.0.123.102)]",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "pandas": "3.1.1",
+    "held_out": [
+      "length1_1",
+      "length1_2",
+      "length1_3",
+      "length2_1",
+      "length3_1"
+    ],
+    "benchmark": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split"
+  },
+  "prompt_path": "logs/s5/length14_2/prompt.json",
+  "completion_path": "logs/s5/length14_2/response.json",
+  "execution": {
+    "status": "ok",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:19: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+    "seconds": 9.812291958995047,
+    "shape": [
+      288,
+      8
+    ],
+    "fingerprint": "b7a44da460a7df5ea9ad354b28e822185e99d5924c017cc178642ede699c7bb4"
+  },
+  "autopipeline": {
+    "accuracy": 0.0,
+    "is_correct": false,
+    "similarities": {},
+    "info": []
+  },
+  "hard_match": {
+    "accuracy": 0.2556423611111111,
+    "is_correct": false,
+    "similarities": [
+      1.0,
+      1.0,
+      0.0,
+      0.04513888888888889,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "info": [
+      "month",
+      "hour"
+    ]
+  },
+  "hard_match_provenance": "course-provided hard_match.py and utils.py",
+  "exact_schema": true,
+  "generation": {
+    "candidate_count": 6,
+    "selected_index": 0,
+    "baseline_index": 0,
+    "selection_reason": "SC winner retained: no strict constraint improvement",
+    "constraints": {
+      "columns": [
+        "month",
+        "hour",
+        "hvac",
+        "domestic_water_heating",
+        "major_appliances",
+        "lighting",
+        "miscellaneous_plug_loads",
+        "total"
+      ],
+      "relations": []
+    },
+    "policy": {
+      "version": "schema-weekday-v1",
+      "pool": "five few-shot SC samples + one greedy few-shot sample",
+      "constraints": [
+        "exact target schema",
+        "uniquely identified date-to-weekday relation"
+      ],
+      "target_rows": "the same 12-row prompt sample as the baselines",
+      "output_rows": "up to 128 evenly spaced training-output rows",
+      "selection": "strictly lower lexicographic constraint loss; preserve SC winner on ties",
+      "forbidden_inputs": [
+        "test_0.csv",
+        "validator results",
+        "case-specific rules",
+        "target row counts"
+      ]
+    },
+    "usage": {
+      "prompt_tokens": 120202,
+      "completion_tokens": 13830,
+      "total_tokens": 134032
+    },
+    "api_attempts": 7,
+    "marginal_api_attempts": 0,
+    "latency_seconds": 214.68296508299682,
+    "inherited_api_seconds": 214.68296508299682,
+    "clusters": {
+      "971e0a7701475adf2b6e1da8dc2a9ecc4441e2c0f978735333f55762368ff803": [
+        0
+      ],
+      "16029d45650e2c96c9fb52f4ee4631613fc2bc8335aa354472559ee25713b65a": [
+        1
+      ],
+      "6bb15ced703fc619287677000bd7834f75cd66bbe95350e7c5d08b6542c4a81a": [
+        2
+      ],
+      "92b5ae40bdb36b31095cdf27b9c280afa68c2f97cf9d5703246451c60f3a3040": [
+        3
+      ],
+      "e0040e9abd3c7616f02a335c61d3fc3bf31e549c9f565b3eba6ac2f8946855ee": [
+        4
+      ]
+    },
+    "cost_basis": "standalone logical pool cost; reused requests have zero marginal API cost",
+    "interruption": {
+      "inherited": [
+        {
+          "reason": "Fresh connection recovery after shared transport drop; no completion was received from the stale attempt.",
+          "calendar_wait_seconds": 4406.536689519882,
+          "active_wait_seconds": null,
+          "note": "Calendar interval is a bound for the logged prompt, not recoverable active latency. Received token usage is unknown. Interrupted attempts count as API requests. Includes a separately cancelled overlapping resume request.",
+          "earlier_interruption": {
+            "reason": "Cancelled overlapping resume attempt: main resume reached a case still owned by the disjoint worker. Original disjoint request remains active; no program was replaced.",
+            "calendar_wait_seconds": 2954.3095304965973,
+            "active_wait_seconds": null,
+            "uncounted_requests": 1,
+            "note": "No completion or usage received for the cancelled duplicate attempt; active time unknown. Other requests for this case remain in request_errors.json/response.json."
+          },
+          "uncounted_requests": 1
+        }
+      ],
+      "calendar_wait_seconds": 4406.536689519882
+    }
+  },
+  "wall_seconds": 288.8437122499963
+}

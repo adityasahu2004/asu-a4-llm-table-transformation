@@ -1,0 +1,108 @@
+**Operator Plan:**
+
+1.  **Parse Date**: Convert the `date` column (format `m/d/yyyy H:MM`) into a pandas datetime object.
+2.  **Extract Components**:
+    *   Extract the date part to form `dt_strata` formatted as `MM/DD/yy`.
+    *   Extract the day of the week (`dow`) as an integer (0=Monday, ..., 6=Sunday).
+    *   Extract the hour of the day.
+3.  **Pivot Data**:
+    *   Group by the unique date (`dt_strata`) and `dow`.
+    *   Pivot the `cerc_logger_1` values into columns based on the hour.
+    *   Map hours 0-23 to columns `pct_hourly_0100` through `pct_hourly_2400`. Note: Hour 0 corresponds to `pct_hourly_0100` (1 AM slot in 24h clock logic often used in these datasets, or simply mapping 0->1, 1->2... 23->24). Let's verify the mapping.
+        *   Source sample: `7/28/2019 4:50` -> Hour 4.
+        *   Target sample: `07/27/19` (Saturday, dow=6). The target row for `07/27/19` has values.
+        *   Let's check the mapping logic. Usually, `pct_hourly_0100` represents the 1st hour of the day (00:00-01:00) or the value at 1:00.
+        *   Looking at the target schema, we have 24 hourly columns + 1 zero column.
+        *   Standard convention in these "strata" problems:
+            *   Hour 0 (00:00) -> `pct_hourly_0100`
+            *   Hour 1 (01:00) -> `pct_hourly_0200`
+            *   ...
+            *   Hour 23 (23:00) -> `pct_hourly_2400`
+        *   Let's verify with the data.
+        *   Source: `7/28/2019 4:50` is Hour 4. This should map to `pct_hourly_0500` if 0->1.
+        *   Target: `07/27/19` is a Saturday. The source has `7/27/2019`? No, source starts `7/28/2019`. Wait, the target sample has `07/27/19`. The source sample provided is just a snippet. The source has 74k rows.
+        *   Let's look at `01/14/19` in target. It's a Monday (dow=1).
+        *   Let's look at `01/07/19` in target. It's a Monday (dow=1).
+        *   The transformation aggregates daily data. Since the source has multiple readings per day (every 10 mins?), we need to aggregate. The target has one row per day.
+        *   How to aggregate? The target values look like single values, not averages of many.
+        *   Actually, looking at the source, it seems to be a time series. The target is a "strata" profile.
+        *   Usually, this implies taking the value for each hour. If there are multiple values per hour, we might need to average or take the first/last. Given the distinct counts in target (e.g., 342 distinct values for hour 1), and source has 74k rows over ~2 years (730 days), that's ~100 rows/day. 24 hours * 100 rows = 2400 rows? No.
+        *   Let's assume we take the **mean** or **first** value for each hour of each day.
+        *   However, often in these specific "strata" datasets, the source is already one reading per hour or the aggregation is simple.
+        *   Let's look at the mapping again.
+        *   Source Hour 0 -> Target `pct_hourly_0100`
+        *   Source Hour 1 -> Target `pct_hourly_0200`
+        *   ...
+        *   Source Hour 23 -> Target `pct_hourly_2400`
+    *   Fill missing hours with 0.0? The target has 0.0 for many hours in some rows (e.g., `02/19/19`). This suggests if no data exists for that hour, it's 0.
+    *   Add `pct_hourly_2500` column with value 0.
+
+4.  **Construct Output**:
+    *   Create DataFrame with `dt_strata`, `dow`.
+    *   Add 24 hourly columns.
+    *   Add `pct_hourly_2500` = 0.
+    *   Sort by `dt_strata`? The target sample is not strictly sorted by date (`01/14/19`, `02/19/19`, `02/26/19`, `01/07/19`...). It seems sorted by `dt_strata` string? `01/07` comes after `02/26`? No. `01/14`, `02/19`, `02/26`, `01/07`. This is not sorted by date. It might be sorted by the original index or just arbitrary. I will preserve the order of unique dates as they appear or sort by date. The target sample order is weird. `01/14`, `02/19`, `02/26`, `01/07`. This looks like it might be sorted by `dow`? 1, 2, 2, 1. No.
+    *   Let's just group by date and return. The order in the target sample might be due to the specific evaluation set. I will sort by `dt_strata` to be safe, or just return the grouped result. Given the "first_last_non_null" in target schema is `01/14/19` to `06/11/19`, it's a subset.
+    *   I will group by `dt_strata` and `dow`, aggregate the hourly values (mean), and pivot.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    # Format: m/d/yyyy H:MM
+    df = source.copy()
+    df['datetime'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract components
+    df['dt_strata'] = df['datetime'].dt.strftime('%m/%d/%y')
+    df['dow'] = df['datetime'].dt.dayofweek # 0=Mon, 6=Sun
+    df['hour'] = df['datetime'].dt.hour
+    
+    # Map hour to target column name
+    # Hour 0 -> pct_hourly_0100
+    # Hour 1 -> pct_hourly_0200
+    # ...
+    # Hour 23 -> pct_hourly_2400
+    df['hour_col'] = df['hour'].apply(lambda h: f'pct_hourly_{h+1:02d}00')
+    
+    # Aggregate by date and hour
+    # We take the mean of the values for each hour in each day
+    # If there are multiple readings per hour, average them.
+    agg_df = df.groupby(['dt_strata', 'dow', 'hour_col'])['cerc_logger_1'].mean().reset_index()
+    
+    # Pivot to wide format
+    pivot_df = agg_df.pivot_table(index=['dt_strata', 'dow'], columns='hour_col', values='cerc_logger_1', fill_value=0.0)
+    
+    # Reset index to make dt_strata and dow columns
+    pivot_df = pivot_df.reset_index()
+    
+    # Ensure all 24 columns exist and are in order
+    expected_cols = [f'pct_hourly_{h:02d}00' for h in range(1, 25)]
+    
+    # Reindex columns to ensure order and presence
+    for col in expected_cols:
+        if col not in pivot_df.columns:
+            pivot_df[col] = 0.0
+            
+    # Select and order columns
+    result_cols = ['dt_strata', 'dow'] + expected_cols
+    pivot_df = pivot_df[result_cols]
+    
+    # Add the 25th hour column with 0
+    pivot_df['pct_hourly_2500'] = 0
+    
+    # Sort by dt_strata to match typical output expectations, 
+    # though the sample order is ambiguous. 
+    # The sample shows 01/14, 02/19, 02/26, 01/07... 
+    # This is not sorted by date. It might be sorted by the original appearance or dow.
+    # However, without explicit instruction, sorting by date is the most deterministic.
+    # Let's check if the sample is sorted by dow? 
+    # 01/14 (Mon, 1), 02/19 (Tue, 2), 02/26 (Tue, 2), 01/07 (Mon, 1). 
+    # It's not strictly sorted by dow either.
+    # I will sort by dt_strata.
+    pivot_df = pivot_df.sort_values('dt_strata').reset_index(drop=True)
+    
+    return pivot_df
+```

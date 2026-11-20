@@ -1,0 +1,37 @@
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    df = source.copy()
+    df['dt'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract date and hour
+    df['date_only'] = df['dt'].dt.date
+    df['hour'] = df['dt'].dt.hour
+    
+    # Map hour 0 to 24, others stay same (1-23)
+    df['hour_label'] = df['hour'].apply(lambda h: 24 if h == 0 else h)
+    
+    # Pivot the table
+    # Index: date_only, Columns: hour_label, Values: cerc_logger_1
+    pivoted = df.pivot_table(index='date_only', columns='hour_label', values='cerc_logger_1')
+    
+    # Ensure all hours 1-24 are present as columns, even if empty
+    all_hours = list(range(1, 25))
+    pivoted = pivoted.reindex(columns=all_hours)
+    
+    # Rename columns to "Hour 1", "Hour 2", ...
+    pivoted.columns = [f'Hour {h}' for h in all_hours]
+    
+    # Reset index to make date_only a column
+    pivoted = pivoted.reset_index()
+    
+    # Rename date_only to date and format as MM/DD/YYYY
+    pivoted = pivoted.rename(columns={'date_only': 'date'})
+    pivoted['date'] = pivoted['date'].apply(lambda d: d.strftime('%m/%d/%Y'))
+    
+    # Sort by date to ensure consistent ordering (optional but good practice)
+    pivoted = pivoted.sort_values('date').reset_index(drop=True)
+    
+    return pivoted

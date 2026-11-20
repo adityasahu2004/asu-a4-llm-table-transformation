@@ -1,0 +1,146 @@
+Operator plan:
+1. Filter out rows where `TOTAL BLDG WHS [emon ch1,2]` is the sentinel value `32767.0` (indicating missing/invalid data).
+2. Parse `timestamp` to datetime.
+3. Derive `season` from the month of the timestamp (Dec-Feb: Winter, Mar-May: Spring, Jun-Aug: Summer, Sep-Nov: Fall).
+4. Derive `hour` from the timestamp.
+5. Aggregate data by `season` and `hour`.
+6. Compute sums for specific columns to derive target metrics:
+    - `HVAC`: Sum of `AC COMPRESSOR WHS [emon ch3,4]` + `AIR HANDLER WHS [emon ch5,6]` + `Minisplit WHS (2-CTs) [xpod chA-7,8]`. Note: Need to handle sentinel `32767.0` in these columns by treating them as 0 or excluding them. Given the distinct values and context, `32767.0` is likely "no data". Since we filtered on Total, we should probably replace `32767.0` with 0 in the component columns before summing, or assume valid rows have valid components. Looking at the sample, rows with valid Total often have valid components, but some components are 0. Rows with Total=32767 have all components 32767. So filtering on Total handles the main case. However, individual components might still be 32767? The sample shows `32767.0` in components for valid total rows (e.g., row 1: AC=0, Air Handler=16... wait, row 1 has Total=386, AC=0, AH=16... Row 2: Total=2069, AC=1714... Row 4: Total=4347, AC=3335... Row 7: Total=32767... all 32767. Row 8: Total=6984, AC=5810, AH=32767. Here AH is 32767 but Total is valid. This implies 32767 in components means "not measured/0" or "error". Given "HVAC" is a derived sum, if a component is 32767, it should probably be treated as 0.
+    - `domestic_water_heating`: Sum of `WATER HEATER WHS [emon ch7,8]`.
+    - `major_appliances`: Sum of `DRYER WHS (1-CT) [emon ch9]` + `RANGE WHS (1-CT) [emon ch10]` + `DISH WASHER WHS [emon ch11]` + `Primary Fridge WHS [emon ch12]` + `2nd Fridge WHS [emon ch13]` + `Dryer WHS (2-CTs) [xpod chA-9,10]`.
+    - `lighting`: Constant 0.
+    - `miscellaneous_plug_loads`: Sum of `SPARE1 WHS (1-CT) [emon ch14]` + `SPARE2 WHS (1-CT) [xpod chA-1]` + `SPARE3 WHS (1-CT) [xpod chA-2]` + `SPARE4 WHS (2-CTs) [xpod chA-5,6]` + `POOL PUMP WHS (2-CTs) [xpod chA-3,4]`. (Note: Pool pump is often HVAC or Misc. Given the column name "SPARE" and "Pool", and typical breakdowns, Pool is often separate. Let's look at the remaining columns. `Calculated Unmeasured loads` and `Calculated Energy Use` are derived. `Future use` columns are likely 0. `Wattsup` columns are cumulative or specific devices. `LaCrosse`, `PointSix`, `HOBO` are sensors.
+    - `Total`: Sum of `TOTAL BLDG WHS [emon ch1,2]`.
+
+    Let's refine the component mappings based on standard energy breakdowns:
+    - HVAC: AC Compressor, Air Handler, Minisplit.
+    - Domestic Water Heating: Water Heater.
+    - Major Appliances: Dryer (1-CT), Range, Dish Washer, Primary Fridge, 2nd Fridge, Dryer (2-CTs).
+    - Lighting: Not explicitly measured separately, often part of "Unmeasured" or assumed 0 if not distinct. Target has 0.
+    - Miscellaneous Plug Loads: This is the tricky one. It likely includes the "SPARE" channels and potentially "Pool Pump" if not HVAC. Let's assume SPARE1, SPARE2, SPARE3, SPARE4, POOL PUMP.
+    
+    Wait, `miscellaneous_plug_loads` in target is `float64`, others are `int64`. This suggests it might be a calculated remainder or a specific sum that isn't integer. Or it's just the sum of specific columns.
+    
+    Let's check the `Total` column in target. Is it the sum of the components?
+    Sample: Summer, 19. HVAC=534437857, DWH=69999495, Major=697764930, Light=0, Misc=351461542.1, Total=93968491.
+    Sum of components = 534437857 + 69999495 + 697764930 + 0 + 351461542.1 = 1,653,663,824.1.
+    This does NOT equal Total (93,968,491).
+    
+    Actually, looking at the source, `TOTAL BLDG WHS` is the meter reading. The target `Total` is likely the sum of the `TOTAL BLDG WHS` for that season/hour.
+    
+    Let's re-read the target `Total`. In the sample, `Total` is `93968491`.
+    If I sum `TOTAL BLDG WHS` for Summer hour 19 in the source, do I get ~94 million?
+    The source has 1.3M rows. 96 buckets. Average ~13k rows per bucket. Average value ~500-1000 Wh? 13000 * 1000 = 13,000,000. 94 million seems high but possible if values are higher or more rows.
+    
+    What about `miscellaneous_plug_loads`? It is `float64`. The other sums are `int64`.
+    Maybe `miscellaneous_plug_loads` is `Calculated Unmeasured loads (Whr)`?
+    Let's check the distinct values. `Calculated Unmeasured loads` has 17022 distinct values. `miscellaneous_plug_loads` has 96 distinct values (one per bucket).
+    
+    Let's assume the following mapping for aggregation:
+    - `HVAC`: `AC COMPRESSOR WHS [emon ch3,4]` + `AIR HANDLER WHS [emon ch5,6]` + `Minisplit WHS (2-CTs) [xpod chA-7,8]`
+    - `domestic_water_heating`: `WATER HEATER WHS [emon ch7,8]`
+    - `major_appliances`: `DRYER WHS (1-CT) [emon ch9]` + `RANGE WHS (1-CT) [emon ch10]` + `DISH WASHER WHS [emon ch11]` + `Primary Fridge WHS [emon ch12]` + `2nd Fridge WHS [emon ch13]` + `Dryer WHS (2-CTs) [xpod chA-9,10]`
+    - `lighting`: 0
+    - `miscellaneous_plug_loads`: `SPARE1 WHS (1-CT) [emon ch14]` + `SPARE2 WHS (1-CT) [xpod chA-1]` + `SPARE3 WHS (1-CT) [xpod chA-2]` + `SPARE4 WHS (2-CTs) [xpod chA-5,6]` + `POOL PUMP WHS (2-CTs) [xpod chA-3,4]` + `Future use- WHS (2-CTs)[xpod chB-3,4]` + `Future use- WHS (2-CTs)[xpod chB-5,6]`?
+    - `Total`: `TOTAL BLDG WHS [emon ch1,2]`
+
+    Crucially, we must replace `32767.0` with `0` in all numeric columns before summing, as it represents "no data" or "not applicable" and summing them would produce garbage.
+
+    Steps:
+    1. Load source.
+    2. Replace `32767.0` with `0` in all float columns.
+    3. Filter out rows where `TOTAL BLDG WHS [emon ch1,2]` was originally `32767.0`? Or just rely on the replacement? If we replace, we sum 0s. But if the whole row is invalid, we might want to drop it. The target has 96 rows. 4 seasons * 24 hours. This implies we aggregate all valid data.
+    4. Create `season` and `hour`.
+    5. Group by `season`, `hour`.
+    6. Sum the columns.
+    7. Construct the final DataFrame with renamed columns and types.
+
+    One detail: `miscellaneous_plug_loads` is float. The others are int. I will cast accordingly.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Identify numeric columns to clean
+    numeric_cols = source.select_dtypes(include=[np.number]).columns.tolist()
+    
+    # Replace sentinel value 32767.0 with 0
+    df = source.copy()
+    for col in numeric_cols:
+        df[col] = df[col].replace(32767.0, 0.0)
+        
+    # Parse timestamp
+    df['timestamp_dt'] = pd.to_datetime(df['timestamp'])
+    
+    # Derive season
+    month = df['timestamp_dt'].dt.month
+    season_map = {1: 'Winter', 2: 'Winter', 3: 'Spring', 4: 'Spring', 5: 'Spring',
+                  6: 'Summer', 7: 'Summer', 8: 'Summer', 9: 'Fall', 10: 'Fall', 11: 'Fall', 12: 'Winter'}
+    df['season'] = month.map(season_map)
+    
+    # Derive hour
+    df['hour'] = df['timestamp_dt'].dt.hour
+    
+    # Define component columns
+    hvac_cols = [
+        'AC COMPRESSOR WHS [emon ch3,4]',
+        'AIR HANDLER WHS [emon ch5,6]',
+        'Minisplit WHS (2-CTs) [xpod chA-7,8]'
+    ]
+    
+    dwh_cols = [
+        'WATER HEATER WHS [emon ch7,8]'
+    ]
+    
+    major_appl_cols = [
+        'DRYER WHS (1-CT) [emon ch9]',
+        'RANGE WHS (1-CT) [emon ch10]',
+        'DISH WASHER WHS [emon ch11]',
+        'Primary Fridge WHS [emon ch12]',
+        '2nd Fridge WHS [emon ch13]',
+        'Dryer WHS (2-CTs) [xpod chA-9,10]'
+    ]
+    
+    misc_cols = [
+        'SPARE1 WHS (1-CT) [emon ch14]',
+        'SPARE2 WHS (1-CT) [xpod chA-1]',
+        'SPARE3 WHS (1-CT) [xpod chA-2]',
+        'SPARE4 WHS (2-CTs) [xpod chA-5,6]',
+        'POOL PUMP WHS (2-CTs) [xpod chA-3,4]'
+    ]
+    
+    total_col = 'TOTAL BLDG WHS [emon ch1,2]'
+    
+    # Create derived columns for summation
+    df['HVAC_sum'] = df[hvac_cols].sum(axis=1)
+    df['DWH_sum'] = df[dwh_cols].sum(axis=1)
+    df['Major_Appl_sum'] = df[major_appl_cols].sum(axis=1)
+    df['Misc_sum'] = df[misc_cols].sum(axis=1)
+    df['Total_sum'] = df[total_col]
+    
+    # Group by season and hour
+    grouped = df.groupby(['season', 'hour']).agg(
+        HVAC=('HVAC_sum', 'sum'),
+        domestic_water_heating=('DWH_sum', 'sum'),
+        major_appliances=('Major_Appl_sum', 'sum'),
+        miscellaneous_plug_loads=('Misc_sum', 'sum'),
+        Total=('Total_sum', 'sum')
+    ).reset_index()
+    
+    # Add lighting column as 0
+    grouped['lighting'] = 0
+    
+    # Reorder columns
+    result = grouped[['season', 'hour', 'HVAC', 'domestic_water_heating', 'major_appliances', 'lighting', 'miscellaneous_plug_loads', 'Total']]
+    
+    # Cast types
+    result['HVAC'] = result['HVAC'].astype('int64')
+    result['domestic_water_heating'] = result['domestic_water_heating'].astype('int64')
+    result['major_appliances'] = result['major_appliances'].astype('int64')
+    result['lighting'] = result['lighting'].astype('int64')
+    result['miscellaneous_plug_loads'] = result['miscellaneous_plug_loads'].astype('float64')
+    result['Total'] = result['Total'].astype('int64')
+    
+    return result
+```

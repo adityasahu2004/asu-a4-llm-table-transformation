@@ -1,0 +1,76 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `date` column from the source format (`m/d/Y`) to a datetime object.
+2.  **Format Date**: Convert the datetime object to the target string format `YYYY-MM-DD 00:00:00`.
+3.  **Map Columns**: Rename the 24 hourly columns (`Hour 1` through `Hour 24`) to the target 12-hour clock format (`1:00 AM` through `12:00 PM`). The mapping logic is:
+    *   Hour 1 -> 1:00 AM
+    *   Hour 2 -> 2:00 AM
+    *   ...
+    *   Hour 11 -> 11:00 AM
+    *   Hour 12 -> 12:00 PM (Note: Target schema lists `12:00 AM` for Hour 12 in column definition but `12:00 PM` in sample data. Standard 12-hour clock for noon is PM. The sample data for Hour 12 corresponds to noon. Wait, looking at the target schema: `12:00 AM` is listed for Hour 12 in the `columns` list? No, `12:00 AM` is index 12 (Hour 12 source). `1:00 PM` is index 13 (Hour 13 source). Let's trace carefully.
+    *   Source `Hour 1` (1 AM) -> Target `1:00 AM`
+    *   Source `Hour 12` (12 PM Noon) -> Target `12:00 PM`? Let's check the target column names list.
+        *   Target cols: `1:00 AM` ... `11:00 AM`, `12:00 AM`, `1:00 PM` ... `11:00 PM`, `12:00 PM`.
+        *   Wait, the target column list has `12:00 AM` at position 12 (0-indexed 11? No, let's count).
+        *   Source `Hour 1` is 1 AM. Target `1:00 AM`.
+        *   Source `Hour 11` is 11 AM. Target `11:00 AM`.
+        *   Source `Hour 12` is 12 PM (Noon). Target column list item 12 is `12:00 AM`? Or is it `12:00 PM`?
+        *   Let's look at the target `columns` list in the JSON:
+            *   `1:00 AM` (1)
+            *   `2:00 AM` (2)
+            *   ...
+            *   `11:00 AM` (11)
+            *   `12:00 AM` (12) -> This looks like a typo in the schema definition or a specific convention. However, looking at the *sample data* for the target:
+                *   Row 1, Col 12 (index 11, which is the 12th column) has value `0`. Source `Hour 12` has value `0`.
+                *   Row 1, Col 24 (index 23, last column) has value `0.0002398657`. Source `Hour 24` has value `0.0002398657`.
+                *   The last column name in target is `12:00 PM`.
+                *   The 12th column name in target is `12:00 AM`.
+                *   Standard time: Hour 12 is Noon (12:00 PM). Hour 0/24 is Midnight (12:00 AM).
+                *   In the source, `Hour 1` is 1 AM. `Hour 12` is Noon. `Hour 24` is Midnight? Or is `Hour 24` the end of the day?
+                *   Let's check the mapping of values.
+                *   Source `Hour 12` (Noon) -> Target `12:00 AM`? That seems wrong semantically, but we must follow the schema/column order.
+                *   Source `Hour 24` -> Target `12:00 PM`?
+                *   Let's re-read the target column names carefully.
+                *   `1:00 AM`, `2:00 AM`, `3:00 AM`, `4:00 AM`, `5:00 AM`, `6:00 AM`, `7:00 AM`, `8:00 AM`, `9:00 AM`, `10:00 AM`, `11:00 AM`, `12:00 AM`, `1:00 PM`, `2:00 PM`, `3:00 PM`, `4:00 PM`, `5:00 PM`, `6:00 PM`, `7:00 PM`, `8:00 PM`, `9:00 PM`, `10:00 PM`, `11:00 PM`, `12:00 PM`.
+                *   This implies:
+                    *   Source `Hour 1` (1 AM) -> `1:00 AM`
+                    *   Source `Hour 12` (Noon) -> `12:00 AM` ?? This is highly suspicious. Usually 12:00 AM is midnight.
+                    *   Source `Hour 13` (1 PM) -> `1:00 PM`
+                    *   Source `Hour 24` (Midnight/End) -> `12:00 PM` ??
+                *   Let's look at the sample data values to see if there's a shift.
+                *   Source `Hour 1` value: `0.0002398657`. Target `1:00 AM` value: `0.0002398657`. Match.
+                *   Source `Hour 12` value: `0`. Target `12:00 AM` value: `0`. Match.
+                *   Source `Hour 13` value: `0`. Target `1:00 PM` value: `0`. Match.
+                *   Source `Hour 24` value: `0.0002398657`. Target `12:00 PM` value: `0.0002398657`. Match.
+                *   It appears the target column names are just labels assigned to the sequential hours 1-24, even if the labels `12:00 AM` for Noon and `12:00 PM` for Midnight seem semantically inverted or non-standard. I will map strictly by position: Source Hour `h` maps to the `h`-th target hour column.
+
+4.  **Construct DataFrame**: Create the new DataFrame with the formatted date and the renamed columns.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    dt = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    
+    # Format date as YYYY-MM-DD 00:00:00
+    formatted_date = dt.dt.strftime('%Y-%m-%d 00:00:00')
+    
+    # Define the target column names for hours 1-24
+    target_hour_cols = [
+        '1:00 AM', '2:00 AM', '3:00 AM', '4:00 AM', '5:00 AM', '6:00 AM', 
+        '7:00 AM', '8:00 AM', '9:00 AM', '10:00 AM', '11:00 AM', '12:00 AM', 
+        '1:00 PM', '2:00 PM', '3:00 PM', '4:00 PM', '5:00 PM', '6:00 PM', 
+        '7:00 PM', '8:00 PM', '9:00 PM', '10:00 PM', '11:00 PM', '12:00 PM'
+    ]
+    
+    # Map source hourly columns to target columns
+    # Source columns are 'Hour 1', 'Hour 2', ... 'Hour 24'
+    out = pd.DataFrame()
+    out['date'] = formatted_date
+    
+    for i, col_name in enumerate(target_hour_cols, start=1):
+        src_col = f'Hour {i}'
+        out[col_name] = source[src_col]
+        
+    return out
+```

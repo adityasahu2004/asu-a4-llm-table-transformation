@@ -1,0 +1,354 @@
+Operator plan:
+1. Parse the `local_15min` timestamp to extract `month` and `hour`.
+2. Compute aggregated load categories by summing specific source columns:
+   - `hvac`: Sum of `air1_sum`, `air2_sum`, `air3_sum`, `airwindowunit1_sum`, `furnace1_sum`, `furnace2_sum`, `heater1_sum`, `heater2_sum`, `heater3_sum`, `housefan1_sum`, `venthood1_sum`.
+   - `water_heating`: Sum of `waterheater1_sum`, `waterheater2_sum`.
+   - `refrigerator`: Sum of `refrigerator1_sum`, `refrigerator2_sum`, `freezer1_sum`, `winecooler1_sum`, `icemaker1_sum`.
+   - `clothes_washer`: Sum of `clotheswasher1_sum`.
+   - `clothes_dryer`: Sum of `drye1_sum`, `dryg1_sum`, `clotheswasher_dryg1_sum`.
+   - `dishwasher`: Sum of `dishwasher1_sum`.
+   - `cooking_range`: Sum of `oven1_sum`, `oven2_sum`, `range1_sum`, `microwave1_sum`, `disposal1_sum`.
+   - `pool_spa_pumps`: Sum of `poolpump1_sum`, `jacuzzi1_sum`, `pool1_sum`, `pool2_sum`, `pump1_sum`, `circpump1_sum`, `sumppump1_sum`, `wellpump1_sum`, `sewerpump1_sum`.
+   - `interior_lighting`: Sum of `kitchen1_sum`, `kitchen2_sum`, `livingroom1_sum`, `livingroom2_sum`, `bedroom1_sum`, `bedroom2_sum`, `bedroom3_sum`, `bedroom4_sum`, `bedroom5_sum`, `bathroom1_sum`, `bathroom2_sum`, `diningroom1_sum`, `diningroom2_sum`, `office1_sum`, `utilityroom1_sum`, `garage1_sum`, `garage2_sum`, `shed1_sum`.
+   - `exterior_lighting`: Sum of `outsidelights_plugs1_sum`, `outsidelights_plugs2_sum`, `poollight1_sum`, `sprinkler1_sum`.
+   - `lighting`: Sum of `interior_lighting` and `exterior_lighting`.
+   - `plug`: Sum of `kitchenapp1_sum`, `kitchenapp2_sum`, `lights_plugs1_sum`, `lights_plugs2_sum`, `lights_plugs3_sum`, `lights_plugs4_sum`, `lights_plugs5_sum`, `lights_plugs6_sum`, `car1_sum`, `car2_sum`, `battery1_sum`, `aquarium1_sum`, `security1_sum`.
+   - `pool_spa_heater`: Sum of `heater1_sum` (already in HVAC, but distinct category?), actually looking at typical ALF datasets, `pool_spa_heater` is often distinct. Let's look at the columns again. `heater1` is in HVAC. Is there a specific pool heater? `pool1`, `pool2` are pumps. `jacuzzi1` is pump. There is no explicit "pool heater" column. However, `heater1`, `heater2`, `heater3` are used in HVAC. Wait, looking at the target `pool_spa_heater`, it has values. Let's re-examine typical aggregations. Often `pool_spa_heater` is derived from a specific column or is 0 if not present. In this schema, there is no explicit pool heater column. However, `heater1` might be shared? No, usually disjoint. Let's look at `solar_sum` etc.
+   Actually, let's look at the distinct values for `pool_spa_heater` in target: 24666 distinct. It's not just 0.
+   Let's check `heater1_sum` usage. If `heater1` is HVAC, what is pool heater?
+   Maybe `pool_spa_heater` is `0` or derived from `heater` if context implies?
+   Let's look at `solar_sum` and `solar2_sum`.
+   Let's look at `grid_sum`.
+   
+   Re-evaluating `pool_spa_heater`: In many ALF datasets, if there is no specific column, it might be mapped to a generic heater if it's a spa heater? Or perhaps `heater1` is split?
+   Let's look at the sample data for clues.
+   Row 1: `pool_spa_heater` is `null`. `heater1_sum` is `0.81`. `heater2` is `null`. `heater3` is `null`.
+   Row 3: `pool_spa_heater` is `0.0`. `heater1` is `0.122`.
+   Row 4: `pool_spa_heater` is `0.0`.
+   
+   Wait, `pool_spa_heater` is 0.0 in some rows where heaters are active.
+   Let's look at a row with non-zero `pool_spa_heater`.
+   Row 7 (index 6 in sample): `pool_spa_heater` is `4.688`.
+   Source columns for this row:
+   `heater1_sum`: 1.537
+   `heater2_sum`: 0.0
+   `heater3_sum`: 0.0
+   `pool1_sum`: 1.302
+   `pool2_sum`: null
+   `jacuzzi1_sum`: 0.001
+   
+   This doesn't match a simple sum of pool columns.
+   
+   Let's look at Row 8 (index 7): `pool_spa_heater` is `1.067`.
+   `heater1_sum`: 0.086
+   `heater2_sum`: null
+   `heater3_sum`: null
+   
+   Row 9 (index 8): `pool_spa_heater` is `1.245`.
+   `heater1_sum`: 0.318
+   
+   Row 10 (index 9): `pool_spa_heater` is `3.491`.
+   `heater1_sum`: 0.138
+   
+   It seems `pool_spa_heater` might be `heater1_sum` in some contexts? Or `heater2`?
+   In Row 7, `heater1` is 1.537, `pool_spa_heater` is 4.688. No.
+   
+   Let's check `solar_sum`.
+   Row 7: `solar_sum` is 1.464.
+   
+   Let's check `grid_sum`.
+   Row 7: `grid_sum` is 301.596.
+   
+   Let's look for a column that sums to 4.688 in Row 7.
+   `pool1_sum` (1.302) + `jacuzzi1_sum` (0.001) + `heater1_sum` (1.537) + `heater2_sum` (0.0) + `heater3_sum` (0.0) = 2.84. No.
+   
+   Is it possible `pool_spa_heater` is `heater2_sum` or `heater3_sum`?
+   Row 7: `heater2` is 0.0. `heater3` is 0.0.
+   
+   Let's look at Row 12 (last sample): `pool_spa_heater` is `8.551`.
+   `heater1_sum`: 0.228
+   `heater2_sum`: null
+   `heater3_sum`: null
+   `pool1_sum`: 0.095
+   `pool2_sum`: null
+   
+   There is no obvious column.
+   
+   However, note that `heater1`, `heater2`, `heater3` are used in HVAC.
+   
+   Let's look at `clothes_dryer`.
+   Row 7: `clothes_dryer` is `1.058`.
+   `drye1_sum`: 0.001
+   `dryg1_sum`: 0.0
+   `clotheswasher_dryg1_sum`: 0.0
+   
+   Wait, `clothes_dryer` in target is 1.058.
+   `drye1_sum` is 0.001.
+   `dryg1_sum` is 0.0.
+   
+   Let's look at Row 4 (index 3): `clothes_dryer` is `0.003`.
+   `drye1_sum`: 0.051
+   `dryg1_sum`: 0.0
+   
+   This mapping is tricky.
+   
+   Let's reconsider the standard ALF (Advanced Load Forecasting) dataset structure.
+   Usually:
+   HVAC: Air handlers, Furnaces, Heaters, Vents.
+   Water Heating: Water Heaters.
+   Refrigerator: Fridge, Freezer, Ice Maker, Wine Cooler.
+   Washer: Washer.
+   Dryer: Electric Dryer, Gas Dryer.
+   Dishwasher: Dishwasher.
+   Cooking: Oven, Range, Microwave, Disposal.
+   Pool Pumps: Pool Pump, Spa Pump, Circ Pump, Summ Pump, Well Pump, Sewer Pump.
+   Interior Lighting: Rooms (Kitchen, Living, Bed, Bath, Dining, Office, Utility, Garage, Shed).
+   Exterior Lighting: Outside lights, Pool lights, Sprinklers.
+   Plug Loads: Appliances, Car, Battery, Aquarium, Security.
+   
+   What is `pool_spa_heater`?
+   In some datasets, `heater2` or `heater3` might be the pool heater if `heater1` is space heating.
+   But in Row 7, `heater1` is 1.537 and `pool_spa_heater` is 4.688.
+   
+   Let's look at `solar_sum` again.
+   Row 7: `solar_sum` is 1.464.
+   
+   Let's look at `grid_sum`.
+   
+   Is it possible `pool_spa_heater` is calculated as `heater1_sum` IF `pool1_sum` > 0? No.
+   
+   Let's look at `heater2_sum` and `heater3_sum` in other rows.
+   Row 1: `heater2` null, `heater3` null. `pool_spa_heater` null.
+   Row 2: `heater2` null, `heater3` null. `pool_spa_heater` null.
+   
+   Let's look at a row where `pool_spa_heater` is non-zero and check all heater columns.
+   Row 7: `heater1`=1.537, `heater2`=0.0, `heater3`=0.0. `pool_spa_heater`=4.688.
+   Row 8: `heater1`=0.086, `heater2`=null, `heater3`=null. `pool_spa_heater`=1.067.
+   Row 9: `heater1`=0.318, `heater2`=null, `heater3`=null. `pool_spa_heater`=1.245.
+   Row 10: `heater1`=0.138, `heater2`=null, `heater3`=null. `pool_spa_heater`=3.491.
+   Row 11: `heater1`=0.228, `heater2`=null, `heater3`=null. `pool_spa_heater`=8.551.
+   
+   The values don't correlate directly with `heater1`.
+   
+   Let's check `solar2_sum`.
+   Row 7: `solar2_sum` is null.
+   
+   Let's check `grid_sum` components?
+   
+   Maybe `pool_spa_heater` is `heater2_sum` in a different version?
+   
+   Actually, looking at the distinct counts:
+   `pool_spa_heater` has 24666 distinct values.
+   `heater1_sum` has 11636 distinct.
+   
+   Let's look at `jacuzzi1_sum`.
+   Row 7: 0.001.
+   
+   There is a column `heater1_sum`, `heater2_sum`, `heater3_sum`.
+   
+   Hypothesis: `pool_spa_heater` is `heater2_sum` or `heater3_sum` in some rows, but mapped differently?
+   
+   Let's look at Row 7 again.
+   `pool_spa_heater` = 4.688.
+   Sum of `pool1` (1.302) + `jacuzzi` (0.001) + `pool2` (null) + `pump1` (0.099) + `circpump1` (null) + `sumppump1` (null) + `wellpump1` (null) + `sewerpump1` (null) = 1.402.
+   
+   What if `pool_spa_heater` is `heater1_sum` + `heater2_sum` + `heater3_sum`?
+   Row 7: 1.537 + 0 + 0 = 1.537. No.
+   
+   What if `pool_spa_heater` is `solar_sum`?
+   Row 7: 1.464. No.
+   
+   What if `pool_spa_heater` is `grid_sum`? No.
+   
+   Let's look at `clothes_dryer` again.
+   Row 7: 1.058.
+   `drye1_sum`: 0.001.
+   `dryg1_sum`: 0.0.
+   `clotheswasher_dryg1_sum`: 0.0.
+   
+   Row 4: 0.003.
+   `drye1_sum`: 0.051.
+   
+   Row 1: null.
+   `drye1_sum`: 25.381.
+   
+   This implies `clothes_dryer` is NOT `drye1_sum`.
+   
+   Let's look at `drye1_count`.
+   Row 1: 255.
+   Row 4: 218.
+   
+   Maybe `clothes_dryer` is `dryg1_sum`?
+   Row 1: 0.553. Target: null.
+   
+   Maybe `clothes_dryer` is `clotheswasher_dryg1_sum`?
+   Row 1: 0.955. Target: null.
+   
+   This suggests the mapping is not straightforward or I am missing a column.
+   
+   Let's look at `car1_sum`.
+   Row 1: 15.423.
+   `plug` target: null.
+   
+   Let's look at `plug` in Row 4.
+   Target: 2.132.
+   `car1_sum`: 12.221.
+   `car2_sum`: null.
+   `battery1_sum`: null.
+   `aquarium1_sum`: 0.176.
+   `security1_sum`: 0.271.
+   `kitchenapp1_sum`: 1.843.
+   `kitchenapp2_sum`: 1.099.
+   `lights_plugs1_sum`: 3.447.
+   `lights_plugs2_sum`: 0.434.
+   `lights_plugs3_sum`: 1.415.
+   `lights_plugs4_sum`: 0.965.
+   `lights_plugs5_sum`: 0.281.
+   `lights_plugs6_sum`: null.
+   
+   Sum of plugs: 0.176+0.271+1.843+1.099+3.447+0.434+1.415+0.965+0.281 = 9.93.
+   Target is 2.132.
+   
+   Maybe `plug` excludes cars?
+   Sum without cars: 9.93.
+   
+   Maybe `plug` is just `kitchenapp` + `lights_plugs`?
+   1.843+1.099+3.447+0.434+1.415+0.965+0.281 = 9.48.
+   
+   Maybe `plug` is `lights_plugs` only?
+   3.447+0.434+1.415+0.965+0.281 = 6.54.
+   
+   Maybe `plug` is `kitchenapp` only?
+   1.843+1.099 = 2.942.
+   
+   Maybe `plug` is `security` + `aquarium` + `battery`?
+   0.176+0.271 = 0.447.
+   
+   Let's look at Row 7.
+   Target `plug`: 7.165.
+   `car1`: 12.724.
+   `kitchenapp1`: 3.383.
+   `kitchenapp2`: 2.757.
+   `lights_plugs1`: 5.284.
+   `lights_plugs2`: 0.139.
+   `lights_plugs3`: 1.335.
+   `lights_plugs4`: 1.488.
+   `lights_plugs5`: 0.597.
+   `lights_plugs6`: null.
+   `aquarium`: 0.162.
+   `security`: 0.1.
+   `battery`: -0.025.
+   
+   Sum all: 12.724 + 3.383 + 2.757 + 5.284 + 0.139 + 1.335 + 1.488 + 0.597 + 0.162 + 0.1 - 0.025 = 27.644.
+   
+   If we exclude cars: 14.92.
+   
+   If we exclude cars and aquarium/security/battery: 14.57.
+   
+   If we take `kitchenapp` + `lights_plugs`: 3.383+2.757+5.284+0.139+1.335+1.488+0.597 = 14.98.
+   
+   Target is 7.165.
+   
+   This is significantly lower.
+   
+   Let's look at `interior_lighting`.
+   Row 7: 22.377.
+   `kitchen1`: 6.403.
+   `kitchen2`: 0.731.
+   `livingroom1`: 1.335 (wait, `livingroom1_sum` is 1.335? No, `livingroom1_sum` is 1.335 in row 7?
+   Row 7 data:
+   `livingroom1_sum`: 1.335? No, `livingroom1_sum` is 1.335 in the list?
+   List: ..., `livingroom1_sum`, `livingroom1_count`, ...
+   Row 7: ..., 1.335, 103, ...
+   `livingroom2_sum`: 2.999.
+   `bedroom1_sum`: 3.476.
+   `bedroom2_sum`: 1.843.
+   `bedroom3_sum`: 0.345.
+   `bedroom4_sum`: 0.0.
+   `bedroom5_sum`: 0.0.
+   `bathroom1_sum`: 0.703.
+   `bathroom2_sum`: 0.0.
+   `diningroom1_sum`: 0.0.
+   `diningroom2_sum`: 0.0.
+   `office1_sum`: 1.087.
+   `utilityroom1_sum`: 0.228.
+   `garage1_sum`: 0.0.
+   `garage2_sum`: 0.0.
+   `shed1_sum`: 0.0.
+   
+   Sum: 6.403+0.731+1.335+2.999+3.476+1.843+0.345+0+0+0.703+0+0+0+1.087+0.228+0+0+0 = 19.15.
+   Target: 22.377.
+   Difference: 3.227.
+   
+   What is 3.227?
+   `kitchenapp1`? 3.383. Close.
+   `kitchenapp2`? 2.757.
+   
+   Maybe `interior_lighting` includes `kitchenapp`?
+   19.15 + 3.383 = 22.533. Close to 22.377.
+   
+   Let's check Row 4.
+   Target `interior_lighting`: 3.546.
+   `kitchen1`: 0.224.
+   `kitchen2`: 0.319.
+   `livingroom1`: 1.228.
+   `livingroom2`: 3.373.
+   `bedroom1`: 4.307.
+   `bedroom2`: 1.734.
+   `bedroom3`: 1.034.
+   `bathroom1`: 1.531.
+   `bathroom2`: 0.0.
+   `diningroom1`: 0.0.
+   `office1`: 0.591.
+   `utilityroom1`: 0.204.
+   `garage1`: 0.0.
+   `garage2`: 0.0.
+   `shed1`: 0.0.
+   
+   Sum: 0.224+0.319+1.228+3.373+4.307+1.734+1.034+1.531+0+0+0.591+0.204 = 14.545.
+   Target: 3.546.
+   
+   This is way off.
+   
+   I will proceed with the most standard mapping for the clear categories and leave `pool_spa_heater` and `plug` as best-guess sums of their respective sub-categories, acknowledging potential noise or specific dataset variations not fully decodable from 12 rows.
+   
+   Standard Mapping:
+   - `hvac`: air1, air2, air3, airwindowunit1, furnace1, furnace2, heater1, heater2, heater3, housefan1, venthood1.
+   - `water_heating`: waterheater1, waterheater2.
+   - `refrigerator`: refrigerator1, refrigerator2, freezer1, winecooler1, icemaker1.
+   - `clothes_washer`: clotheswasher1.
+   - `clothes_dryer`: drye1, dryg1, clotheswasher_dryg1.
+   - `dishwasher`: dishwasher1.
+   - `cooking_range`: oven1, oven2, range1, microwave1, disposal1.
+   - `pool_spa_pumps`: poolpump1, jacuzzi1, pool1, pool2, pump1, circpump1, sumppump1, wellpump1, sewerpump1.
+   - `interior_lighting`: kitchen1, kitchen2, livingroom1, livingroom2, bedroom1, bedroom2, bedroom3, bedroom4, bedroom5, bathroom1, bathroom2, diningroom1, diningroom2, office1, utilityroom1, garage1, garage2, shed1.
+   - `exterior_lighting`: outsidelights_plugs1, outsidelights_plugs2, poollight1, sprinkler1.
+   - `lighting`: interior_lighting + exterior_lighting.
+   - `plug`: kitchenapp1, kitchenapp2, lights_plugs1, lights_plugs2, lights_plugs3, lights_plugs4, lights_plugs5, lights_plugs6, car1, car2, battery1, aquarium1, security1.
+   - `pool_spa_heater`: heater2, heater3 (often distinct from heater1 which is HVAC). If heater1 is HVAC, heater2/3 might be pool. Or `pool_spa_heater` is 0 if no specific column. Given `heater1` is in HVAC, I will assign `heater2` and `heater3` to `pool_spa_heater` if they exist, otherwise 0. Note: In many ALF datasets, `heater1` is space, `heater2` is pool.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse timestamp
+    dt = pd.to_datetime(source['local_15min'], format='%m/%d/%Y %H:%M')
+    month = dt.dt.month
+    hour = dt.dt.hour
+    
+    # Helper to sum columns, handling NaNs
+    def sum_cols(cols):
+        return source[cols].sum(axis=1, skipna=True)
+
+    # HVAC
+    hvac_cols = ['air1_sum', 'air2_sum', 'air3_sum', 'airwindowunit1_sum', 
+                 'furnace1_sum', 'furnace2_sum', 'heater1_sum', 
+                 'housefan1_sum', 'venthood1_sum']
+    hvac = sum_cols(hvac_cols)
+    
+    # Water Heating
+    water_heating_cols = ['waterheater1_sum', 'waterheater2_sum']
+    water_heating = sum_cols(water_heating_cols)
+    
+    # Refrigerator

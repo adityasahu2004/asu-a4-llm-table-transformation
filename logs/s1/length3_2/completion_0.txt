@@ -1,0 +1,89 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `date` column from string format (`M/D/YYYY H:MM`) to pandas datetime objects.
+2.  **Extract Date and Hour**:
+    *   Create a `date` column representing the calendar date (YYYY-MM-DD) for grouping.
+    *   Create an `hour` column representing the hour of the day (0-23).
+3.  **Pivot Data**:
+    *   Group by the extracted `date`.
+    *   Pivot the `cerc_logger_1` values such that each unique hour (0-23) becomes a separate column.
+    *   The target columns are named "Hour 1" through "Hour 24". This implies a 1-based indexing for the columns, where "Hour 1" corresponds to the first hour of the day (00:00-00:59, i.e., hour index 0), "Hour 2" to hour index 1, ..., and "Hour 24" to hour index 23.
+4.  **Rename Columns**: Map the integer hour indices (0-23) to the string labels "Hour 1" through "Hour 24".
+5.  **Format Date Column**: Convert the grouping `date` column back to string format `MM/DD/YYYY` as seen in the target sample.
+6.  **Sort and Clean**: Sort the resulting DataFrame by the `date` column to match the typical chronological order (though the target sample isn't strictly sorted, the distinct count and structure imply a daily aggregation). Ensure the column order matches the target specification (`date` followed by `Hour 1` to `Hour 24`).
+
+### Assumptions
+*   "Hour 1" corresponds to the 00:00 hour (midnight start), "Hour 2" to 01:00, etc., up to "Hour 24" for 23:00. This is a common convention in some logging systems where hours are 1-indexed.
+*   If multiple readings exist for the same date and hour, the pivot operation will need to handle aggregation. Given the source has distinct timestamps and the target has single values per hour, and the source sample shows sparse data, it's likely there is at most one reading per hour per day, or we should take the mean/first. Looking at the source sample, timestamps are unique. The pivot will naturally handle single values. If duplicates exist, `pivot_table` with `aggfunc='mean'` or `'first'` is safer. Given the precision of the floats, `mean` is a safe default for sensor data, but `first` might be intended if it's a snapshot. However, standard pivot behavior in pandas for unique index/column pairs is direct assignment. I will use `pivot_table` with `aggfunc='mean'` to be robust against potential duplicates, though `first` is also plausible. Let's look at the nulls. The target has nulls. This suggests that if no data exists for a specific hour on a specific day, it remains NaN.
+*   The date format in the target is `MM/DD/YYYY`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse the date column
+    # Source format: "7/28/2019 4:50" -> M/D/YYYY H:MM
+    df = source.copy()
+    df['datetime'] = pd.to_datetime(df['date'], format='%m/%d/%Y %I:%M %p', errors='coerce')
+    
+    # If the above format fails due to single digit hours/minutes without leading zeros or AM/PM,
+    # try a more flexible parser or specific format.
+    # The sample "7/28/2019 4:50" suggests 12-hour clock? Or 24-hour?
+    # "4:50" could be 4:50 AM or 4:50 PM. 
+    # Let's check "12:20" in sample. If it's 24h, 12:20 is noon. If 12h, it's noon.
+    # "18:50" in sample clearly indicates 24-hour format.
+    # So the format is likely %m/%d/%Y %H:%M
+    df['datetime'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M', errors='coerce')
+    
+    # 2. Extract date and hour
+    df['date_only'] = df['datetime'].dt.date
+    df['hour_idx'] = df['datetime'].dt.hour # 0-23
+    
+    # 3. Pivot the data
+    # We want columns "Hour 1" to "Hour 24"
+    # Mapping: hour_idx 0 -> "Hour 1", hour_idx 1 -> "Hour 2", ..., hour_idx 23 -> "Hour 24"
+    
+    # Create a mapping for column names
+    hour_map = {i: f"Hour {i+1}" for i in range(24)}
+    df['hour_label'] = df['hour_idx'].map(hour_map)
+    
+    # Pivot table
+    # Index: date_only
+    # Columns: hour_label
+    # Values: cerc_logger_1
+    # Aggfunc: mean (to handle potential duplicates, though likely unique)
+    pivoted = df.pivot_table(
+        index='date_only',
+        columns='hour_label',
+        values='cerc_logger_1',
+        aggfunc='mean'
+    )
+    
+    # 4. Reset index and rename date column
+    pivoted = pivoted.reset_index()
+    pivoted = pivoted.rename(columns={'date_only': 'date'})
+    
+    # 5. Ensure all 24 hour columns exist, even if empty
+    expected_hours = [f"Hour {i+1}" for i in range(24)]
+    for h in expected_hours:
+        if h not in pivoted.columns:
+            pivoted[h] = np.nan
+            
+    # 6. Select and order columns
+    # Target order: date, Hour 1, ..., Hour 24
+    final_columns = ['date'] + expected_hours
+    result = pivoted[final_columns]
+    
+    # 7. Format date column to MM/DD/YYYY
+    # Convert date object to datetime then to string
+    result['date'] = pd.to_datetime(result['date']).dt.strftime('%m/%d/%Y')
+    
+    # 8. Sort by date to ensure consistent ordering (optional but good practice)
+    # The target sample isn't strictly sorted, but usually these outputs are.
+    # However, the prompt says "Preserve NaNs...". Sorting doesn't affect NaNs.
+    # Let's sort by date string to match typical expectations.
+    result = result.sort_values('date').reset_index(drop=True)
+    
+    return result
+```

@@ -1,0 +1,27 @@
+{
+  "request_hash": "81f1351ebd9345f9537cf0066319e1949328fe6c565dd3a43e56a35b80826ef8",
+  "usage": {
+    "completion_tokens": 2237,
+    "prompt_tokens": 42444,
+    "total_tokens": 44681,
+    "completion_tokens_details": null,
+    "prompt_tokens_details": {
+      "audio_tokens": null,
+      "cache_write_tokens": null,
+      "cached_tokens": 36736,
+      "image_tokens": null,
+      "text_tokens": null,
+      "created_cache_tokens": 5376,
+      "multimodal_tokens": null
+    },
+    "co2_g": 2.794594,
+    "energy_wh": 8.292562
+  },
+  "latency_seconds": 94.5810192079989,
+  "api_attempts": 1,
+  "cached": true,
+  "candidate_count": 1,
+  "reasoning_effort_header": "none",
+  "selected_index": 0,
+  "clusters": {}
+}

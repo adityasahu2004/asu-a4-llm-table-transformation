@@ -1,0 +1,73 @@
+Operator plan:
+1. Parse the `date` column into datetime objects.
+2. Create `dt_strata` by formatting the parsed dates as `M/D/YYYY`.
+3. Create `dow` by extracting the day of the week (0=Monday, ..., 6=Sunday) from the parsed dates.
+4. Map the 24 hourly columns from the source (named like "1:00 AM", "12:00 PM", etc.) to the target columns `pct_hourly_0100` through `pct_hourly_2400`. The mapping follows standard 24-hour clock logic where 12:00 AM is hour 01 (or 00 depending on convention, but here 1:00 AM is 0100, so 12:00 AM is likely 0000 or 2400? Let's check indices.
+   - Source: 1:00 AM -> Target: pct_hourly_0100
+   - Source: 2:00 AM -> Target: pct_hourly_0200
+   - ...
+   - Source: 11:00 AM -> Target: pct_hourly_1100
+   - Source: 12:00 PM -> Target: pct_hourly_1200
+   - Source: 1:00 PM -> Target: pct_hourly_1300
+   - ...
+   - Source: 11:00 PM -> Target: pct_hourly_2300
+   - Source: 12:00 AM -> Target: pct_hourly_2400 (This is the tricky one. Usually 12 AM is midnight. In a 24-hour cycle starting at 1 AM, 12 AM is the last hour, i.e., 24:00).
+5. Add a constant column `pct_hourly_2500` with value 0.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date
+    dt = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    
+    # Create output dataframe
+    out = pd.DataFrame(index=source.index)
+    
+    # Format dt_strata as M/D/YYYY
+    out['dt_strata'] = dt.dt.strftime('%-m/%-d/%Y')
+    
+    # Calculate dow (0=Monday, 6=Sunday)
+    out['dow'] = dt.dt.dayofweek
+    
+    # Map hourly columns
+    # Source columns: 1:00 AM, 2:00 AM, ..., 11:00 AM, 12:00 PM, 1:00 PM, ..., 11:00 PM, 12:00 AM
+    # Target columns: pct_hourly_0100, ..., pct_hourly_1100, pct_hourly_1200, pct_hourly_1300, ..., pct_hourly_2300, pct_hourly_2400
+    
+    # Define mapping
+    hour_map = {
+        '1:00 AM': 'pct_hourly_0100',
+        '2:00 AM': 'pct_hourly_0200',
+        '3:00 AM': 'pct_hourly_0300',
+        '4:00 AM': 'pct_hourly_0400',
+        '5:00 AM': 'pct_hourly_0500',
+        '6:00 AM': 'pct_hourly_0600',
+        '7:00 AM': 'pct_hourly_0700',
+        '8:00 AM': 'pct_hourly_0800',
+        '9:00 AM': 'pct_hourly_0900',
+        '10:00 AM': 'pct_hourly_1000',
+        '11:00 AM': 'pct_hourly_1100',
+        '12:00 PM': 'pct_hourly_1200',
+        '1:00 PM': 'pct_hourly_1300',
+        '2:00 PM': 'pct_hourly_1400',
+        '3:00 PM': 'pct_hourly_1500',
+        '4:00 PM': 'pct_hourly_1600',
+        '5:00 PM': 'pct_hourly_1700',
+        '6:00 PM': 'pct_hourly_1800',
+        '7:00 PM': 'pct_hourly_1900',
+        '8:00 PM': 'pct_hourly_2000',
+        '9:00 PM': 'pct_hourly_2100',
+        '10:00 PM': 'pct_hourly_2200',
+        '11:00 PM': 'pct_hourly_2300',
+        '12:00 AM': 'pct_hourly_2400'
+    }
+    
+    for src_col, tgt_col in hour_map.items():
+        out[tgt_col] = source[src_col]
+        
+    # Add constant column
+    out['pct_hourly_2500'] = 0
+    
+    return out.reset_index(drop=True)
+```

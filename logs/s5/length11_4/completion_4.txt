@@ -1,0 +1,128 @@
+Operator plan:
+1. Map the `Time Period` strings to integer month numbers (1-12).
+2. Create the `hour` column from `Hour Ending`.
+3. Initialize all target end-use columns to 0 (int) or 0.0 (float) as appropriate.
+4. Map specific `End Use` values to their corresponding target columns:
+   - "Remaining Load" -> `hvac` (based on typical load disaggregation where remaining is HVAC, and distinct values match float presence). Note: The sample shows `hvac` having non-zero values and `water_heating` having non-zero values. We need to check which source End Uses map to `hvac` and `water_heating`.
+     - Looking at distinct values: `hvac` has 425 distinct, `water_heating` has 269 distinct.
+     - Source `Average Demand...` has 341 distinct non-nulls.
+     - Let's look at the sample data mapping:
+       - Row 0: Kitchen/Freezer -> month null, hour 1, hvac 1.07. Wait, Freezer is usually Refrigerator. But `refrigerator` is 0 in target. `hvac` is 1.07.
+       - Row 1: Laundry/Clothes Dryer -> month 11, hour 21, hvac 0.034.
+       - Row 6: Lighting/Lighting -> month 2, hour 18, hvac 0.076.
+       - Row 11: Remaining Load -> month 12, hour 22, hvac 0.0, water_heating 0.0.
+     - This implies a specific mapping logic or perhaps `hvac` and `water_heating` are derived from specific End Uses.
+     - Let's look closer. The target columns `refrigerator`, `clothes_washer`, etc. are all 0 in the sample. This suggests that in this specific target schema, only `hvac` and `water_heating` carry the numeric data from the source, while others are zeroed out? Or perhaps the mapping is:
+       - `hvac` comes from "Remaining Load"? In row 11, Remaining Load is 0.0. In row 0, Kitchen/Freezer is 0.031 in source, but target hvac is 1.07. This doesn't match directly.
+     - Let's re-read the sample carefully.
+       - Source Row 0: Kitchen, Freezer, March, Weekend, 13, 11, 0.031. Target: null, 1, 1.07, 0.0...
+       - Source Row 1: Laundry, Clothes Dryer, December, Weekday, 9, 173, 0.083. Target: 11.0, 21, 0.034, 0.0...
+       - The values don't seem to map 1:1 from the source `Average Demand` column to the target columns directly in the sample rows provided because the row indices might not align or there is aggregation. However, the prompt says "Compute the result only from the source DataFrame" and "rows: 258420" in both source and target. This implies a row-by-row transformation.
+       - If it's row-by-row, why is Source Row 0 (Freezer, 0.031) -> Target Row 0 (hvac 1.07)?
+       - Maybe the sample rows are just random samples and not aligned? "Source row count describes a training sample only". The sample data is just for schema inference.
+       - Let's look at the distinct values.
+       - Source `End Use` has 15 distinct values. Target has 15 columns (month, hour, hvac, water_heating, 12 others).
+       - The 12 "other" target columns are all int64 with distinct value 0. This implies they are always 0.
+       - `hvac` and `water_heating` are float64.
+       - `month` is float64 (with nulls).
+       - `hour` is int64.
+       - Hypothesis: `hvac` and `water_heating` are the only non-zero numeric columns. Which End Uses map to them?
+       - Commonly:
+         - "Remaining Load" -> HVAC
+         - "Water Heater" -> Water Heating
+       - Let's check if "Water Heater" is in the source distinct values. The sample shows "Freezer", "Clothes Dryer", "Clothes Washer", "Primary TV...", "Primary Desktop...", "Misc Metered", "Pool Pump", "Lighting", "Remaining Load".
+       - If `hvac` corresponds to "Remaining Load", and `water_heating` corresponds to "Water Heater" (if present), we can map them.
+       - What about the other End Uses? If the target columns for them are all 0, then we set them to 0.
+       - What about `month`? Map "January"->1, ..., "December"->12. If `Time Period` is null or unknown, month is null.
+       - What about `hour`? Just copy `Hour Ending`.
+       - Let's verify the "Remaining Load" -> `hvac` hypothesis. In the target sample, `hvac` has non-nulls. `water_heating` has non-nulls (0.092, 0.12).
+       - If "Water Heater" is not in the sample, it might be in the full data.
+       - Given the target columns `refrigerator`...`pool_spa_heater` are all 0, it is highly likely that the transformation simply maps "Remaining Load" to `hvac`, "Water Heater" (if exists) to `water_heating`, and all other specific end uses to 0 in their respective columns (which are already 0).
+       - Wait, if `refrigerator` is a column and it's always 0, why is it there? Maybe for other datasets. For this dataset, we just fill it with 0.
+       - So the logic is:
+         1. `month`: Map Time Period string to int.
+         2. `hour`: Copy Hour Ending.
+         3. `hvac`: If End Use is "Remaining Load", take Average Demand. Else 0.0? Or NaN? The target has 27792 nulls for hvac. Source has 70248 nulls. If we map only "Remaining Load", and other rows are 0, where do the nulls come from?
+         4. If `hvac` is 0 for non-Remaining-Load rows, it wouldn't be null.
+         5. Perhaps `hvac` takes the value if End Use is "Remaining Load", else NaN? But then `water_heating` would be NaN for non-water-heater rows.
+         6. Target `water_heating` has 0 nulls. This suggests `water_heating` is 0 when not applicable.
+         7. Target `hvac` has 13728 nulls.
+         8. This inconsistency suggests `hvac` might be the sum of something, or specific mapping.
+         9. Let's look at the distinct values of `hvac` (425) and `water_heating` (269).
+         10. Let's assume:
+             - `hvac` = `Average Demand` if `End Use` == "Remaining Load", else `NaN`?
+             - `water_heating` = `Average Demand` if `End Use` == "Water Heater", else `0.0`?
+             - But `water_heating` has 0 nulls. If it's 0.0 for non-matches, that works.
+             - Why would `hvac` be NaN for non-matches? Maybe because "Remaining Load" is the only source of HVAC data, and for other rows, HVAC is unknown (NaN), whereas for Water Heating, if it's not the water heater, it's 0? This seems asymmetrical.
+             - Alternative: `hvac` is `Average Demand` for "Remaining Load". For other End Uses, `hvac` is NaN. `water_heating` is `Average Demand` for "Water Heater". For other End Uses, `water_heating` is 0.0.
+             - Let's check the null count. If `hvac` is NaN for all non-"Remaining Load" rows, the null count would be `Total Rows - Count(End Use == "Remaining Load")`.
+             - If `water_heating` is 0.0 for all non-"Water Heater" rows, the null count is 0 (assuming "Water Heater" rows don't have null demand).
+             - This matches the target schema: `hvac` has nulls, `water_heating` has no nulls.
+             - The other columns are 0.
+             - `month` has nulls. This corresponds to `Time Period` being null or unmapped.
+
+Implementation:
+- Map `Time Period` to month number.
+- `hour` = `Hour Ending`.
+- `hvac` = `Average Demand` if `End Use` == "Remaining Load" else `NaN`.
+- `water_heating` = `Average Demand` if `End Use` == "Water Heater" else `0.0`.
+- All other target columns = 0.
+
+Wait, is "Water Heater" in the source distinct values? The sample doesn't show it, but "Laundry" and "Kitchen" are there. It's a standard end use. I will assume "Water Heater" is the key. If it's not present, `water_heating` will be all 0.0.
+
+One detail: `month` dtype is float64. `hour` is int64.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Map Time Period to month number
+    month_map = {
+        'January': 1.0, 'February': 2.0, 'March': 3.0, 'April': 4.0,
+        'May': 5.0, 'June': 6.0, 'July': 7.0, 'August': 8.0,
+        'September': 9.0, 'October': 10.0, 'November': 11.0, 'December': 12.0
+    }
+    months = source['Time Period'].map(month_map)
+    
+    # Hour
+    hours = source['Hour Ending'].astype('int64')
+    
+    # Initialize output dataframe
+    out = pd.DataFrame(index=source.index)
+    out['month'] = months
+    out['hour'] = hours
+    
+    # Prepare demand column, coercing to float
+    demand = pd.to_numeric(source['Average Demand Per Home With This End Use [kW]'], errors='coerce')
+    
+    # Map HVAC
+    # Assuming "Remaining Load" maps to hvac
+    hvac_mask = source['End Use'] == 'Remaining Load'
+    out['hvac'] = np.where(hvac_mask, demand, np.nan)
+    
+    # Map Water Heating
+    # Assuming "Water Heater" maps to water_heating. If not present, it stays 0.0
+    wh_mask = source['End Use'] == 'Water Heater'
+    out['water_heating'] = np.where(wh_mask, demand, 0.0)
+    
+    # All other columns are 0
+    zero_cols = [
+        'refrigerator', 'clothes_washer', 'clothes_dryer', 'dishwasher',
+        'cooking_range', 'pool_spa_pumps', 'interior_lighting', 'exterior_lighting',
+        'lighting', 'plug', 'pool_spa_heater'
+    ]
+    for col in zero_cols:
+        out[col] = 0
+        
+    # Ensure dtypes
+    out['month'] = out['month'].astype('float64')
+    out['hour'] = out['hour'].astype('int64')
+    out['hvac'] = out['hvac'].astype('float64')
+    out['water_heating'] = out['water_heating'].astype('float64')
+    
+    for col in zero_cols:
+        out[col] = out[col].astype('int64')
+        
+    return out
+```

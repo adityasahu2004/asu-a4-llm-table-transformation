@@ -1,0 +1,74 @@
+Operator plan:
+1. Parse the `date` column into datetime objects to extract the month.
+2. Melt the source DataFrame from wide format (Hour 1-24) to long format, creating columns `hour` (integer 1-24) and `value`.
+3. Group by `hour` and `month` (1-12) and calculate the mean of `value` for each group. This aggregates the daily data into a monthly profile per hour.
+4. Pivot the result so that each month becomes a column (named january, february, etc.) and each hour becomes a row.
+5. Ensure the `hour` column is integer type and the month columns are float.
+6. Sort by `hour` to match the typical output order (though the sample is unordered, sorting is standard for deterministic output unless specified otherwise; however, looking at the sample, it's not sorted. I will preserve the natural order of hours 1-24 which is standard for this type of profile). *Correction*: The sample output is not sorted by hour. It seems random or based on distinct values. However, standard practice for "hourly profile" is 1-24. Let's look at the sample again. The sample has hours: 1, 11, 13, 15, 17, 19, 20, 22, 24, 4, 6, 9. This is not sorted. It might be the order of appearance in the source or just a random sample. Since the target schema doesn't specify an index, and `hour` is a column, I will sort by `hour` ascending as it is the most logical deterministic representation of a 24-hour profile. If the evaluation expects a specific unsorted order, it would be ambiguous. Given "deterministic", sorting is the safest bet for a profile.
+
+Wait, looking at the target sample again:
+`[1, ...], [11, ...], [13, ...]`
+It is definitely not sorted.
+However, the prompt says "Infer a general transformation". A general transformation for creating a monthly hourly profile usually results in a sorted 1-24 index. The sample might just be a random subset of rows from the target DataFrame. The target has 24 rows. The sample shows 12 rows.
+I will sort by `hour` ascending.
+
+Steps:
+1. `source['date']` -> `pd.to_datetime`.
+2. `source['month']` -> `dt.month`.
+3. `melt` source: `id_vars=['month']`, `value_vars=[f'Hour {i}' for i in range(1,25)]`, `var_name='hour_str'`, `value_name='value'`.
+4. Convert `hour_str` to int: `hour_str.str.replace('Hour ', '').astype(int)`.
+5. `groupby(['hour_str', 'month']).mean().reset_index()`.
+6. `pivot_table` or `pivot`: index='hour_str', columns='month', values='value'.
+7. Rename month columns to lowercase names.
+8. Reset index, rename `hour_str` to `hour`.
+9. Sort by `hour`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date to get month
+    source = source.copy()
+    source['date_dt'] = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    source['month'] = source['date_dt'].dt.month
+    
+    # Melt the hourly columns
+    hour_cols = [f'Hour {i}' for i in range(1, 25)]
+    melted = source.melt(
+        id_vars=['month'],
+        value_vars=hour_cols,
+        var_name='hour_label',
+        value_name='value'
+    )
+    
+    # Extract hour integer
+    melted['hour'] = melted['hour_label'].str.replace('Hour ', '').astype(int)
+    
+    # Aggregate: Mean value for each hour and month
+    agg = melted.groupby(['hour', 'month'])['value'].mean().reset_index()
+    
+    # Pivot to wide format
+    pivoted = agg.pivot(index='hour', columns='month', values='value')
+    
+    # Rename month columns to lowercase names
+    month_names = {
+        1: 'january', 2: 'february', 3: 'march', 4: 'april',
+        5: 'may', 6: 'june', 7: 'july', 8: 'august',
+        9: 'september', 10: 'october', 11: 'november', 12: 'december'
+    }
+    pivoted = pivoted.rename(columns=month_names)
+    
+    # Reset index to make 'hour' a column
+    result = pivoted.reset_index()
+    result = result.rename(columns={'index': 'hour'})
+    
+    # Ensure correct column order: hour, then months 1-12
+    cols = ['hour'] + [month_names[i] for i in range(1, 13)]
+    result = result[cols]
+    
+    # Sort by hour
+    result = result.sort_values('hour').reset_index(drop=True)
+    
+    return result
+```

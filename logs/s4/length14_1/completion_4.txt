@@ -1,0 +1,109 @@
+**Operator Plan:**
+
+1.  **Parse Date/Time**: Convert the `time` column to datetime objects to extract `month` and `hour`.
+2.  **Aggregate by Month and Hour**: Group the data by the extracted `month` and `hour`.
+3.  **Compute End-Use Categories**: Within each group, sum the relevant source columns to create the target categories:
+    *   `hvac`: Sum of heating, cooling, fans, and pumps related to HVAC (central and general). Specifically: `electricity_heating_kwh`, `electricity_central_system_heating_kwh`, `electricity_cooling_kwh`, `electricity_central_system_cooling_kwh`, `electricity_fans_heating_kwh`, `electricity_fans_cooling_kwh`, `electricity_pumps_heating_kwh`, `electricity_central_system_pumps_heating_kwh`, `electricity_pumps_cooling_kwh`, `electricity_central_system_pumps_cooling_kwh`.
+    *   `domestic_water_heating`: `electricity_water_systems_kwh`.
+    *   `major_appliances`: Sum of `electricity_refrigerator_kwh`, `electricity_clothes_washer_kwh`, `electricity_clothes_dryer_kwh`, `electricity_cooking_range_kwh`, `electricity_dishwasher_kwh`.
+    *   `lighting`: Sum of `electricity_interior_lighting_kwh` and `electricity_exterior_lighting_kwh`.
+    *   `miscellaneous_plug_loads`: Sum of `electricity_plug_loads_kwh`, `electricity_house_fan_kwh`, `electricity_range_fan_kwh`, `electricity_bath_fan_kwh`, `electricity_ceiling_fan_kwh`, `electricity_pool_heater_kwh`, `electricity_pool_pump_kwh`, `electricity_hot_tub_heater_kwh`, `electricity_hot_tub_pump_kwh`.
+    *   `total`: `net_site_electricity_kwh`.
+4.  **Format Output**: Reset the index to form the final DataFrame with columns `month`, `hour`, and the calculated sums.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse time
+    source = source.copy()
+    source['dt'] = pd.to_datetime(source['time'])
+    source['month'] = source['dt'].dt.month
+    source['hour'] = source['dt'].dt.hour
+    
+    # Define aggregation mapping
+    # hvac components
+    hvac_cols = [
+        'electricity_heating_kwh',
+        'electricity_central_system_heating_kwh',
+        'electricity_cooling_kwh',
+        'electricity_central_system_cooling_kwh',
+        'electricity_fans_heating_kwh',
+        'electricity_fans_cooling_kwh',
+        'electricity_pumps_heating_kwh',
+        'electricity_central_system_pumps_heating_kwh',
+        'electricity_pumps_cooling_kwh',
+        'electricity_central_system_pumps_cooling_kwh'
+    ]
+    
+    # domestic water heating
+    dwh_cols = ['electricity_water_systems_kwh']
+    
+    # major appliances
+    major_appl_cols = [
+        'electricity_refrigerator_kwh',
+        'electricity_clothes_washer_kwh',
+        'electricity_clothes_dryer_kwh',
+        'electricity_cooking_range_kwh',
+        'electricity_dishwasher_kwh'
+    ]
+    
+    # lighting
+    lighting_cols = [
+        'electricity_interior_lighting_kwh',
+        'electricity_exterior_lighting_kwh'
+    ]
+    
+    # miscellaneous plug loads
+    misc_plug_cols = [
+        'electricity_plug_loads_kwh',
+        'electricity_house_fan_kwh',
+        'electricity_range_fan_kwh',
+        'electricity_bath_fan_kwh',
+        'electricity_ceiling_fan_kwh',
+        'electricity_pool_heater_kwh',
+        'electricity_pool_pump_kwh',
+        'electricity_hot_tub_heater_kwh',
+        'electricity_hot_tub_pump_kwh'
+    ]
+
+    # Group by month and hour
+    grouped = source.groupby(['month', 'hour'])
+    
+    # Aggregate
+    agg_df = grouped.agg(
+        hvac=('electricity_heating_kwh', 'sum'), # Placeholder, will recalculate sum of multiple cols
+        domestic_water_heating=('electricity_water_systems_kwh', 'sum'),
+        major_appliances=('electricity_refrigerator_kwh', 'sum'), # Placeholder
+        lighting=('electricity_interior_lighting_kwh', 'sum'), # Placeholder
+        miscellaneous_plug_loads=('electricity_plug_loads_kwh', 'sum'), # Placeholder
+        total=('net_site_electricity_kwh', 'sum')
+    ).reset_index()
+    
+    # Recalculate sums for columns that involve multiple source columns
+    # We need to sum the specific columns within the groups first
+    # It's cleaner to create intermediate columns in the source dataframe or use apply, 
+    # but standard agg is faster. Let's create the sums in the source frame first.
+    
+    source['hvac_sum'] = source[hvac_cols].sum(axis=1)
+    source['major_appl_sum'] = source[major_appl_cols].sum(axis=1)
+    source['lighting_sum'] = source[lighting_cols].sum(axis=1)
+    source['misc_plug_sum'] = source[misc_plug_cols].sum(axis=1)
+    
+    # Now group and aggregate the pre-summed columns
+    result = source.groupby(['month', 'hour']).agg(
+        hvac=('hvac_sum', 'sum'),
+        domestic_water_heating=('electricity_water_systems_kwh', 'sum'),
+        major_appliances=('major_appl_sum', 'sum'),
+        lighting=('lighting_sum', 'sum'),
+        miscellaneous_plug_loads=('misc_plug_sum', 'sum'),
+        total=('net_site_electricity_kwh', 'sum')
+    ).reset_index()
+    
+    # Ensure integer types for month and hour if they are floats due to some pandas version quirk, 
+    # though groupby keys usually preserve type. The target expects int64.
+    result['month'] = result['month'].astype('int64')
+    result['hour'] = result['hour'].astype('int64')
+    
+    return result
+```

@@ -1,0 +1,135 @@
+**Operator Plan:**
+1.  **Parse Timestamps**: Convert `local_15min` to a datetime object to extract `hour` and `month`.
+2.  **Derive Season**: Map `month` to `season` (Winter: 12, 1, 2; Spring: 3, 4, 5; Summer: 6, 7, 8; Fall: 9, 10, 11).
+3.  **Aggregate Columns**: Define mappings for target columns by summing specific source `*_sum` columns.
+    *   `hvac`: `air1_sum` + `air2_sum` + `air3_sum` + `airwindowunit1_sum` + `housefan1_sum` + `furnace1_sum` + `furnace2_sum` + `heater1_sum` + `heater2_sum` + `heater3_sum`
+    *   `water_heating`: `waterheater1_sum` + `waterheater2_sum`
+    *   `refrigerator`: `refrigerator1_sum` + `refrigerator2_sum`
+    *   `clothes_washer`: `clotheswasher1_sum`
+    *   `clothes_dryer`: `drye1_sum` + `dryg1_sum` + `clotheswasher_dryg1_sum`
+    *   `dishwasher`: `dishwasher1_sum`
+    *   `cooking_range`: `range1_sum` + `oven1_sum` + `oven2_sum` + `microwave1_sum`
+    *   `pool_spa_pumps`: `poolpump1_sum` + `jacuzzi1_sum` + `sumppump1_sum`
+    *   `interior_lighting`: `lights_plugs1_sum` + `lights_plugs2_sum` + `lights_plugs3_sum` + `lights_plugs4_sum` + `lights_plugs5_sum` + `lights_plugs6_sum` + `kitchen1_sum` + `kitchen2_sum` + `bathroom1_sum` + `bathroom2_sum` + `bedroom1_sum` + `bedroom2_sum` + `bedroom3_sum` + `bedroom4_sum` + `bedroom5_sum` + `livingroom1_sum` + `livingroom2_sum` + `diningroom1_sum` + `diningroom2_sum` + `office1_sum` + `utilityroom1_sum` + `garage1_sum` + `garage2_sum` + `shed1_sum` + `security1_sum`
+    *   `exterior_lighting`: `outsidelights_plugs1_sum` + `outsidelights_plugs2_sum` + `poollight1_sum`
+    *   `lighting`: `interior_lighting` + `exterior_lighting`
+    *   `plug`: `kitchenapp1_sum` + `kitchenapp2_sum` + `aquarium1_sum` + `battery1_sum` + `car1_sum` + `car2_sum` + `disposal1_sum` + `icemaker1_sum` + `pump1_sum` + `sprinkler1_sum` + `wellpump1_sum` + `winecooler1_sum` + `circpump1_sum` + `sewerpump1_sum`
+    *   `pool_spa_heaters`: `pool1_sum` + `pool2_sum`
+4.  **Group and Sum**: Group by `season` and `hour`, summing the derived columns.
+5.  **Format Output**: Reset index and ensure column order matches target.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse datetime
+    dt = pd.to_datetime(source['local_15min'])
+    
+    # Extract hour and month
+    hour = dt.dt.hour
+    month = dt.dt.month
+    
+    # Map month to season
+    # Winter: 12, 1, 2; Spring: 3, 4, 5; Summer: 6, 7, 8; Fall: 9, 10, 11
+    def get_season(m):
+        if m in [12, 1, 2]:
+            return 'Winter'
+        elif m in [3, 4, 5]:
+            return 'Spring'
+        elif m in [6, 7, 8]:
+            return 'Summer'
+        else:
+            return 'Fall'
+            
+    season = month.apply(get_season)
+    
+    # Helper to safely sum columns, treating NaN as 0 for summation logic if needed, 
+    # but pandas sum with skipna=True handles NaNs in aggregation.
+    # We need to ensure we don't drop rows due to NaNs in individual components if they aren't present.
+    # The source has many nulls. We should fill NaN with 0 before summing components to avoid NaN propagation in intermediate sums?
+    # Actually, standard pandas sum on a group will skip NaNs. If we sum columns A+B, and A is NaN, B is 5, result is 5.
+    # If we want 0+5=5, we need to fillna(0) on the component columns first.
+    
+    s = source.copy()
+    
+    # Fill NaNs with 0 for all sum columns to ensure arithmetic works as expected (missing data = 0 usage)
+    sum_cols = [c for c in s.columns if c.endswith('_sum')]
+    s[sum_cols] = s[sum_cols].fillna(0)
+    
+    # Construct derived columns
+    s['hvac'] = (s['air1_sum'] + s['air2_sum'] + s['air3_sum'] + s['airwindowunit1_sum'] + 
+                 s['housefan1_sum'] + s['furnace1_sum'] + s['furnace2_sum'] + 
+                 s['heater1_sum'] + s['heater2_sum'] + s['heater3_sum'])
+                 
+    s['water_heating'] = s['waterheater1_sum'] + s['waterheater2_sum']
+    
+    s['refrigerator'] = s['refrigerator1_sum'] + s['refrigerator2_sum']
+    
+    s['clothes_washer'] = s['clotheswasher1_sum']
+    
+    s['clothes_dryer'] = s['drye1_sum'] + s['dryg1_sum'] + s['clotheswasher_dryg1_sum']
+    
+    s['dishwasher'] = s['dishwasher1_sum']
+    
+    s['cooking_range'] = s['range1_sum'] + s['oven1_sum'] + s['oven2_sum'] + s['microwave1_sum']
+    
+    s['pool_spa_pumps'] = s['poolpump1_sum'] + s['jacuzzi1_sum'] + s['sumppump1_sum']
+    
+    # Interior Lighting Components
+    interior_cols = [
+        'lights_plugs1_sum', 'lights_plugs2_sum', 'lights_plugs3_sum', 'lights_plugs4_sum', 
+        'lights_plugs5_sum', 'lights_plugs6_sum', 'kitchen1_sum', 'kitchen2_sum', 
+        'bathroom1_sum', 'bathroom2_sum', 'bedroom1_sum', 'bedroom2_sum', 'bedroom3_sum', 
+        'bedroom4_sum', 'bedroom5_sum', 'livingroom1_sum', 'livingroom2_sum', 
+        'diningroom1_sum', 'diningroom2_sum', 'office1_sum', 'utilityroom1_sum', 
+        'garage1_sum', 'garage2_sum', 'shed1_sum', 'security1_sum'
+    ]
+    s['interior_lighting'] = s[interior_cols].sum(axis=1)
+    
+    # Exterior Lighting Components
+    exterior_cols = ['outsidelights_plugs1_sum', 'outsidelights_plugs2_sum', 'poollight1_sum']
+    s['exterior_lighting'] = s[exterior_cols].sum(axis=1)
+    
+    s['lighting'] = s['interior_lighting'] + s['exterior_lighting']
+    
+    # Plug Loads
+    plug_cols = [
+        'kitchenapp1_sum', 'kitchenapp2_sum', 'aquarium1_sum', 'battery1_sum', 
+        'car1_sum', 'car2_sum', 'disposal1_sum', 'icemaker1_sum', 'pump1_sum', 
+        'sprinkler1_sum', 'wellpump1_sum', 'winecooler1_sum', 'circpump1_sum', 
+        'sewerpump1_sum'
+    ]
+    s['plug'] = s[plug_cols].sum(axis=1)
+    
+    s['pool_spa_heaters'] = s['pool1_sum'] + s['pool2_sum']
+    
+    # Group and Aggregate
+    agg_data = s.groupby([season, hour]).agg({
+        'hvac': 'sum',
+        'water_heating': 'sum',
+        'refrigerator': 'sum',
+        'clothes_washer': 'sum',
+        'clothes_dryer': 'sum',
+        'dishwasher': 'sum',
+        'cooking_range': 'sum',
+        'pool_spa_pumps': 'sum',
+        'interior_lighting': 'sum',
+        'exterior_lighting': 'sum',
+        'lighting': 'sum',
+        'plug': 'sum',
+        'pool_spa_heaters': 'sum'
+    }).reset_index()
+    
+    # Rename index columns to match target
+    agg_data = agg_data.rename(columns={'level_0': 'season', 'level_1': 'hour'})
+    
+    # Ensure column order
+    target_cols = [
+        'season', 'hour', 'hvac', 'water_heating', 'refrigerator', 
+        'clothes_washer', 'clothes_dryer', 'dishwasher', 'cooking_range', 
+        'pool_spa_pumps', 'interior_lighting', 'exterior_lighting', 
+        'lighting', 'plug', 'pool_spa_heaters'
+    ]
+    
+    return agg_data[target_cols]
+```

@@ -1,0 +1,73 @@
+{
+  "case": "length9_3",
+  "length": 9,
+  "strategy": "s2",
+  "model": "qwen36-27b",
+  "is_demo": false,
+  "parameters": {
+    "output": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment",
+    "model": "qwen36-27b",
+    "base_url": "https://openai.rc.asu.edu/v1",
+    "max_tokens": 6000,
+    "reasoning_effort": "none",
+    "k": 5,
+    "sample_rows": 12,
+    "timeout": 120,
+    "replay_only": true,
+    "strategy": "s2",
+    "python": "3.14.4 (main, Apr  7 2026, 13:13:20) [Clang 21.0.0 (clang-2100.0.123.102)]",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "pandas": "3.1.1",
+    "held_out": [
+      "length1_1",
+      "length1_2",
+      "length1_3",
+      "length2_1",
+      "length3_1"
+    ],
+    "benchmark": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split"
+  },
+  "prompt_path": "logs/s2/length9_3/prompt.json",
+  "completion_path": "logs/s2/length9_3/response.json",
+  "error": "RuntimeError: No fenced Python block",
+  "execution": {
+    "status": "generation_error"
+  },
+  "generation": {
+    "request_hash": "8c1f3c479bf68b7861cf290893c1cbcf5c8d369f35a5b240dc9f9b18dc655526",
+    "usage": {
+      "completion_tokens": 6000,
+      "prompt_tokens": 41800,
+      "total_tokens": 47800,
+      "completion_tokens_details": null,
+      "prompt_tokens_details": {
+        "audio_tokens": null,
+        "cache_write_tokens": null,
+        "cached_tokens": 36736,
+        "image_tokens": null,
+        "text_tokens": null,
+        "created_cache_tokens": 4480,
+        "multimodal_tokens": null
+      },
+      "co2_g": 2.944416,
+      "energy_wh": 8.73714
+    },
+    "latency_seconds": 141.75553508300072,
+    "api_attempts": 1,
+    "cached": true,
+    "candidate_count": 1,
+    "reasoning_effort_header": "none"
+  },
+  "autopipeline": {
+    "accuracy": 0.0,
+    "is_correct": false,
+    "similarities": {}
+  },
+  "hard_match": {
+    "accuracy": 0.0,
+    "is_correct": false,
+    "similarities": {}
+  },
+  "wall_seconds": 141.77270116600266,
+  "replay_wall_seconds": 0.003838458000245737
+}

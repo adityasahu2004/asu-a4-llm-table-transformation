@@ -1,0 +1,206 @@
+**Operator Plan:**
+
+1.  **Parse Timestamp**: Convert the `timestamp` string column to a datetime object to extract the hour and month.
+2.  **Derive Features**:
+    *   `hour`: Extract the hour (0-23) from the timestamp.
+    *   `season`: Determine the season based on the month (e.g., Jun-Aug=Summer, Sep-Nov=Fall, Dec-Feb=Winter, Mar-May=Spring).
+3.  **Map Columns**: Rename and select specific source columns to match the target schema.
+    *   `hvac`: Sum of `AC COMPRESSOR WHS` and `AIR HANDLER WHS`. Note: The sample data shows `hvac` values like 98301 which corresponds to `32767 + 32767 + ...` or potentially just raw sums if inputs are 32767. Looking at the sample:
+        *   Row 1 Source: AC=0, AH=16. Target hvac=98301? No.
+        *   Let's look at Row 11 Source: AC=898, AH=273. Sum=1171. Target hvac=32782?
+        *   Let's look at Row 10 Source: All 32767. Target hvac=32778.
+        *   Let's look at Row 1 Source again. AC=0, AH=16. Target hvac=98301. This doesn't look like a simple sum.
+        *   Wait, let's look at the distinct values. `hvac` distinct count is 12015.
+        *   Let's re-examine the mapping.
+        *   Source `AC COMPRESSOR WHS` -> Target `hvac`? No.
+        *   Source `WATER HEATER WHS` -> Target `water_heating`?
+            *   Row 1: Source WH=7. Target WH=32767.
+            *   Row 2: Source WH=0. Target WH=1074.
+            *   Row 10: Source WH=32767. Target WH=0.
+        *   There seems to be a complex mapping or a specific dataset transformation rule not immediately obvious from simple arithmetic. However, looking at the distinct values in the target:
+            *   `clothes_washer`, `interior_lighting`, `exterior_lighting`, `lighting`, `plug`, `pool_spa_heater` are all 0.
+            *   `refrigerator` distinct 1760. Source `Primary Fridge` distinct 761, `2nd Fridge` distinct 1063. Sum?
+            *   `clothes_dryer` distinct 10348. Source `DRYER (1-CT)` distinct 3901, `Dryer (2-CTs)` distinct 3446.
+            *   `dishwasher` distinct 1213. Source `DISH WASHER` distinct 1082.
+            *   `cooking_range` distinct 2342. Source `RANGE` distinct 3627.
+            *   `pool_spa_pumps` distinct 3133. Source `POOL PUMP` distinct 2570.
+
+    *   Let's look closer at the values.
+        *   Target `hvac` Row 1: 98301. Source `TOTAL BLDG` is 386.
+        *   Target `water_heating` Row 1: 32767. Source `WATER HEATER` is 7.
+        *   Target `refrigerator` Row 1: 65534. Source `Primary Fridge` is 58, `2nd` is 32767.
+        *   Target `clothes_dryer` Row 1: 65534. Source `DRYER (1-CT)` is 3, `Dryer (2-CTs)` is 0.
+
+    *   Actually, let's look at the "32767" value. It appears frequently in the source as a sentinel for missing/null data.
+    *   In the target, `clothes_washer` is always 0.
+    *   In the target, `lighting` is always 0.
+
+    *   Let's look at the mapping logic again.
+        *   `hvac`: Likely `AC COMPRESSOR` + `AIR HANDLER`.
+        *   `water_heating`: `WATER HEATER`.
+        *   `refrigerator`: `Primary Fridge` + `2nd Fridge`.
+        *   `clothes_dryer`: `DRYER (1-CT)` + `Dryer (2-CTs)`.
+        *   `dishwasher`: `DISH WASHER`.
+        *   `cooking_range`: `RANGE`.
+        *   `pool_spa_pumps`: `POOL PUMP`.
+
+    *   Why are the values different?
+        *   Row 1: Source AC=0, AH=16. Sum=16. Target=98301.
+        *   Row 2: Source AC=1714, AH=201. Sum=1915. Target=33294.
+        *   Row 10: Source AC=32767, AH=32767. Sum=65534. Target=32778.
+
+    *   There is a possibility that the target values are not simple sums but perhaps scaled or derived differently, OR the sample rows in the target do not correspond 1:1 to the sample rows in the source in the same order. The note says "Source row count describes a training sample only". The target sample might be from a different subset or shuffled.
+    *   However, usually in these problems, the transformation is deterministic on the columns.
+    *   Let's check if `hvac` = `AC` + `AH`.
+        *   If Source AC=32767 (null) and AH=32767 (null), sum is 65534.
+        *   Target Row 10 hvac=32778.
+        *   Target Row 1 hvac=98301.
+    
+    *   Let's look at `water_heating`.
+        *   Source Row 1: 7. Target Row 1: 32767.
+        *   Source Row 2: 0. Target Row 2: 1074.
+    
+    *   Let's look at `refrigerator`.
+        *   Source Row 1: 58 + 32767 = 32825. Target Row 1: 65534.
+    
+    *   It seems the target values might be **doubled** or **scaled**?
+        *   32767 * 2 = 65534.
+        *   7 * ? = 32767. No.
+    
+    *   Let's look at the distinct values again.
+        *   Source `AC` distinct 6181. Target `hvac` distinct 12015.
+        *   Source `WH` distinct 3807. Target `water_heating` distinct 3979.
+    
+    *   Hypothesis: The target columns are simple sums of the relevant source columns. The discrepancy in the sample data is likely due to the samples being from different rows/shuffled, or the "32767" sentinel is handled differently (e.g., treated as 0 or ignored in sum, or the target sample rows are just different).
+    *   Given the constraint "Compute the result only from the source DataFrame", and the column names strongly suggest a semantic mapping:
+        *   `hvac` = `AC COMPRESSOR WHS [emon ch3,4]` + `AIR HANDLER WHS [emon ch5,6]`
+        *   `water_heating` = `WATER HEATER WHS [emon ch7,8]`
+        *   `refrigerator` = `Primary Fridge WHS [emon ch12]` + `2nd Fridge WHS [emon ch13]`
+        *   `clothes_dryer` = `DRYER WHS (1-CT) [emon ch9]` + `Dryer WHS (2-CTs) [xpod chA-9,10]`
+        *   `dishwasher` = `DISH WASHER WHS [emon ch11]`
+        *   `cooking_range` = `RANGE WHS (1-CT) [emon ch10]`
+        *   `pool_spa_pumps` = `POOL PUMP WHS (2-CTs) [xpod chA-3,4]`
+        *   `clothes_washer` = 0 (No clear source column, or `Wattsup Energy Washer` is negligible/ignored? Target distinct is 1 value: 0).
+        *   `interior_lighting`, `exterior_lighting`, `lighting`, `plug`, `pool_spa_heater` = 0.
+
+    *   Let's verify the `clothes_washer` logic. Source has `Wattsup Energy Washer (WHS)`. Distinct 1429. Target `clothes_washer` distinct 1 (value 0). This implies `clothes_washer` is set to 0.
+
+    *   Let's verify `hvac` logic with Row 2.
+        *   Source: AC=1714, AH=201. Sum=1915.
+        *   Target Row 2: 33294.
+        *   This is not a match.
+    
+    *   Is it possible the target values are `32767` if *any* component is `32767`?
+        *   Row 10 Source: AC=32767, AH=32767. Target hvac=32778. Close to 32767.
+        *   Row 1 Source: AC=0, AH=16. Target hvac=98301.
+    
+    *   Let's look at the `season` and `hour` derivation again.
+        *   Source Row 1: `2015-11-14 02:00:00`. Month 11 (Nov) -> Fall. Hour 2.
+        *   Target Row 1: `Summer`, 16.
+        *   Source Row 2: `2014-08-20 01:00:00`. Month 8 (Aug) -> Summer. Hour 1.
+        *   Target Row 2: `Summer`, 13.
+        
+    *   The Target Sample rows are **not** aligned with the Source Sample rows. This confirms we cannot reverse-engineer the numeric transformation from the sample data directly. We must rely on the schema and column names.
+    
+    *   Standard energy disaggregation mapping:
+        *   HVAC = AC + Air Handler
+        *   Water Heating = Water Heater
+        *   Refrigerator = Primary Fridge + 2nd Fridge
+        *   Clothes Dryer = Dryer 1-CT + Dryer 2-CTs
+        *   Dishwasher = Dish Washer
+        *   Cooking Range = Range
+        *   Pool Pumps = Pool Pump
+        *   Washer = 0 (as per target distinct values)
+        *   Lighting/Plug/Heater = 0 (as per target distinct values)
+
+    *   Data Types: Target columns are `int64`. Source are `float64`. We should cast to `int64` (likely rounding or truncating, standard cast).
+
+4.  **Construct DataFrame**:
+    *   Create `season` and `hour`.
+    *   Calculate sums for the defined categories.
+    *   Set zero-columns to 0.
+    *   Cast to int64.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse timestamp
+    ts = pd.to_datetime(source['timestamp'])
+    
+    # Derive hour
+    hour = ts.dt.hour
+    
+    # Derive season
+    # Winter: Dec, Jan, Feb (12, 1, 2)
+    # Spring: Mar, Apr, May (3, 4, 5)
+    # Summer: Jun, Jul, Aug (6, 7, 8)
+    # Fall: Sep, Oct, Nov (9, 10, 11)
+    month = ts.dt.month
+    season = pd.Series('', index=source.index)
+    season[month.isin([12, 1, 2])] = 'Winter'
+    season[month.isin([3, 4, 5])] = 'Spring'
+    season[month.isin([6, 7, 8])] = 'Summer'
+    season[month.isin([9, 10, 11])] = 'Fall'
+    
+    # Map columns
+    # Helper to get column safely
+    def get_col(name):
+        return source[name]
+    
+    # HVAC: AC Compressor + Air Handler
+    hvac = get_col('AC COMPRESSOR WHS [emon ch3,4]') + get_col('AIR HANDLER WHS [emon ch5,6]')
+    
+    # Water Heating
+    water_heating = get_col('WATER HEATER WHS [emon ch7,8]')
+    
+    # Refrigerator: Primary + 2nd
+    refrigerator = get_col('Primary Fridge WHS [emon ch12]') + get_col('2nd Fridge WHS [emon ch13]')
+    
+    # Clothes Dryer: 1-CT + 2-CTs
+    clothes_dryer = get_col('DRYER WHS (1-CT) [emon ch9]') + get_col('Dryer WHS (2-CTs) [xpod chA-9,10]')
+    
+    # Dishwasher
+    dishwasher = get_col('DISH WASHER WHS [emon ch11]')
+    
+    # Cooking Range
+    cooking_range = get_col('RANGE WHS (1-CT) [emon ch10]')
+    
+    # Pool Spa Pumps
+    pool_spa_pumps = get_col('POOL PUMP WHS (2-CTs) [xpod chA-3,4]')
+    
+    # Zero columns
+    clothes_washer = 0
+    interior_lighting = 0
+    exterior_lighting = 0
+    lighting = 0
+    plug = 0
+    pool_spa_heater = 0
+    
+    # Construct result
+    out = pd.DataFrame({
+        'season': season,
+        'hour': hour,
+        'hvac': hvac,
+        'water_heating': water_heating,
+        'refrigerator': refrigerator,
+        'clothes_washer': clothes_washer,
+        'clothes_dryer': clothes_dryer,
+        'dishwasher': dishwasher,
+        'cooking_range': cooking_range,
+        'pool_spa_pumps': pool_spa_pumps,
+        'interior_lighting': interior_lighting,
+        'exterior_lighting': exterior_lighting,
+        'lighting': lighting,
+        'plug': plug,
+        'pool_spa_heater': pool_spa_heater
+    })
+    
+    # Cast numeric columns to int64
+    numeric_cols = [c for c in out.columns if c not in ['season']]
+    for c in numeric_cols:
+        out[c] = out[c].astype('int64')
+        
+    return out
+```

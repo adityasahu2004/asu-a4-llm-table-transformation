@@ -1,0 +1,15 @@
+Operator plan: Parse CST into datetime; format date as MM/DD/YYYY for dt_strata; compute ISO day of week (Monday=1) for dow; rename the 24 hourly columns to pct_hourly_0100 through pct_hourly_2400; add a constant zero column pct_hourly_2500.
+
+```python
+import pandas as pd
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    dates = pd.to_datetime(source['CST'], format='%a %m/%d/%Y')
+    out = pd.DataFrame(index=source.index)
+    out['dt_strata'] = dates.dt.strftime('%m/%d/%Y')
+    out['dow'] = dates.dt.dayofweek + 1
+    for h in range(1,25):
+        src_col = f'{h}:00' if h < 24 else '24:00:00'
+        out[f'pct_hourly_{h:02d}00'] = source[src_col]
+    out['pct_hourly_2500'] = 0
+    return out.reset_index(drop=True)
+```

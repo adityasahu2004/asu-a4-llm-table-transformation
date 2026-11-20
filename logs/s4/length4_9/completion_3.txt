@@ -1,0 +1,69 @@
+Operator plan:
+1. Parse the `date` column into a datetime object.
+2. Extract the calendar date and format it as `MM/DD/YYYY` for the new `date` column.
+3. Determine the target hour for each row. The source data has timestamps like `0:11`, `2:22`, etc. The target columns are `1:00 AM` through `12:00 AM`.
+   - Mapping logic:
+     - Source hour 0 (0:00-0:59) maps to `12:00 AM`.
+     - Source hour 1 (1:00-1:59) maps to `1:00 AM`.
+     - ...
+     - Source hour 11 (11:00-11:59) maps to `11:00 AM`.
+     - Source hour 12 (12:00-12:59) maps to `12:00 PM`.
+     - Source hour 13 (13:00-13:59) maps to `1:00 PM`.
+     - ...
+     - Source hour 23 (23:00-23:59) maps to `11:00 PM`.
+   - Formula for 12-hour clock with AM/PM:
+     - If hour == 0: 12 AM
+     - If hour < 12: hour AM
+     - If hour == 12: 12 PM
+     - If hour > 12: (hour - 12) PM
+4. Pivot the data so that each unique calendar date becomes a row, and the 24 hour labels become columns.
+5. Ensure the columns are in the correct order: `1:00 AM` to `11:00 AM`, `12:00 PM`, `1:00 PM` to `11:00 PM`, `12:00 AM`.
+6. Handle missing values (NaNs) appropriately, preserving them if no data exists for a specific hour/date combination.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date
+    df = source.copy()
+    df['datetime'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract calendar date for grouping
+    df['cal_date'] = df['datetime'].dt.strftime('%m/%d/%Y')
+    
+    # Determine target hour label
+    def get_hour_label(dt):
+        h = dt.hour
+        if h == 0:
+            return '12:00 AM'
+        elif h < 12:
+            return f'{h}:00 AM'
+        elif h == 12:
+            return '12:00 PM'
+        else:
+            return f'{h-12}:00 PM'
+            
+    df['hour_label'] = df['datetime'].apply(get_hour_label)
+    
+    # Pivot
+    pivot_df = df.pivot_table(index='cal_date', columns='hour_label', values='zone_016', aggfunc='first')
+    
+    # Define the desired column order
+    hour_order = []
+    for h in range(1, 13):
+        hour_order.append(f'{h}:00 AM')
+    hour_order.append('12:00 PM')
+    for h in range(1, 12):
+        hour_order.append(f'{h}:00 PM')
+    hour_order.append('12:00 AM')
+    
+    # Reindex columns to match desired order, adding NaN for missing columns if any
+    pivot_df = pivot_df.reindex(columns=hour_order)
+    
+    # Rename index to date
+    pivot_df.index.name = 'date'
+    pivot_df = pivot_df.reset_index()
+    
+    return pivot_df
+```

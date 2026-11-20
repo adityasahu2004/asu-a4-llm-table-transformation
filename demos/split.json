@@ -1,0 +1,15 @@
+{
+  "held_out": [
+    "length1_1",
+    "length1_2",
+    "length1_3",
+    "length2_1",
+    "length3_1"
+  ],
+  "shown": [
+    "length1_1",
+    "length2_1",
+    "length3_1"
+  ],
+  "note": "All five excluded from every headline denominator; three worked examples shown."
+}

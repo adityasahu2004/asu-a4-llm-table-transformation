@@ -1,0 +1,18 @@
+[
+  {
+    "pilot": "incorrect_demo_s2",
+    "requests": 4,
+    "completions": 4,
+    "input_tokens": 188470,
+    "output_tokens": 2311,
+    "reason": "Discarded pilot: author-written length2_1 demonstration used Sunday-zero rather than ISO day of week. Not used in final scored results. Contains only early demo-case completions and possibly an interrupted request. Excluded from submission.\n"
+  },
+  {
+    "pilot": "zero_shot_sc",
+    "requests": 5,
+    "completions": 25,
+    "input_tokens": 53351,
+    "output_tokens": 85772,
+    "reason": "Preliminary zero-shot self-consistency pilot. Replaced by few-shot self-consistency for shorter completions and lower generation cost. Not included in the final three-strategy comparison.\n"
+  }
+]

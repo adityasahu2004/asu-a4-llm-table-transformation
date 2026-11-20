@@ -1,0 +1,228 @@
+**Operator Plan:**
+1.  **Parse Timestamp**: Convert `timestamp` to datetime to extract the month and hour.
+2.  **Derive Season**: Map the extracted month to the corresponding season string ("Winter", "Spring", "Summer", "Fall").
+3.  **Extract Hour**: Get the hour of day from the timestamp.
+4.  **Map Columns**: Select specific source columns and rename them to the target schema.
+    *   `AC COMPRESSOR WHS [emon ch3,4]` -> `hvac`
+    *   `WATER HEATER WHS [emon ch7,8]` -> `water_heating`
+    *   Combine `Primary Fridge WHS [emon ch12]` and `2nd Fridge WHS [emon ch13]` -> `refrigerator` (Note: In the sample data, `refrigerator` values like 65534 correspond to 32767+32767, suggesting a sum or concatenation. Given the integer dtype and values, summing is the standard aggregation for energy loads, but looking at the distinct values, 65534 is exactly $2 \times 32767$. Let's verify other rows. Row 2: 62+18=80, target 479? No. Row 2 source: 62, 18. Target: 479. This doesn't match a simple sum. Let's look closer.
+    *   Wait, let's re-examine `refrigerator`.
+        *   Row 1 Source: 58, 32767. Target: 65534. ($58 + 32767 \neq 65534$).
+        *   Row 2 Source: 62, 18. Target: 479.
+        *   Row 3 Source: 79, 344. Target: 178.
+        *   Row 4 Source: 79, 21. Target: 479.
+        *   Row 5 Source: 53, 61. Target: 479.
+        *   Row 6 Source: 150, 110. Target: 169.
+        *   Row 7 Source: 32767, 32767. Target: 65534.
+        *   Row 8 Source: 34, 118. Target: 479.
+        *   Row 9 Source: 32767, 32767. Target: 65534.
+        *   Row 10 Source: 32767, 32767. Target: 65534.
+        *   Row 11 Source: 91, 11. Target: 178.
+        *   Row 12 Source: 1, 5. Target: 479.
+        
+        The target `refrigerator` values seem to be fixed buckets or derived from a different logic not immediately obvious from simple arithmetic on the two fridge columns. However, looking at `clothes_dryer`:
+        *   Source `DRYER WHS (1-CT) [emon ch9]` and `Dryer WHS (2-CTs) [xpod chA-9,10]`.
+        *   Row 1: 3, 0 -> Target 65534? No, Target is 65534.
+        *   Row 2: 0, 32767 -> Target 32849?
+        
+        Let's look at `hvac`.
+        *   Source: `AC COMPRESSOR WHS [emon ch3,4]` + `AIR HANDLER WHS [emon ch5,6]`?
+        *   Row 1: 0 + 16 = 16. Target: 98301.
+        *   Row 2: 1714 + 201 = 1915. Target: 33294.
+        
+        The values in the target are significantly larger or different. Let's look at the `distinct_values` for `clothes_washer`, `interior_lighting`, etc. They are all 0.
+        
+        Let's look at the `hvac` target values again. 98301, 33294, 34123...
+        Let's look at the source `TOTAL BLDG WHS`.
+        Row 1: 386.
+        
+        Actually, looking at the provided sample data for the *previous* problems, the transformations were usually direct renames or simple aggregations. Here, the values are quite different.
+        
+        Let's re-read the distinct values.
+        Target `hvac` distinct: 12015.
+        Source `AC COMPRESSOR` distinct: 6181.
+        
+        Is it possible the target values are just the source values multiplied by something? Or is there a mapping?
+        
+        Let's look at `water_heating`.
+        Row 1: Source 7.0. Target 32767.
+        Row 2: Source 0.0. Target 1074.
+        Row 3: Source 0.0. Target 1325.
+        
+        This looks like the target data might be from a different dataset or a complex transformation involving imputation or external data not present in the source schema provided. However, I must infer from the schema.
+        
+        Wait, look at `clothes_dryer` target.
+        Row 1: 65534.
+        Row 2: 32849.
+        
+        Let's look at `pool_spa_pumps`.
+        Row 1: 32767. Source `POOL PUMP WHS`: 32767.
+        Row 2: 1333. Source `POOL PUMP WHS`: 1.
+        Row 3: 0. Source `POOL PUMP WHS`: 75.
+        
+        There is no obvious arithmetic relationship.
+        
+        **Hypothesis**: The "Target" sample data provided in the prompt might be illustrative of the *schema* (columns and types) but the values might be from a specific processed version that isn't purely deterministic from the *provided* source sample without additional context (like a model or lookup table). However, in these types of problems, usually, the transformation is a direct column mapping or simple arithmetic.
+        
+        Let's look closer at `refrigerator` again.
+        Target `refrigerator` values: 65534, 479, 178, 169, 32816, 401, 11, 94, 120, 65534, 32837.
+        Source `Primary Fridge`: 58, 62, 79, 79, 53, 150, 32767, 34, 32767, 32767, 91, 1.
+        Source `2nd Fridge`: 32767, 18, 344, 21, 61, 110, 32767, 118, 32767, 32767, 11, 5.
+        
+        Notice that 32767 is a sentinel value for "missing" or "error" in the source data (seen in `Future use` columns).
+        
+        If we assume the target is simply selecting columns:
+        `hvac` <- `AC COMPRESSOR WHS [emon ch3,4]`? No, values don't match.
+        
+        Let's look at the `season` column.
+        Row 1: Timestamp "2015-11-14". Month 11. Target "Summer".
+        Row 2: Timestamp "2014-08-20". Month 8. Target "Summer".
+        Row 3: Timestamp "2014-12-11". Month 12. Target "Fall".
+        
+        Standard seasons:
+        Dec, Jan, Feb = Winter
+        Mar, Apr, May = Spring
+        Jun, Jul, Aug = Summer
+        Sep, Oct, Nov = Fall
+        
+        Row 1 (Nov) -> Fall. Target says Summer.
+        Row 3 (Dec) -> Winter. Target says Fall.
+        
+        This suggests the `season` column in the target sample might be misaligned with the standard definition or the sample rows in the "target" block do not correspond row-for-row to the "source" block in the same order?
+        
+        **Crucial Observation**: The prompt says "Infer the transformation from this schema/sample block". It provides a source sample and a target sample. Usually, the rows correspond.
+        Source Row 0: `19`, `2015-11-14...`
+        Target Row 0: `Summer`, `16`, `98301`...
+        
+        If the rows do not correspond 1:1, I cannot infer a row-wise transformation. However, the problem statement implies a deterministic transformation.
+        
+        Let's look at the `hour` column.
+        Source Row 0: `02:00:00`. Hour 2.
+        Target Row 0: `16`.
+        
+        Source Row 1: `01:00:00`. Hour 1.
+        Target Row 1: `13`.
+        
+        There is no correlation between Source Hour and Target Hour in the first two rows.
+        
+        **Alternative Interpretation**: The "Target" sample data is just *example data* for the schema, not the actual transformed result of the "Source" sample data. The note says "Source row count describes a training sample only". It doesn't explicitly say the target sample is the transformed source sample.
+        
+        If the target sample is *not* the transformed source sample, I must rely on the **schema** and **column names** to infer the transformation.
+        
+        **Schema-based Inference**:
+        1.  `season`: Derived from `timestamp`. Standard meteorological seasons are likely:
+            *   Dec, Jan, Feb -> Winter
+            *   Mar, Apr, May -> Spring
+            *   Jun, Jul, Aug -> Summer
+            *   Sep, Oct, Nov -> Fall
+        2.  `hour`: Derived from `timestamp`.
+        3.  `hvac`: Likely sum of `AC COMPRESSOR WHS [emon ch3,4]` and `AIR HANDLER WHS [emon ch5,6]` and `Minisplit WHS (2-CTs) [xpod chA-7,8]`. Or just the main AC compressor. Given the name `hvac`, it usually aggregates all heating/cooling.
+        4.  `water_heating`: `WATER HEATER WHS [emon ch7,8]`.
+        5.  `refrigerator`: Sum of `Primary Fridge WHS [emon ch12]` and `2nd Fridge WHS [emon ch13]`.
+        6.  `clothes_washer`: `Wattsup Energy Washer (WHS)` or `Wattsup Cumulative Washer (WHS)`. The target distinct values are all 0. This might imply it's not present or mapped to 0. Or perhaps `DISH WASHER`? No, dishwasher is separate. Let's map `clothes_washer` to `Wattsup Energy Washer (WHS)`.
+        7.  `clothes_dryer`: Sum of `DRYER WHS (1-CT) [emon ch9]` and `Dryer WHS (2-CTs) [xpod chA-9,10]`.
+        8.  `dishwasher`: `DISH WASHER WHS [emon ch11]`.
+        9.  `cooking_range`: `RANGE WHS (1-CT) [emon ch10]`.
+        10. `pool_spa_pumps`: `POOL PUMP WHS (2-CTs) [xpod chA-3,4]`.
+        11. `interior_lighting`, `exterior_lighting`, `lighting`, `plug`, `pool_spa_heater`: These are likely 0 or derived from `SPARE` channels or `Calculated Unmeasured loads`. Given the target distinct values are all 0 for these, and no specific "Lighting" channels exist in the source (only SPAREs), they are likely set to 0.
+        
+        **Refining the Mapping**:
+        *   `season`: Map Month to Season.
+        *   `hour`: Extract Hour.
+        *   `hvac`: `AC COMPRESSOR WHS [emon ch3,4]` + `AIR HANDLER WHS [emon ch5,6]` + `Minisplit WHS (2-CTs) [xpod chA-7,8]`.
+        *   `water_heating`: `WATER HEATER WHS [emon ch7,8]`.
+        *   `refrigerator`: `Primary Fridge WHS [emon ch12]` + `2nd Fridge WHS [emon ch13]`.
+        *   `clothes_washer`: `Wattsup Energy Washer (WHS)`. (Or 0 if not applicable).
+        *   `clothes_dryer`: `DRYER WHS (1-CT) [emon ch9]` + `Dryer WHS (2-CTs) [xpod chA-9,10]`.
+        *   `dishwasher`: `DISH WASHER WHS [emon ch11]`.
+        *   `cooking_range`: `RANGE WHS (1-CT) [emon ch10]`.
+        *   `pool_spa_pumps`: `POOL PUMP WHS (2-CTs) [xpod chA-3,4]`.
+        *   `interior_lighting`: 0.
+        *   `exterior_lighting`: 0.
+        *   `lighting`: 0.
+        *   `plug`: 0.
+        *   `pool_spa_heater`: 0.
+
+        **Handling Sentinel Values**: The source contains `32767`. In the target schema, the types are `int64`. The target sample shows values like `32767` and `65534`. This suggests we should **preserve** the raw values, including sentinels, and just sum them if aggregating. If a component is missing (32767), the sum might be nonsensical, but without instructions to clean, we should perform the arithmetic as defined by the schema mapping.
+
+        **Season Logic**:
+        Months:
+        12, 1, 2 -> Winter
+        3, 4, 5 -> Spring
+        6, 7, 8 -> Summer
+        9, 10, 11 -> Fall
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse timestamp
+    ts = pd.to_datetime(source['timestamp'])
+    
+    # Derive season
+    month = ts.dt.month
+    season_map = {
+        12: 'Winter', 1: 'Winter', 2: 'Winter',
+        3: 'Spring', 4: 'Spring', 5: 'Spring',
+        6: 'Summer', 7: 'Summer', 8: 'Summer',
+        9: 'Fall', 10: 'Fall', 11: 'Fall'
+    }
+    out = pd.DataFrame(index=source.index)
+    out['season'] = month.map(season_map)
+    
+    # Extract hour
+    out['hour'] = ts.dt.hour.astype('int64')
+    
+    # Helper to get column safely
+    def get_col(name):
+        return source[name].astype('float64')
+
+    # Map and aggregate columns
+    # HVAC: AC Compressor + Air Handler + Minisplit
+    hvac_cols = [
+        'AC COMPRESSOR WHS [emon ch3,4]',
+        'AIR HANDLER WHS [emon ch5,6]',
+        'Minisplit WHS (2-CTs) [xpod chA-7,8]'
+    ]
+    out['hvac'] = sum([get_col(c) for c in hvac_cols]).astype('int64')
+    
+    # Water Heating
+    out['water_heating'] = get_col('WATER HEATER WHS [emon ch7,8]').astype('int64')
+    
+    # Refrigerator: Primary + 2nd
+    fridge_cols = [
+        'Primary Fridge WHS [emon ch12]',
+        '2nd Fridge WHS [emon ch13]'
+    ]
+    out['refrigerator'] = sum([get_col(c) for c in fridge_cols]).astype('int64')
+    
+    # Clothes Washer: Wattsup Energy Washer
+    out['clothes_washer'] = get_col('Wattsup Energy Washer (WHS)').astype('int64')
+    
+    # Clothes Dryer: 1-CT + 2-CTs
+    dryer_cols = [
+        'DRYER WHS (1-CT) [emon ch9]',
+        'Dryer WHS (2-CTs) [xpod chA-9,10]'
+    ]
+    out['clothes_dryer'] = sum([get_col(c) for c in dryer_cols]).astype('int64')
+    
+    # Dishwasher
+    out['dishwasher'] = get_col('DISH WASHER WHS [emon ch11]').astype('int64')
+    
+    # Cooking Range
+    out['cooking_range'] = get_col('RANGE WHS (1-CT) [emon ch10]').astype('int64')
+    
+    # Pool Spa Pumps
+    out['pool_spa_pumps'] = get_col('POOL PUMP WHS (2-CTs) [xpod chA-3,4]').astype('int64')
+    
+    # Columns with no direct source or mapped to 0 based on target distinct values
+    zero_cols = [
+        'interior_lighting', 'exterior_lighting', 'lighting', 
+        'plug', 'pool_spa_heater'
+    ]
+    for col in zero_cols:
+        out[col] = 0
+        
+    return out.reset_index(drop=True)
+```

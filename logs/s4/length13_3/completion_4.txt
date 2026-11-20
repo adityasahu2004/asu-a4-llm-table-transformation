@@ -1,0 +1,167 @@
+Operator plan:
+1. Parse the `timestamp` column into datetime objects.
+2. Group the data by `site` and `timestamp` (hourly) to aggregate values across sites if necessary, or simply process per row. Given the target has distinct timestamps and the source has many rows per timestamp (due to multiple sites), and the target values look like aggregated sums (e.g., `hvac` sums of AC compressor and Air Handler), we need to aggregate.
+   - However, looking at the target `rows` count (63,969) vs source `distinct` timestamps (63,212), it's close but not identical. The source has 1.3M rows. The target has ~64k rows. This suggests aggregation by timestamp across all sites, or perhaps just one site?
+   - Let's look at the target values. `hvac` is `int64`. `domestic_water_heating` is `int64`. `major_appliances` is `int64`. `lighting` is `int64` (all 0). `miscellaneous_plug_loads` is `float64`. `total` is `int64`.
+   - Source columns mapping:
+     - `hvac`: Likely sum of `AC COMPRESSOR WHS [emon ch3,4]` and `AIR HANDLER WHS [emon ch5,6]` and `Minisplit WHS (2-CTs) [xpod chA-7,8]`.
+     - `domestic_water_heating`: `WATER HEATER WHS [emon ch7,8]`.
+     - `major_appliances`: Sum of `DRYER WHS (1-CT) [emon ch9]`, `RANGE WHS (1-CT) [emon ch10]`, `DISH WASHER WHS [emon ch11]`, `Primary Fridge WHS [emon ch12]`, `2nd Fridge WHS [emon ch13]`.
+     - `lighting`: No clear lighting column in source, likely 0.
+     - `miscellaneous_plug_loads`: `Calculated Unmeasured loads (Whr)` or similar? Or maybe `SPARE` columns?
+     - `total`: `TOTAL BLDG WHS [emon ch1,2]` or `Calculated Energy Use (Whr)`?
+
+   Let's check the sample data consistency.
+   Source row 1:
+   - AC COMP: 0
+   - AIR HANDLER: 16
+   - Minisplit: 32767 (invalid/missing)
+   - Water Heater: 7
+   - Dryer: 3
+   - Range: 6
+   - Dish: 0
+   - Fridge1: 58
+   - Fridge2: 32767 (invalid)
+   - Unmeasured: 175
+   - Total Bldg: 386
+
+   If we sum AC(0) + Air(16) = 16.
+   Water(7).
+   Dryer(3) + Range(6) + Dish(0) + Fridge1(58) = 67.
+   Unmeasured(175).
+   Total(386).
+
+   Target sample row 1:
+   - datetime: "2012-09-14 22:00:00" (This date is not in the source sample provided, the source sample starts 2015-11-14. The target sample has different dates. This implies the transformation must be general.)
+   - hvac: 1781116
+   - domestic_water_heating: 460594
+   - major_appliances: 3312151
+   - lighting: 0
+   - miscellaneous_plug_loads: 1148884.1
+   - total: 514620
+
+   The values in the target are huge, suggesting aggregation over many sites or many hours.
+   Source `distinct` timestamps: 63,212. Target `rows`: 63,969.
+   Wait, the target `first_last_non_null` for datetime is `2012-09-14` to `2012-08-10`. This looks like unsorted or a specific range.
+   
+   Let's look at the structure again.
+   Source has `site` and `timestamp`.
+   Target has `datetime`.
+   
+   Hypothesis: The target is an aggregation of all sites for each timestamp.
+   Let's verify the aggregation logic.
+   `hvac` = Sum of AC Compressor, Air Handler, Minisplit?
+   `domestic_water_heating` = Sum of Water Heater?
+   `major_appliances` = Sum of Dryer, Range, Dish, Fridge1, Fridge2?
+   `miscellaneous_plug_loads` = Sum of Unmeasured?
+   `total` = Sum of Total Bldg?
+
+   Let's check if `total` in target is sum of `TOTAL BLDG WHS` or sum of components.
+   In source, `TOTAL BLDG WHS` is 386. `Calculated Energy Use` is 386.
+   
+   If we aggregate by timestamp:
+   `hvac` = `AC COMPRESSOR WHS` + `AIR HANDLER WHS` + `Minisplit WHS`?
+   `domestic_water_heating` = `WATER HEATER WHS`?
+   `major_appliances` = `DRYER WHS (1-CT)` + `RANGE WHS (1-CT)` + `DISH WASHER WHS` + `Primary Fridge WHS` + `2nd Fridge WHS`?
+   `lighting` = 0?
+   `miscellaneous_plug_loads` = `Calculated Unmeasured loads (Whr)`?
+   `total` = `TOTAL BLDG WHS`?
+
+   Note: Values of 32767 are likely missing data. We should treat them as NaN or 0? Usually in energy data, 32767 is a sentinel for missing. If we sum them, they will skew the data. We should probably replace 32767 with NaN or 0 before summing. Given `miscellaneous_plug_loads` is float and others are int, maybe 32767 is excluded.
+
+   Let's refine the aggregation:
+   1. Replace 32767 with NaN in all numeric columns.
+   2. Group by `timestamp`.
+   3. Sum the relevant columns.
+   4. Map to target column names.
+   5. Format timestamp as `YYYY-MM-DD HH:MM:SS`.
+
+   Columns mapping:
+   - `hvac`: `AC COMPRESSOR WHS [emon ch3,4]` + `AIR HANDLER WHS [emon ch5,6]` + `Minisplit WHS (2-CTs) [xpod chA-7,8]`
+   - `domestic_water_heating`: `WATER HEATER WHS [emon ch7,8]`
+   - `major_appliances`: `DRYER WHS (1-CT) [emon ch9]` + `RANGE WHS (1-CT) [emon ch10]` + `DISH WASHER WHS [emon ch11]` + `Primary Fridge WHS [emon ch12]` + `2nd Fridge WHS [emon ch13]`
+   - `lighting`: 0 (constant)
+   - `miscellaneous_plug_loads`: `Calculated Unmeasured loads (Whr)`
+   - `total`: `TOTAL BLDG WHS [emon ch1,2]`
+
+   Let's check the dtypes.
+   Target `hvac`, `domestic_water_heating`, `major_appliances`, `lighting`, `total` are `int64`.
+   Target `miscellaneous_plug_loads` is `float64`.
+
+   Steps:
+   1. Create a copy of the source.
+   2. Replace 32767.0 with NaN in all numeric columns.
+   3. Define the aggregation groups.
+   4. Group by `timestamp`.
+   5. Apply sum for each group.
+   6. Create the new columns.
+   7. Format the timestamp.
+   8. Reset index.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Replace sentinel value 32767 with NaN
+    df = source.copy()
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    df[numeric_cols] = df[numeric_cols].replace(32767.0, np.nan)
+
+    # Define aggregation groups
+    # hvac: AC Compressor + Air Handler + Minisplit
+    # domestic_water_heating: Water Heater
+    # major_appliances: Dryer(1-CT) + Range(1-CT) + Dish Washer + Fridge1 + Fridge2
+    # lighting: 0
+    # miscellaneous_plug_loads: Calculated Unmeasured loads
+    # total: TOTAL BLDG WHS
+
+    # We will group by timestamp and sum
+    group_cols = ['timestamp']
+    
+    # Calculate components per row first to ensure correct summation logic before aggregation
+    # Or just sum the columns directly in the groupby agg
+    
+    agg_dict = {
+        'AC COMPRESSOR WHS [emon ch3,4]': 'sum',
+        'AIR HANDLER WHS [emon ch5,6]': 'sum',
+        'Minisplit WHS (2-CTs) [xpod chA-7,8]': 'sum',
+        'WATER HEATER WHS [emon ch7,8]': 'sum',
+        'DRYER WHS (1-CT) [emon ch9]': 'sum',
+        'RANGE WHS (1-CT) [emon ch10]': 'sum',
+        'DISH WASHER WHS [emon ch11]': 'sum',
+        'Primary Fridge WHS [emon ch12]': 'sum',
+        '2nd Fridge WHS [emon ch13]': 'sum',
+        'Calculated Unmeasured loads (Whr)': 'sum',
+        'TOTAL BLDG WHS [emon ch1,2]': 'sum'
+    }
+
+    grouped = df.groupby('timestamp', as_index=False).agg(agg_dict)
+
+    # Construct target columns
+    out = pd.DataFrame()
+    out['datetime'] = pd.to_datetime(grouped['timestamp']).dt.strftime('%Y-%m-%d %H:%M:%S')
+    
+    # HVAC
+    hvac_cols = ['AC COMPRESSOR WHS [emon ch3,4]', 'AIR HANDLER WHS [emon ch5,6]', 'Minisplit WHS (2-CTs) [xpod chA-7,8]']
+    out['hvac'] = grouped[hvac_cols].sum(axis=1).astype('int64')
+    
+    # Domestic Water Heating
+    out['domestic_water_heating'] = grouped['WATER HEATER WHS [emon ch7,8]'].astype('int64')
+    
+    # Major Appliances
+    major_cols = ['DRYER WHS (1-CT) [emon ch9]', 'RANGE WHS (1-CT) [emon ch10]', 'DISH WASHER WHS [emon ch11]', 
+                  'Primary Fridge WHS [emon ch12]', '2nd Fridge WHS [emon ch13]']
+    out['major_appliances'] = grouped[major_cols].sum(axis=1).astype('int64')
+    
+    # Lighting
+    out['lighting'] = 0
+    
+    # Miscellaneous Plug Loads
+    out['miscellaneous_plug_loads'] = grouped['Calculated Unmeasured loads (Whr)']
+    
+    # Total
+    out['total'] = grouped['TOTAL BLDG WHS [emon ch1,2]'].astype('int64')
+
+    return out.reset_index(drop=True)
+```

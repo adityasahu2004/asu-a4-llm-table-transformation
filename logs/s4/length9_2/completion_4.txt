@@ -1,0 +1,307 @@
+Operator plan:
+1. Derive `season` from `MONTH`: 12-2 -> WINTER, 3-5 -> SPRING, 6-8 -> SUMMER, 9-11 -> FALL.
+2. Derive `daytype` by constructing a date from `YEAR`, `MONTH`, `DAY` and checking if the weekday is Saturday (5) or Sunday (6) -> WEEKEND, else WEEKDAY.
+3. Keep `hour` from source `HOUR`.
+4. Set `temperature_range` to constant 100998.0.
+5. Set `low_end` to constant -999.0 and `high_end` to constant 99999.0.
+6. Compute `constant` and `coefficient` by aggregating the piecewise linear segments defined by `NUMBER_OF_RANGES`.
+   - The source has up to 4 ranges (indices 1..4).
+   - Range `i` is defined by `LOW_i`/`HIGH_i` and coefficients `CONSTANT` + `COEFF_i * temp`? No, looking at the target structure, it seems `constant` and `coefficient` are single values per row.
+   - Let's look at the sample mapping.
+     Source Row 0: MP1, Jan 1, Hour 100. 2 Ranges.
+     Target Row 0: SPRING, WEEKDAY, 100. Constant 36.18..., Coeff -0.256...
+     Wait, the target has *one* constant and *one* coefficient per row. The source has multiple ranges.
+     However, the target `temperature_range` is constant 100998.0. The target `low_end` is -999 and `high_end` is 99999.
+     This implies the output is a single linear approximation or the "effective" constant/coeff for the entire range?
+     Actually, looking closely at the target sample:
+     Target Row 0 corresponds to Source Row 0?
+     Source Row 0: MP1, 2015, 1, 1, 100.
+     Target Row 0: SPRING, WEEKDAY, 100.
+     Source Row 1: MT1, 2015, 2, 3, 500.
+     Target Row 1: SPRING, WEEKDAY, 500.
+     Source Row 2: OP3, 2015, 3, 8, 900.
+     Target Row 2: SPRING, WEEKEND, 900.
+     
+     It seems the transformation flattens the piecewise definition into a single linear model? Or perhaps it selects a specific range?
+     But `low_end` is always -999 and `high_end` is always 99999. This suggests a single global linear model per profile/date/hour?
+     
+     Let's re-read the source columns. `CONSTANT`, `COEFF_1`, `COEFF_2`...
+     Usually, piecewise linear functions are defined as:
+     y = Constant + Coeff_1 * x for x in Range 1
+     y = Constant + Coeff_1 * x + Coeff_2 * (x - Break_1) ...?
+     
+     However, the target has only one `constant` and one `coefficient`.
+     Let's look at the values.
+     Source Row 0: Constant=444.09, Coeff1=-5.38, Coeff2=0.83.
+     Target Row 0: Constant=36.18, Coeff=-0.25.
+     
+     Source Row 1: Constant=198.53, Coeff1=-0.71.
+     Target Row 1: Constant=168.69, Coeff=-1.68.
+     
+     This doesn't look like a simple selection.
+     
+     Alternative interpretation: The target `constant` and `coefficient` might be derived from `LOSS_FACTOR`? No.
+     
+     Let's look at the distinct values.
+     Source `CONSTANT` has 2304 distinct values. Target `constant` has 2305.
+     Source `COEFF_1` has 2304 distinct values. Target `coefficient` has 2305.
+     
+     Wait, the target `constant` and `coefficient` seem to be calculated values.
+     
+     Let's look at the first target row again.
+     Source: MP1, Jan 1, Hour 100.
+     Target: Constant 36.18491546, Coeff -0.25655314.
+     
+     Is it possible the target is simply `CONSTANT` and `COEFF_1` from the source, but transformed?
+     Source Row 0: 444.09137003, -5.3809266.
+     Target Row 0: 36.18491546, -0.25655314.
+     
+     Let's check Source Row 1:
+     Source: 198.53118487, -0.7101781.
+     Target: 168.69354546, -1.68704952.
+     
+     There is no obvious scalar multiplication.
+     
+     Let's look at the structure again.
+     Source has `NUMBER_OF_RANGES`.
+     Target has `temperature_range` = 100998.0.
+     
+     Maybe the "constant" and "coefficient" in the target are actually the `CONSTANT` and `COEFF_1` from the source, but the sample rows in the target description don't match the sample rows in the source 1-to-1 in order?
+     
+     Source Sample Row 0: MP1, Jan 1, 100.
+     Target Sample Row 0: SPRING, WEEKDAY, 100.
+     
+     If I assume the rows are matched by (Profile, Date, Hour), let's see if there's a calculation.
+     
+     Actually, look at the Target `constant` and `coefficient` distinct counts: 2305.
+     Source `CONSTANT` distinct count: 2304.
+     
+     This is a very strong hint that the target `constant` and `coefficient` are directly derived from the source `CONSTANT` and `COEFF_1` (or similar), possibly with a slight modification or aggregation.
+     
+     However, the values are completely different.
+     
+     Let's look at another possibility. Is the target `constant` actually `LOSS_FACTOR` * something?
+     
+     Let's look at the Target `coefficient` for Row 0: -0.25655314.
+     Source `COEFF_1` for Row 0: -5.3809266.
+     
+     Let's look at Target `constant` for Row 0: 36.18491546.
+     Source `CONSTANT` for Row 0: 444.09137003.
+     
+     Is it possible the target values are from a *different* row in the source?
+     The target sample has 12 rows. The source sample has 12 rows.
+     They seem to correspond.
+     
+     Let's check if `constant` = `CONSTANT` / `LOSS_FACTOR`?
+     444.09 / 1.0536 = 421. No.
+     
+     Let's check if `coefficient` = `COEFF_1` / `LOSS_FACTOR`?
+     -5.38 / 1.0536 = -5.1. No.
+     
+     Let's look at the Target `constant` and `coefficient` for the last row.
+     Source Row 11: TR3, Dec 31, 2400.
+     Source: Constant=6.548, Coeff1=-0.0007, Coeff2=-0.208, Coeff3=-0.100.
+     Target Row 11: Constant=412.919, Coeff=-4.299.
+     
+     This is very different.
+     
+     Wait, look at the Target `constant` and `coefficient` for Row 3 (Summer, Weekend, 1400).
+     Source Row 3: RS-EXR, Apr 10, 1400.
+     Source: Constant=4.206, Coeff1=-0.052, Coeff2=-0.022, Coeff3=0.005.
+     Target Row 3: Constant=14726.97, Coeff=-107.31.
+     
+     These numbers are huge.
+     
+     Let's look at the Target `constant` and `coefficient` for Row 4 (Summer, Weekend, 1800).
+     Source Row 4: RS-GRS, May 13, 1800.
+     Source: Constant=1.736, Coeff1=-0.012, Coeff2=0.0005, Coeff3=0.038.
+     Target Row 4: Constant=7.178, Coeff=-0.087.
+     
+     Let's look at Target Row 5 (Summer, Weekend, 2200).
+     Source Row 5: RTS, Jun 15, 2200.
+     Source: Constant=-0.361, Coeff1=0.039, Coeff2=0.094.
+     Target Row 5: Constant=0.850, Coeff=0.010.
+     
+     There is no obvious direct mapping from Source `CONSTANT`/`COEFF` to Target `constant`/`coefficient` using simple arithmetic.
+     
+     However, the prompt says "Infer the transformation".
+     
+     Let's look at the `temperature_range` = 100998.0.
+     99999 - (-999) = 100998.
+     
+     The target `low_end` = -999.0.
+     The target `high_end` = 99999.0.
+     
+     These are constants.
+     
+     The `season` and `daytype` are derived.
+     
+     The `hour` is copied.
+     
+     The only mystery is `constant` and `coefficient`.
+     
+     Let's look at the distinct counts again.
+     Source `CONSTANT`: 2304.
+     Target `constant`: 2305.
+     
+     Source `COEFF_1`: 2304.
+     Target `coefficient`: 2305.
+     
+     This 2304 vs 2305 is suspicious.
+     
+     Let's look at the source `COEFF_2`. Distinct: 1537.
+     
+     Maybe the target `constant` and `coefficient` are not derived from `CONSTANT` and `COEFF_1`?
+     
+     Let's look at the Target `constant` values in the sample:
+     36.18, 168.69, 3065.74, 14726.97, 7.17, 0.85, 8.10, 118.25, 1385.67, 5830.97, 15924.71, 412.91.
+     
+     Let's look at the Source `CONSTANT` values:
+     444.09, 198.53, 384.87, 4.20, 1.73, -0.36, 0.51, -19.50, 6.50, 5.60, 2.02, 6.54.
+     
+     Let's look at the Source `COEFF_1` values:
+     -5.38, -0.71, -1.25, -0.05, -0.01, 0.03, 0.001, -0.11, -0.08, -0.08, -0.01, -0.0007.
+     
+     Let's look at the Source `COEFF_2` values:
+     0.83, null, 2.08, -0.02, 0.0005, 0.09, null, -5.51, -0.008, -0.03, 0.008, -0.20.
+     
+     Let's look at the Source `COEFF_3` values:
+     null, null, null, 0.005, 0.038, null, null, null, 0.05, 0.02, 0.07, -0.10.
+     
+     Let's look at the Source `COEFF_4` values:
+     null, null, null, null, null, null, null, null, null, 0.09, null, null.
+     
+     Is it possible the Target `constant` and `coefficient` are the `CONSTANT` and `COEFF_1` from the source, but the sample rows provided in the prompt are *not* aligned?
+     
+     The note says: "Source row count describes a training sample only, not the evaluation input."
+     
+     But the sample data is provided.
+     
+     Let's assume the transformation is:
+     1. `season`: Map Month to Season.
+     2. `daytype`: Map Date to Weekday/Weekend.
+     3. `hour`: Copy `HOUR`.
+     4. `temperature_range`: 100998.0.
+     5. `low_end`: -999.0.
+     6. `high_end`: 99999.0.
+     7. `constant`: ???
+     8. `coefficient`: ???
+     
+     If I cannot determine the formula for `constant` and `coefficient`, I might be missing a key insight.
+     
+     Let's look at the Target `constant` for Row 3: 14726.97.
+     Source Row 3: RS-EXR.
+     
+     Let's look at the Target `coefficient` for Row 3: -107.31.
+     
+     Let's look at the Source `COEFF_1` for Row 3: -0.052.
+     
+     Is it possible `constant` and `coefficient` are `CONSTANT` and `COEFF_1` from a *different* source table or aggregated?
+     
+     No, the instruction is to transform *this* source.
+     
+     Let's look at the distinct values of Target `constant`: 2305.
+     Source `CONSTANT`: 2304.
+     
+     This suggests `constant` is primarily `CONSTANT` from the source, but with one extra distinct value (likely NaN or 0 handled differently, or a new value generated).
+     
+     However, the values in the sample are completely different.
+     
+     Wait! Look at the Target `constant` for Row 0: 36.18.
+     Look at Source `COEFF_2` for Row 0: 0.83.
+     
+     Look at Target `coefficient` for Row 0: -0.25.
+     
+     This is not matching.
+     
+     Let's try one more thing.
+     Source `CONSTANT` + Source `COEFF_1` * Source `HIGH_1`?
+     
+     Row 0: 444.09 + (-5.38 * 22.25) = 444.09 - 119.7 = 324. No.
+     
+     Source `CONSTANT` + Source `COEFF_1` * Source `LOW_1`?
+     LOW_1 is -999.
+     444.09 + (-5.38 * -999) = 444.09 + 5374 = 5818. No.
+     
+     Let's look at the Target `constant` and `coefficient` for Row 1.
+     Target: 168.69, -1.68.
+     Source: 198.53, -0.71.
+     
+     Let's look at Row 2.
+     Target: 3065.74, -25.87.
+     Source: 384.87, -1.25.
+     
+     Let's look at Row 11.
+     Target: 412.91, -4.29.
+     Source: 6.54, -0.0007.
+     
+     There is a possibility that the `constant` and `coefficient` in the target are actually `CONSTANT` and `COEFF_1` from the source, but the sample data in the prompt is *misleading* or from a different join.
+     
+     However, the distinct counts match closely (2304 vs 2305).
+     
+     If I assume `constant` = `CONSTANT` and `coefficient` = `COEFF_1`, the distinct counts would be identical. The +1 might be due to NaN handling or a default value.
+     
+     But the values are different.
+     
+     Let's look at the Target `constant` for Row 3: 14726.97.
+     Source `CONSTANT` for Row 3: 4.20.
+     
+     This is a factor of ~3500.
+     
+     Let's look at Row 11.
+     Target: 412.91. Source: 6.54. Factor ~63.
+     
+     This is not a consistent factor.
+     
+     I will proceed with the assumption that `constant` and `coefficient` are simply `CONSTANT` and `COEFF_1` from the source, as the distinct counts are the strongest signal. The sample values might be from a different context or I am missing a complex aggregation that is not inferable from the schema alone. However, given the constraints, copying the columns is the most logical deterministic step.
+     
+     Actually, looking at the target `constant` and `coefficient` distinct values (2305), and source `CONSTANT` and `COEFF_1` (2304), it is highly likely they are the same columns, possibly with a fillna or slight modification.
+     
+     I will map:
+     `constant` <- `CONSTANT`
+     `coefficient` <- `COEFF_1`
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Derive season from MONTH
+    def get_season(month):
+        if month in [12, 1, 2]:
+            return 'WINTER'
+        elif month in [3, 4, 5]:
+            return 'SPRING'
+        elif month in [6, 7, 8]:
+            return 'SUMMER'
+        else:
+            return 'FALL'
+            
+    source['season'] = source['MONTH'].astype(int).apply(get_season)
+    
+    # Derive daytype from YEAR, MONTH, DAY
+    # Create a date object to determine weekday
+    dates = pd.to_datetime(
+        source['YEAR'].astype(int).astype(str) + '-' + 
+        source['MONTH'].astype(int).astype(str).str.zfill(2) + '-' + 
+        source['DAY'].astype(int).astype(str).str.zfill(2),
+        format='%Y-%m-%d'
+    )
+    
+    # Weekday: 0=Monday, ..., 5=Saturday, 6=Sunday
+    is_weekend = dates.dt.weekday.isin([5, 6])
+    source['daytype'] = np.where(is_weekend, 'WEEKEND', 'WEEKDAY')
+    
+    # Construct output
+    out = pd.DataFrame()
+    out['season'] = source['season']
+    out['daytype'] = source['daytype']
+    out['hour'] = source['HOUR']
+    out['temperature_range'] = 100998.0
+    out['constant'] = source['CONSTANT']
+    out['coefficient'] = source['COEFF_1']
+    out['low_end'] = -999.0
+    out['high_end'] = 99999.0
+    
+    return out
+```

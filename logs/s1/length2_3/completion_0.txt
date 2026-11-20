@@ -1,0 +1,195 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `date` column from string format (`M/D/YYYY`) to pandas datetime objects.
+2.  **Generate Full Date Range**: The target has 183 rows while the source has 182. The target dates range from `1/1/2014` to `7/2/2014` (based on sample first/last), whereas the source sample starts at `7/3/2014`. This implies the transformation requires generating a complete daily time series for the year 2014 (or the relevant period) and merging/joining the source data onto it. Given the source covers a specific period and the target seems to cover a full year or a specific contiguous block starting from Jan 1, 2014, we will create a date range from `2014-01-01` to `2014-12-31` (365 days) or infer the exact range from the source min/max if it were contiguous. However, looking at the target sample `1/1/2014` to `7/2/2014` and the source `7/3/2014` to `12/31/2014`, it appears the target is the *complement* or a specific subset?
+    *   *Correction*: Let's look closer. Source rows: 182. Target rows: 183.
+    *   Source sample dates: `7/3/2014` ... `12/31/2014`.
+    *   Target sample dates: `1/1/2014` ... `7/2/2014`.
+    *   It seems the target is the *first half* of the year (Jan 1 to July 2) and the source is the *second half* (July 3 to Dec 31).
+    *   Wait, the prompt says "Compute the result only from the source DataFrame". If the source only contains July-Dec, how can we generate Jan-June data?
+    *   *Re-reading the note*: "Source row count describes a training sample only, not the evaluation input." This implies the *evaluation* source might contain the full year, or the transformation logic must be generalizable.
+    *   However, usually in these tasks, if the target contains dates not in the source, there's a pattern or the source *does* contain them in the actual evaluation file. But here, the schema says source has 182 rows. 182 days is roughly half a year.
+    *   Let's look at the column transformation.
+    *   Source columns: `1:00 AM` ... `12:00 PM` ... `11:00 PM`. These are hourly values.
+    *   Target columns: `pct_hourly_0100` ... `pct_hourly_2400`.
+    *   The target values look like normalized percentages or ratios.
+    *   Let's check the sum of hourly values in a source row vs target row.
+    *   Source Row 1 (`7/3/2014`): Sum of hourly cols ≈ 4.5.
+    *   Target Row 1 (`1/1/2014`): Sum of hourly cols ≈ 5.5.
+    *   The values are different.
+    *   Crucially, the target has a column `pct_hourly_2500` which is always 0.
+    *   The target has `dow` (day of week).
+    *   The target has `dt_strata` which is the date string.
+
+    *   *Hypothesis*: The transformation is a **pivot/unpivot** or **reshaping** combined with **normalization**.
+    *   But wait, if the source doesn't have the dates in the target, we can't generate them.
+    *   *Alternative Hypothesis*: The "Source" provided in the JSON is just a *sample* of the actual evaluation source. The actual evaluation source likely contains the full year (365 rows). The task is to transform *whatever* is in the source into the target format.
+    *   If the source contains the full year, the transformation is:
+        1.  Parse `date`.
+        2.  Extract `dow` (0=Mon? or 0=Sun? Target sample `1/1/2014` is Wednesday. `1/1/2014` dow is 3. Python `weekday()` returns 2 for Wednesday. `dayofweek` returns 2. If target is 3, maybe 0=Sunday? `1/1/2014` is Wed. Sun=0, Mon=1, Tue=2, Wed=3. Yes, 0-indexed Sunday).
+        3.  Melt the hourly columns into a long format? No, the target is wide (24 hourly columns).
+        4.  The source has 24 hourly columns. The target has 24 hourly columns (`0100` to `2400`).
+        5.  Map source column names to target column names.
+            *   `1:00 AM` -> `pct_hourly_0100`
+            *   `2:00 AM` -> `pct_hourly_0200`
+            *   ...
+            *   `12:00 AM` -> `pct_hourly_2400` (Midnight at end of day)
+            *   `12:00 PM` -> `pct_hourly_1200`
+        6.  The values in the target are likely the source values divided by the sum of the hourly values for that day (normalization to sum to 1? Or sum to something else?).
+            *   Let's check Source Row 1 Sum: ~4.5. Target Row 1 Sum: ~5.5. They don't match.
+            *   Let's check if Target values are just Source values renamed?
+            *   Source `7/3/2014` `1:00 AM` = 1.035932.
+            *   Target `7/2/2014` (last row of sample) `pct_hourly_0100` = 0.816822.
+            *   These are different dates.
+            *   *Critical Insight*: The problem statement says "Source row count describes a training sample only". This implies the *actual* input to the function during evaluation will have the rows corresponding to the target. The sample provided in the JSON is just to show schema. The *logic* must be derived from the schema mapping.
+            *   Therefore, I should assume the source DataFrame passed to `transform` contains the rows that need to be transformed into the target structure. I should not try to generate missing dates. I should transform the existing rows.
+            *   The transformation is:
+                1.  Rename columns to match target `pct_hourly_XXXX` format.
+                2.  Parse `date` to datetime.
+                3.  Create `dt_strata` as string `M/D/YYYY`.
+                4.  Create `dow` as integer (0=Sun, ..., 6=Sat).
+                5.  Add `pct_hourly_2500` column with value 0.
+                6.  The values in `pct_hourly_XXXX` columns: Are they raw values or normalized?
+                    *   Let's look at the distinct counts. Source hourly cols have 182 distinct values. Target hourly cols have 183 distinct values.
+                    *   If it were just renaming, the values would be identical for the same date.
+                    *   Since the sample dates are disjoint, I can't verify value transformation directly.
+                    *   However, the column name `pct_hourly` suggests "percentage".
+                    *   Let's check if the source values sum to 1.0 or 100.0?
+                    *   Source Row 1 Sum: ~4.5. Not 1.
+                    *   Maybe they are already percentages?
+                    *   Let's look at the `DSL` column in source. It has values 0.0 and 0.119509. It is not in the target.
+                    *   Let's assume the values are simply copied/renamed unless there's a strong signal for normalization. The name `pct_hourly` might just be a label for the metric (e.g., "percentage of daily load" or similar), but if the source values don't sum to 1, and we don't have a target row for the same date to compare, we must assume the transformation is structural (renaming/reshaping) rather than arithmetic, *or* that the arithmetic is standard normalization.
+                    *   Wait, look at `pct_hourly_2500`. It is 0.
+                    *   Look at `dow`.
+                    *   Let's assume the values are **normalized** to sum to 1.0 (or 100.0) for each day?
+                    *   If I normalize Source Row 1 (Sum ~4.5), `1:00 AM` (1.03) becomes ~0.23.
+                    *   Target Row 1 (`1/1/2014`) `pct_hourly_0100` is 0.40.
+                    *   Without overlapping dates, this is ambiguous.
+                    *   *However*, in many such datasets, "pct_hourly" implies the value is already the percentage or the raw value is the percentage.
+                    *   Let's look at the distinct values again. Source `1:00 AM` has 182 distinct values. Target `pct_hourly_0100` has 183 distinct values.
+                    *   If it were a simple rename, the distinct count would be the same (for the same rows).
+                    *   The fact that the target has *more* distinct values (183 vs 182) and the row count is 183 vs 182 suggests the evaluation source will have 183 rows.
+                    *   I will assume the values are **copied directly** (renamed). Why? Because "pct" might refer to the nature of the data (e.g. percentiles, or just a name) and without a clear normalization factor (like summing to 1), introducing arithmetic is risky. Also, the source values are floats like `1.035932`. If they were percentages, they might be `1.03%`.
+                    *   Actually, let's look at the `DSL` column. It's dropped.
+                    *   Let's look at the column mapping carefully.
+                        *   `1:00 AM` -> `0100`
+                        *   `2:00 AM` -> `0200`
+                        *   ...
+                        *   `11:00 AM` -> `1100`
+                        *   `12:00 PM` -> `1200`
+                        *   `1:00 PM` -> `1300`
+                        *   ...
+                        *   `11:00 PM` -> `2300`
+                        *   `12:00 AM` -> `2400` (This is the tricky one. 12:00 AM is midnight. In 24h clock, midnight starting the day is 00:00, midnight ending the day is 24:00. Given the sequence, `12:00 AM` is likely the last hour of the day, mapped to 2400).
+
+    *   **Refined Plan**:
+        1.  Parse `date` to datetime.
+        2.  Create `dt_strata` by formatting datetime as `%m/%d/%Y`.
+        3.  Create `dow` using `dt.weekday()`? No, `1/1/2014` is Wed. Target `dow` is 3.
+            *   Python `weekday()`: Mon=0, Tue=1, Wed=2.
+            *   Python `dayofweek`: Mon=0, Tue=1, Wed=2.
+            *   Target `dow` for Wed is 3.
+            *   This corresponds to `0=Sunday, 1=Monday, ..., 6=Saturday`.
+            *   Formula: `(dt.weekday() + 1) % 7`?
+                *   Wed (2) -> (2+1)%7 = 3. Correct.
+                *   Sun (6) -> (6+1)%7 = 0. Correct.
+        4.  Map source hourly columns to target `pct_hourly_XXXX` columns.
+        5.  Add `pct_hourly_2500` = 0.
+        6.  Select and order columns as per target.
+
+    *   **Value Transformation Check**:
+        *   If the values are just renamed, why the name `pct`?
+        *   Maybe the source values *are* the percentages?
+        *   I will proceed with direct value assignment (renaming). If normalization was required, there would likely be a clearer signal (e.g., source sums to 100, or target sums to 1). Source sums to ~4.5. Target sums to ~5.5. This inconsistency in the *samples* (which are disjoint) prevents verifying normalization. However, standard practice in these "schema transformation" tasks without explicit arithmetic instructions is to preserve values unless the column name implies a unit conversion (e.g., `ft` to `m`). `pct_hourly` is ambiguous. I will stick to copying values.
+
+    *   **Column Mapping Logic**:
+        *   Create a dictionary mapping source col names to target col names.
+        *   `1:00 AM` -> `pct_hourly_0100`
+        *   `2:00 AM` -> `pct_hourly_0200`
+        *   ...
+        *   `12:00 PM` -> `pct_hourly_1200`
+        *   `1:00 PM` -> `pct_hourly_1300`
+        *   ...
+        *   `11:00 PM` -> `pct_hourly_2300`
+        *   `12:00 AM` -> `pct_hourly_2400`
+
+    *   **Date Formatting**:
+        *   Target `dt_strata`: `1/1/2014`. This is `%m/%d/%Y` (no leading zeros for month/day).
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse the date column
+    df = source.copy()
+    df['date_dt'] = pd.to_datetime(df['date'])
+    
+    # 2. Create dt_strata in M/D/YYYY format
+    df['dt_strata'] = df['date_dt'].dt.strftime('%m/%d/%Y')
+    
+    # 3. Create dow (0=Sunday, 1=Monday, ..., 6=Saturday)
+    # Python weekday(): Mon=0, ..., Sun=6
+    # We want Sun=0, Mon=1, ..., Sat=6
+    # Formula: (weekday() + 1) % 7
+    df['dow'] = (df['date_dt'].dt.weekday() + 1) % 7
+    
+    # 4. Map hourly columns
+    # Define the mapping from source column names to target column names
+    col_mapping = {
+        '1:00 AM': 'pct_hourly_0100',
+        '2:00 AM': 'pct_hourly_0200',
+        '3:00 AM': 'pct_hourly_0300',
+        '4:00 AM': 'pct_hourly_0400',
+        '5:00 AM': 'pct_hourly_0500',
+        '6:00 AM': 'pct_hourly_0600',
+        '7:00 AM': 'pct_hourly_0700',
+        '8:00 AM': 'pct_hourly_0800',
+        '9:00 AM': 'pct_hourly_0900',
+        '10:00 AM': 'pct_hourly_1000',
+        '11:00 AM': 'pct_hourly_1100',
+        '12:00 PM': 'pct_hourly_1200',
+        '1:00 PM': 'pct_hourly_1300',
+        '2:00 PM': 'pct_hourly_1400',
+        '3:00 PM': 'pct_hourly_1500',
+        '4:00 PM': 'pct_hourly_1600',
+        '5:00 PM': 'pct_hourly_1700',
+        '6:00 PM': 'pct_hourly_1800',
+        '7:00 PM': 'pct_hourly_1900',
+        '8:00 PM': 'pct_hourly_2000',
+        '9:00 PM': 'pct_hourly_2100',
+        '10:00 PM': 'pct_hourly_2200',
+        '11:00 PM': 'pct_hourly_2300',
+        '12:00 AM': 'pct_hourly_2400'
+    }
+    
+    # Rename the columns
+    df = df.rename(columns=col_mapping)
+    
+    # 5. Add the constant column pct_hourly_2500
+    df['pct_hourly_2500'] = 0
+    
+    # 6. Select and order the columns as per target schema
+    target_cols = [
+        'dt_strata', 'dow',
+        'pct_hourly_0100', 'pct_hourly_0200', 'pct_hourly_0300', 'pct_hourly_0400',
+        'pct_hourly_0500', 'pct_hourly_0600', 'pct_hourly_0700', 'pct_hourly_0800',
+        'pct_hourly_0900', 'pct_hourly_1000', 'pct_hourly_1100', 'pct_hourly_1200',
+        'pct_hourly_1300', 'pct_hourly_1400', 'pct_hourly_1500', 'pct_hourly_1600',
+        'pct_hourly_1700', 'pct_hourly_1800', 'pct_hourly_1900', 'pct_hourly_2000',
+        'pct_hourly_2100', 'pct_hourly_2200', 'pct_hourly_2300', 'pct_hourly_2400',
+        'pct_hourly_2500'
+    ]
+    
+    result = df[target_cols]
+    
+    # Ensure dtypes match target if necessary
+    # dow is int64
+    result['dow'] = result['dow'].astype('int64')
+    # pct_hourly_2500 is int64
+    result['pct_hourly_2500'] = result['pct_hourly_2500'].astype('int64')
+    # dt_strata is str
+    result['dt_strata'] = result['dt_strata'].astype('str')
+    
+    return result
+```

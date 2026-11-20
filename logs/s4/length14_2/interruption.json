@@ -1,0 +1,14 @@
+{
+  "reason": "Fresh connection recovery after shared transport drop; no completion was received from the stale attempt.",
+  "calendar_wait_seconds": 4406.536689519882,
+  "active_wait_seconds": null,
+  "note": "Calendar interval is a bound for the logged prompt, not recoverable active latency. Received token usage is unknown. Interrupted attempts count as API requests. Includes a separately cancelled overlapping resume request.",
+  "earlier_interruption": {
+    "reason": "Cancelled overlapping resume attempt: main resume reached a case still owned by the disjoint worker. Original disjoint request remains active; no program was replaced.",
+    "calendar_wait_seconds": 2954.3095304965973,
+    "active_wait_seconds": null,
+    "uncounted_requests": 1,
+    "note": "No completion or usage received for the cancelled duplicate attempt; active time unknown. Other requests for this case remain in request_errors.json/response.json."
+  },
+  "uncounted_requests": 1
+}

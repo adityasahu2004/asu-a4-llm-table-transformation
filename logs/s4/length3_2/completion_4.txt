@@ -1,0 +1,81 @@
+**Operator Plan:**
+
+1.  **Parse Date**: Convert the `date` column (format `M/d/yyyy H:mm`) into a pandas `datetime` object.
+2.  **Extract Components**: Derive the calendar date (`YYYY-MM-DD`) and the hour of the day (0-23) from the parsed datetime.
+3.  **Map Hour to Column**: Map the extracted hour to the target column names "Hour 1" through "Hour 24". Note that Hour 1 corresponds to 00:00 (midnight), Hour 2 to 01:00, ..., and Hour 24 to 23:00. This is a 1-based indexing of the 24 hours of the day.
+4.  **Pivot**: Use `pivot_table` or `groupby` + `unstack` to reshape the data from long to wide format. The index is the calendar date, the columns are the "Hour X" labels, and the values are `cerc_logger_1`. Since the input seems to have one reading per unique timestamp (or at least distinct timestamps), we can use `pivot` if unique, or `pivot_table` with `aggfunc='first'` or `mean` if duplicates exist. Given the distinct count of source rows equals the number of unique timestamps implied by the sample, `pivot` is safe if we assume unique (date, hour) pairs. However, looking at the source sample, timestamps are not strictly hourly (e.g., 4:50, 9:30). The target has exactly 24 hours. The source has minute-level data.
+    *   *Correction*: The source has minute-level timestamps (e.g., "4:50"). The target has hourly buckets. We need to aggregate the minute-level data into hourly buckets.
+    *   Let's look at the source data again. "7/28/2019 4:50" -> 4:50 AM. This falls into Hour 5 (04:00-04:59)? Or does it map to the hour it belongs to?
+    *   Standard hourly bucketing: 00:00-00:59 is Hour 1, 01:00-01:59 is Hour 2, etc.
+    *   Let's check the target sample for "05/08/2019".
+        *   Hour 1 (00:00-00:59): 24.25
+        *   Hour 2 (01:00-01:59): 23.375
+        *   ...
+    *   The source data has many rows per day (74848 rows / ~2 years ≈ 100 rows/day? No, 74848 / 730 days ≈ 100 readings/day). Wait, 74848 rows. 2 years is ~730 days. 74848/730 ≈ 102 readings per day. This suggests multiple readings per hour.
+    *   Therefore, we must **aggregate** (likely mean) the readings within each hour for each day.
+5.  **Aggregation**: Group by `date` (calendar day) and `hour` (0-23), calculate the mean of `cerc_logger_1`.
+6.  **Reshape**: Pivot the aggregated data so that rows are dates and columns are hours.
+7.  **Rename Columns**: Rename the integer hours (0-23) to "Hour 1" - "Hour 24".
+8.  **Format Date**: Format the index date as `MM/DD/YYYY`.
+9.  **Reset Index**: Make `date` a column.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse the date string
+    # Format: M/d/yyyy H:mm
+    source = source.copy()
+    source['parsed_dt'] = pd.to_datetime(source['date'], format='%m/%d/%Y %I:%M %p')
+    
+    # Handle cases where AM/PM might be missing or format is slightly different
+    # The sample shows "4:50", "9:30", "18:50". 
+    # "18:50" implies 24-hour format. "4:50" could be 4:50 AM.
+    # Let's look at the sample: "1/1/2021 0:00". This is 24-hour format.
+    # "11/2/2019 18:50". This is 24-hour format.
+    # So the format is likely '%m/%d/%Y %H:%M'.
+    
+    # Re-parse with 24-hour format
+    source['parsed_dt'] = pd.to_datetime(source['date'], format='%m/%d/%Y %H:%M')
+    
+    # 2. Extract calendar date and hour
+    source['cal_date'] = source['parsed_dt'].dt.date
+    source['hour'] = source['parsed_dt'].dt.hour
+    
+    # 3. Aggregate by date and hour
+    # We need to group by calendar date and hour, then mean the values
+    agg_df = source.groupby(['cal_date', 'hour'])['cerc_logger_1'].mean().reset_index()
+    
+    # 4. Pivot to wide format
+    # Index: cal_date, Columns: hour, Values: cerc_logger_1
+    pivot_df = agg_df.pivot(index='cal_date', columns='hour', values='cerc_logger_1')
+    
+    # 5. Rename columns from 0-23 to "Hour 1" - "Hour 24"
+    pivot_df.columns = [f'Hour {h+1}' for h in pivot_df.columns]
+    
+    # 6. Sort columns by hour number to ensure correct order
+    # The column names are "Hour 1", "Hour 2", ... "Hour 24"
+    # Sorting them lexicographically might fail for "Hour 10" vs "Hour 2".
+    # But we generated them in order. Let's ensure they are in order 1-24.
+    pivot_df = pivot_df[[f'Hour {h}' for h in range(1, 25)]]
+    
+    # 7. Reset index to make date a column
+    result = pivot_df.reset_index()
+    
+    # 8. Format date as MM/DD/YYYY
+    result['date'] = pd.to_datetime(result['cal_date']).dt.strftime('%m/%d/%Y')
+    
+    # 9. Drop the helper column if it exists (cal_date is now index or dropped)
+    # Since we reset index, 'cal_date' is now a column named 'cal_date' or 'date' if we renamed?
+    # In step 7, reset_index() creates a column from the index. The index name was 'cal_date'.
+    # So the column is 'cal_date'. We want it to be 'date'.
+    
+    result = result.rename(columns={'cal_date': 'date'})
+    
+    # Select only the required columns
+    final_cols = ['date'] + [f'Hour {h}' for h in range(1, 25)]
+    result = result[final_cols]
+    
+    return result
+```

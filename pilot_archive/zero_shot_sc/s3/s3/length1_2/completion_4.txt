@@ -1,0 +1,56 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `date` column from string format (`MM/DD/YYYY`) to pandas `datetime` objects.
+2.  **Extract Day of Week and Date Components**: Determine the day of the week (abbreviated, e.g., "Sat") and the month/day/year components for formatting.
+3.  **Format Date Column**: Create a new column `cst` formatted as `"Day MM/DD/YYYY"` (e.g., "Sat 01/01/2011"). Note: The sample shows zero-padded months and days (e.g., `01/01`), so we must ensure zero-padding in the format string.
+4.  **Rename Value Columns**: Map the source columns `value1` through `value24` to target column names `1:00` through `24:00`.
+5.  **Select and Order Columns**: Select the new `cst` column and the renamed value columns in the correct order.
+6.  **Handle Missing Data/Rows**: The source has 182 rows and the target has 183 rows. The target sample starts at `Sat 01/01/2011` and ends at `Sat 07/02/2011` (based on the provided sample data range, though the source sample starts at `7/3/2011`). The transformation logic must be general: it processes whatever rows are in the source. The discrepancy in row count in the schema description (182 vs 183) likely implies the evaluation source might have slightly different dates or the sample provided is a subset. However, looking closely at the target sample:
+    *   First row: `Sat 01/01/2011`
+    *   Last row: `Sat 07/02/2011`
+    *   Source sample starts: `7/3/2011`
+    *   This suggests the target contains *all* dates for the period (likely weekly aggregates or specific dates), while the source sample provided is just a slice.
+    *   Crucially, the task is to transform the *source* DataFrame. We do not generate new rows. We simply transform the existing rows. The row count difference in the schema metadata (182 vs 183) might be due to the evaluation source having one more row than the training sample, or the target including a date not present in the specific training sample slice shown. The code must simply process the rows present in `source`.
+    *   Wait, let's look at the target sample data again. The first row is `Sat 01/01/2011`. The last is `Sat 07/02/2011`. The source sample starts `7/3/2011`. This implies the target data *precedes* the source sample data in time? No, `1/1/2011` is before `7/3/2011`.
+    *   Actually, usually these problems involve a direct mapping. If the source has rows, we transform them. If the target has more rows, it might imply an outer join or index alignment, but we don't have a calendar table.
+    *   Let's re-read carefully: "Compute the result only from the source DataFrame." This means we cannot generate rows that aren't in the source. The discrepancy in the schema metadata (182 vs 183) is likely an artifact of the specific training/evaluation split or a slight mismatch in the problem description's sample vs full data. I will proceed by transforming the rows present in the source. If the evaluation source has 183 rows, the code will produce 183 rows.
+7.  **Final Output**: Return the DataFrame with columns `['cst', '1:00', ..., '24:00']`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    """
+    Transforms the source hourly load data into a formatted daily/weekly view.
+    """
+    # Create a copy to avoid modifying the original
+    df = source.copy()
+    
+    # 1. Parse the date column
+    # Source format: MM/DD/YYYY (e.g., "7/3/2011")
+    df['date_parsed'] = pd.to_datetime(df['date'], format='%m/%d/%Y')
+    
+    # 2. Format the 'cst' column
+    # Target format: "Day MM/DD/YYYY" (e.g., "Sat 01/01/2011")
+    # Day abbreviation (3 chars), Month (zero-padded), Day (zero-padded), Year
+    df['cst'] = df['date_parsed'].dt.strftime('%a %m/%d/%Y')
+    
+    # 3. Rename value columns from 'value1'...'value24' to '1:00'...'24:00'
+    rename_mapping = {}
+    for i in range(1, 25):
+        rename_mapping[f'value{i}'] = f'{i}:00'
+    
+    df = df.rename(columns=rename_mapping)
+    
+    # 4. Select and order the columns
+    # Target columns: 'cst', '1:00', '2:00', ..., '24:00'
+    time_cols = [f'{i}:00' for i in range(1, 25)]
+    final_cols = ['cst'] + time_cols
+    
+    # Ensure we only select columns that exist and are in the correct order
+    # The source has value1-24, which are now renamed.
+    result = df[final_cols].reset_index(drop=True)
+    
+    return result
+```

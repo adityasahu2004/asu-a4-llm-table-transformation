@@ -1,0 +1,141 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `Date` column from string format (`M/D/YYYY`) to pandas datetime objects.
+2.  **Generate Target Dates**: The target data contains dates that are not present in the source (e.g., `01/01/2013` vs source start `07/03/2013`). The target dates appear to be a regular sequence (likely bi-weekly or similar) covering a range that extends before and after the source data.
+    *   Observation: The source has 182 rows, target has 183 rows.
+    *   Observation: The target dates in the sample are `Tue 01/01/2013`, `Thu 01/17/2013`, `Sun 02/03/2013`, etc. These are roughly 2 weeks apart.
+    *   Strategy: Since we cannot hardcode the specific target dates, we must infer the grid. However, looking closely at the data values, the target values for dates *present* in the source (like `7/3/2013`? No, `7/3` is a Thursday. The target sample ends with `Tue 07/02/2013`. The source starts with `7/3/2013`.
+    *   Let's check the relationship between source and target rows.
+        *   Source `7/3/2013` (Thu) values: `0.56, 0.51...`
+        *   Target `Tue 07/02/2013` values: `0.66, 0.61...`
+        *   These are different.
+        *   Source `7/19/2013` (Fri) values: `0.81, 0.75...`
+        *   Is there a target row for `7/19`? The target sample ends at `7/02`.
+    *   Actually, let's look at the distinct counts. Source `Date` has 182 distinct values. Target `cst` has 183 distinct values.
+    *   The target dates seem to be a fixed calendar grid. The source dates are a subset or a different grid.
+    *   Wait, the problem states "Compute the result only from the source DataFrame". This implies we shouldn't generate arbitrary dates outside the source unless we can derive them.
+    *   Let's re-read the sample carefully.
+        *   Source first date: `7/3/2013`. Last: `12/31/2013`.
+        *   Target first date: `01/01/2013`. Last: `07/02/2013` (in sample).
+        *   The target sample *only* shows dates from Jan to July. The source sample *only* shows dates from July to Dec.
+        *   This suggests the transformation might involve **interpolation** or **alignment** to a standard grid, OR the source provided in the "evaluation" will contain the necessary dates to map to the target grid.
+        *   However, usually in these tasks, if the target has dates not in the source, and we can't fetch external data, there might be a misunderstanding of the "source".
+        *   Let's look at the column names. Source: `1` to `24`. Target: `1:00` to `24:00`. This is a simple rename.
+        *   Let's look at the values.
+            *   Source `7/3/2013` (Thu): `0.56` (col 1).
+            *   Target `Tue 07/02/2013`: `0.66` (col 1:00).
+            *   Target `Thu 01/17/2013`: `0.68`.
+        *   Is it possible the target is just the source data, but the sample provided in the prompt is misleading regarding the *overlap*?
+        *   Let's check if the target dates correspond to the source dates shifted or formatted differently.
+        *   Source `7/3/2013` is a Thursday. Target `Tue 07/02/2013` is a Tuesday.
+        *   Source `7/19/2013` is a Friday.
+        *   Source `8/4/2013` is a Sunday.
+        *   Target `Sun 02/03/2013`.
+        *   The days of the week match the dates.
+        *   The key insight might be that the **Target** represents a specific set of dates (e.g., every 2 weeks on specific days) and the **Source** contains data for those same dates, but perhaps the sample provided in the JSON is just a subset of the full evaluation data?
+        *   No, the prompt says "Source row count describes a training sample only".
+        *   If the evaluation source contains different rows, we must assume the evaluation source *will* contain the rows corresponding to the target dates, or we need to interpolate.
+        *   However, a simpler explanation: The target column `cst` is formatted as `DayOfWeek MM/DD/YYYY`. The source `Date` is `MM/DD/YYYY`.
+        *   If the evaluation source contains the exact same dates as the target (just formatted differently), we just need to:
+            1.  Parse source dates.
+            2.  Format them as `DayOfWeek MM/DD/YYYY`.
+            3.  Rename columns `1`..`24` to `1:00`..`24:00`.
+        *   Let's verify if the values match for any overlapping date.
+            *   The samples don't overlap in time (Source: Jul-Dec, Target: Jan-Jul).
+            *   But wait, look at the distinct counts. Source `Date` has 182 distinct. Target `cst` has 183 distinct.
+            *   If the transformation is just formatting and renaming, the row count should be identical. 182 != 183.
+            *   This implies one row is added or removed.
+            *   Or, the source in the *evaluation* will have 183 rows?
+            *   Let's look at the dates again.
+            *   Source: `7/3/2013` to `12/31/2013`.
+            *   Target: `1/1/2013` to `7/2/2013` (sample).
+            *   It is highly likely that the **full** dataset (not just the sample) covers the whole year. The source sample is Jul-Dec. The target sample is Jan-Jul.
+            *   If the evaluation source contains the full year (or the specific dates required), the transformation is likely just:
+                1.  Parse `Date`.
+                2.  Format `Date` to `cst` string: `%a %m/%d/%Y` (e.g., `Tue 01/01/2013`). Note: `Tue` is 3-letter abbreviation.
+                3.  Rename numeric columns `1`-`24` to `1:00`-`24:00`.
+                4.  Drop `Class` column.
+                5.  Sort by date? The target sample is sorted by date.
+            *   Why the row count difference (182 vs 183)?
+                *   Maybe the source has a duplicate or missing date in the sample?
+                *   Or maybe the target includes a date not in the source?
+                *   Given the constraint "Compute the result only from the source DataFrame", we cannot generate new rows. We can only transform existing ones.
+                *   Therefore, the assumption is that the **evaluation source** will contain the rows that map to the target. The discrepancy in the *sample* row counts (182 vs 183) might be due to the sample being a partial view of a larger dataset where the source actually has 183 rows, or the target has 182.
+                *   Actually, 182 days is exactly half a year (non-leap). 2013 is not a leap year.
+                *   If the data is daily, 182 rows = ~6 months.
+                *   Source sample: Jul 3 to Dec 31. That's about 181 days.
+                *   Target sample: Jan 1 to Jul 2. That's about 182 days.
+                *   It seems the Source and Target are complementary halves of the year in the sample, but the *full* evaluation source likely contains all dates.
+                *   The transformation logic remains: Format date, rename columns, drop unused columns.
+
+3.  **Refined Plan**:
+    *   Parse `Date` column to datetime.
+    *   Create new column `cst` by formatting the datetime as `"%a %m/%d/%Y"`.
+    *   Select columns `cst` and the numeric columns `1` through `24`.
+    *   Rename numeric columns to `f"{i}:00"` for `i` in 1..24.
+    *   Sort by `cst` (or the underlying datetime) to ensure order, though the target sample is sorted.
+    *   Return the DataFrame.
+
+4.  **Assumptions**:
+    *   The source DataFrame in evaluation contains the dates corresponding to the target.
+    *   The `Class` column is dropped.
+    *   The date format in target is 3-letter weekday abbreviation, followed by space, then MM/DD/YYYY.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse the Date column
+    df = source.copy()
+    df['Date'] = pd.to_datetime(df['Date'], format='%m/%d/%Y')
+    
+    # 2. Create the 'cst' column with the specific format: "DayOfWeek MM/DD/YYYY"
+    # %a gives abbreviated weekday name (e.g., Tue)
+    df['cst'] = df['Date'].dt.strftime('%a %m/%d/%Y')
+    
+    # 3. Prepare the numeric columns
+    # Source columns are '1' through '24'
+    numeric_cols = [str(i) for i in range(1, 25)]
+    
+    # 4. Select the required columns: 'cst' and the numeric ones
+    # We drop 'Class' and the original 'Date'
+    result = df[['cst'] + numeric_cols].copy()
+    
+    # 5. Rename numeric columns to '1:00', '2:00', ..., '24:00'
+    new_col_names = {str(i): f"{i}:00" for i in range(1, 25)}
+    result = result.rename(columns=new_col_names)
+    
+    # 6. Sort by the underlying date to match the target order (ascending)
+    # We can sort by the 'cst' string if it's sortable, but safer to use the datetime
+    # However, 'cst' is the only date-like column left. 
+    # Let's add a temporary sort key or sort by 'cst' if it works.
+    # "Tue 01/01/2013" vs "Thu 01/17/2013". String sort might fail if months/days aren't zero-padded consistently in a way that sorts correctly?
+    # MM/DD/YYYY is zero-padded in the format string? 
+    # pd.to_datetime('7/3/2013') -> 2013-07-03. 
+    # strftime('%m/%d/%Y') -> '07/03/2013'.
+    # The target sample shows '01/01/2013'.
+    # String sorting of "Tue 01/01/2013" works if the date part is ISO-like or consistent.
+    # MM/DD/YYYY is not ISO (YYYY-MM-DD). 
+    # "01/01/2013" < "01/17/2013" < "02/03/2013".
+    # But "Tue" vs "Thu". 
+    # It is safer to sort by the original datetime before dropping it, or reconstruct it.
+    
+    # Let's sort by the 'cst' column? 
+    # Actually, let's just sort by the index if the source was ordered, or better:
+    # We can sort by the 'cst' string if we assume the format is consistent.
+    # But to be robust, let's sort by the datetime value we parsed.
+    
+    # Re-attach datetime for sorting
+    df['Date'] = pd.to_datetime(df['Date'], format='%m/%d/%Y')
+    df = df.sort_values('Date')
+    
+    # Now select and rename
+    result = df[['cst'] + numeric_cols].copy()
+    result = result.rename(columns=new_col_names)
+    
+    # Reset index to clean up
+    result = result.reset_index(drop=True)
+    
+    return result
+```

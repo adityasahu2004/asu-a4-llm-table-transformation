@@ -1,0 +1,24 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `Date` column from the source format (e.g., "7/3/2013") to a pandas datetime object.
+2.  **Format Date**: Convert the parsed datetime to the target string format "YYYY-MM-DD 00:00:00" and assign to the `date` column.
+3.  **Rename Columns**: Map the source integer hour columns ("1" through "24") to the target column names ("value1" through "value24").
+4.  **Select and Return**: Select the new `date` column and the renamed value columns, preserving the row order (which appears to be chronological or consistent with the sample, though the distinct count difference in `date` suggests the evaluation set might have different dates, the transformation is row-wise). The target row count (183) vs source (182) in the sample description is likely due to the sample being a subset or slight variation in the training/eval split description, but the transformation logic remains deterministic per row.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse and format the date column
+    # Source format is M/D/YYYY or MM/DD/YYYY
+    dt = pd.to_datetime(source['Date'], format='%m/%d/%Y')
+    
+    # Create output dataframe
+    out = pd.DataFrame()
+    out['date'] = dt.dt.strftime('%Y-%m-%d 00:00:00')
+    
+    # 2. Rename hourly columns from "1"..."24" to "value1"..."value24"
+    for h in range(1, 25):
+        out[f'value{h}'] = source[str(h)]
+        
+    return out
+```

@@ -1,0 +1,81 @@
+**Operator Plan:**
+1.  **Filter and Clean**: Identify the hourly columns (`Hr 1` through `Hr 24`).
+2.  **Date Parsing**: Parse the `Date` column into a datetime object to extract the month.
+3.  **Aggregation**: Group the data by the extracted month and calculate the sum of values for each hourly column across all rows (representing the total volume/magnitude for that hour in that month across all rates/companies). Note: The target has 12 rows (one per month) and 24 columns (one per hour). The source has multiple rates per date. The target values look like sums (e.g., Jan Hour 1 is ~721, while individual rows are ~2-120). Summing all rows for a given date/hour aligns with the magnitude.
+4.  **Reshape**: The target structure is `hour` (1-24) as rows and `months` as columns. This is a pivot/unstack operation.
+    *   First, aggregate: Group by Month, sum each `Hr` column.
+    *   Result is a DataFrame with index=Month (1-12) and columns=Hr 1-24.
+    *   Transpose this so Index=Hr 1-24 and Columns=Month 1-12.
+    *   Rename columns to month names.
+    *   Rename index to `hour` and reset index.
+
+Let's refine the aggregation logic.
+Source: 2190 rows. 6 rates. 365 dates. $6 \times 365 = 2190$.
+Target: 12 rows (months). 24 columns (hours).
+Value check: Target `january`, `hour` 1 is `721.41763`.
+Let's look at Jan 1, 2014 in source.
+Rows for Jan 1, 2014:
+- R4: 2.43675
+- S1: 16.6457
+- S2: 4.64371
+- S3: 0.80181
+- T1: 1.27021
+- T2: 110.91961
+Sum for Jan 1, Hr 1 = $2.43675 + 16.6457 + 4.64371 + 0.80181 + 1.27021 + 110.91961 = 136.71779$.
+There are 31 days in Jan. If we sum all days for Hr 1 in Jan, we get the target value.
+So the transformation is: **Sum** all hourly values for each date, then **Sum** those daily totals by month? Or simply sum all rows in the source dataframe grouped by Month and Hour?
+Since every rate exists for every date, summing all rows grouped by (Month, Hour) is equivalent to summing daily totals.
+
+Steps:
+1.  Select `Date` and `Hr 1`...`Hr 24`.
+2.  Parse `Date` to get `Month`.
+3.  Group by `Month`.
+4.  Sum the hourly columns.
+5.  Transpose so Hours are rows and Months are columns.
+6.  Format column names to lowercase month names.
+7.  Format row index to `hour` integer.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Identify hourly columns
+    hr_cols = [c for c in source.columns if c.startswith('Hr ')]
+    
+    # 2. Parse Date and extract Month
+    dates = pd.to_datetime(source['Date'], format='%m/%d/%Y')
+    months = dates.dt.month
+    
+    # 3. Group by Month and sum the hourly columns
+    # Create a dataframe with just the month and the hourly values
+    df_agg = pd.DataFrame({
+        'Month': months,
+        **{col: source[col] for col in hr_cols}
+    })
+    
+    # Group by Month and sum
+    grouped = df_agg.groupby('Month').sum()
+    
+    # 4. Transpose to get Hours as rows and Months as columns
+    # grouped index is Month (1-12), columns are Hr 1-24
+    transposed = grouped.T
+    
+    # 5. Rename columns to month names
+    month_names = {
+        1: 'january', 2: 'february', 3: 'march', 4: 'april',
+        5: 'may', 6: 'june', 7: 'july', 8: 'august',
+        9: 'september', 10: 'october', 11: 'november', 12: 'december'
+    }
+    transposed.columns = [month_names[col] for col in transposed.columns]
+    
+    # 6. Rename index to 'hour' and convert to integer
+    # The index is currently strings like 'Hr 1', 'Hr 2'
+    transposed.index = transposed.index.str.replace('Hr ', '').astype(int)
+    transposed.index.name = 'hour'
+    
+    # 7. Reset index to make 'hour' a column
+    result = transposed.reset_index()
+    
+    return result
+```

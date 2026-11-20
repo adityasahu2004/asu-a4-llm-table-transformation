@@ -1,0 +1,101 @@
+**Operator Plan:**
+
+1.  **Parse Date:** Parse the `date` column from string format (e.g., "7/3/2014") to datetime objects.
+2.  **Format Date:** Convert the parsed datetime to the target string format `%a %m/%d/%Y` (e.g., "Wed 07/03/2014") and assign to column `cst`.
+3.  **Map Hour Columns:** The source has 24 hourly columns labeled in 12-hour format with AM/PM (e.g., "1:00 AM", "12:00 PM"). The target requires 24 columns labeled in 24-hour format ("1:00" to "24:00").
+    *   "1:00 AM" -> "1:00"
+    *   ...
+    *   "11:00 AM" -> "11:00"
+    *   "12:00 PM" -> "12:00" (Note: Source has "12:00 PM" and "12:00 AM". Standard 12-hour clock: 12:00 AM is midnight/start of day, 12:00 PM is noon. However, looking at the source sample:
+        *   Row 0: "1:00 AM"=1.03, ..., "12:00 AM"=0.15, "1:00 PM"=0.17, ..., "12:00 PM"=0.30.
+        *   Wait, let's look at the target sample.
+        *   Target Row 0 ("Wed 01/01/2014"): "1:00"=0.40, ..., "12:00"=0.37, "13:00"=0.39, ..., "24:00"=1.14.
+        *   Let's check the mapping logic. Usually:
+            *   1:00 AM -> 1:00
+            *   2:00 AM -> 2:00
+            *   ...
+            *   11:00 AM -> 11:00
+            *   12:00 PM -> 12:00 (Noon)
+            *   1:00 PM -> 13:00
+            *   ...
+            *   11:00 PM -> 23:00
+            *   12:00 AM -> 24:00 (Midnight end of day) OR 0:00? The target column is "24:00".
+    *   Let's verify this mapping with the data.
+        *   Source Row 0 ("7/3/2014"):
+            *   1:00 AM: 1.035932
+            *   ...
+            *   12:00 AM: 0.153621
+            *   1:00 PM: 0.170029
+            *   ...
+            *   12:00 PM: 0.306257
+        *   Target Row 0 ("Wed 01/01/2014"): This is a different date. I cannot cross-reference values directly because the dates are different.
+        *   However, the schema implies a standard 24-hour period.
+        *   Standard mapping:
+            *   `1:00 AM` -> `1:00`
+            *   `2:00 AM` -> `2:00`
+            *   ...
+            *   `11:00 AM` -> `11:00`
+            *   `12:00 PM` -> `12:00`
+            *   `1:00 PM` -> `13:00`
+            *   ...
+            *   `11:00 PM` -> `23:00`
+            *   `12:00 AM` -> `24:00`
+4.  **Construct Output:** Create a new DataFrame with columns `cst`, `1:00` through `24:00` populated from the mapped source columns.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    dates = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    
+    # Format the date to 'cst' column: e.g., "Wed 01/01/2014"
+    out = pd.DataFrame(index=source.index)
+    out['cst'] = dates.dt.strftime('%a %m/%d/%Y')
+    
+    # Define the mapping from source 12-hour AM/PM columns to target 24-hour columns
+    # Source columns:
+    # 1:00 AM -> 1:00
+    # 2:00 AM -> 2:00
+    # ...
+    # 11:00 AM -> 11:00
+    # 12:00 PM -> 12:00
+    # 1:00 PM -> 13:00
+    # ...
+    # 11:00 PM -> 23:00
+    # 12:00 AM -> 24:00
+    
+    mapping = {
+        '1:00 AM': '1:00',
+        '2:00 AM': '2:00',
+        '3:00 AM': '3:00',
+        '4:00 AM': '4:00',
+        '5:00 AM': '5:00',
+        '6:00 AM': '6:00',
+        '7:00 AM': '7:00',
+        '8:00 AM': '8:00',
+        '9:00 AM': '9:00',
+        '10:00 AM': '10:00',
+        '11:00 AM': '11:00',
+        '12:00 PM': '12:00',
+        '1:00 PM': '13:00',
+        '2:00 PM': '14:00',
+        '3:00 PM': '15:00',
+        '4:00 PM': '16:00',
+        '5:00 PM': '17:00',
+        '6:00 PM': '18:00',
+        '7:00 PM': '19:00',
+        '8:00 PM': '20:00',
+        '9:00 PM': '21:00',
+        '10:00 PM': '22:00',
+        '11:00 PM': '23:00',
+        '12:00 AM': '24:00'
+    }
+    
+    # Assign the values from source to the new columns
+    for src_col, tgt_col in mapping.items():
+        out[tgt_col] = source[src_col]
+        
+    return out.reset_index(drop=True)
+```

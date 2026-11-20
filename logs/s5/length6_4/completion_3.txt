@@ -1,0 +1,69 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `date` column from the source format (`M/D/YYYY` or `MM/DD/YYYY`) into a pandas datetime object.
+2.  **Format Date**: Convert the parsed datetime into the target string format (`YYYY-MM-DD 00:00:00`) and assign to the new `Date` column.
+3.  **Map Hour Columns**: The source has 24 hour columns with AM/PM labels (`1:00 AM` ... `11:00 AM`, `12:00 AM` ... `11:00 PM`, `12:00 PM`). These need to be mapped to sequential 24-hour indices (1-24) corresponding to `Hr 1` through `Hr 24`.
+    *   `1:00 AM` -> Hr 1
+    *   ...
+    *   `11:00 AM` -> Hr 11
+    *   `12:00 AM` (Noon) -> Hr 12
+    *   `1:00 PM` -> Hr 13
+    *   ...
+    *   `11:00 PM` -> Hr 23
+    *   `12:00 PM` (Midnight/End of day) -> Hr 24
+    *   *Note*: In standard 12-hour clock notation often used in these datasets, `12:00 AM` is Noon (12:00) and `12:00 PM` is Midnight (24:00/00:00). Looking at the sample data:
+        *   Source `1:00 AM` corresponds to early morning.
+        *   Source `12:00 AM` is between 11:00 AM and 1:00 PM. This is Noon (Hour 12).
+        *   Source `12:00 PM` is after 11:00 PM. This is Midnight (Hour 24).
+4.  **Construct Output**: Create a new DataFrame with the formatted `Date` and the 24 renamed hour columns (`Hr 1` to `Hr 24`).
+5.  **Reset Index**: Ensure the output has a default integer index.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    dates = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    
+    # Format date as required
+    out = pd.DataFrame(index=source.index)
+    out['Date'] = dates.dt.strftime('%Y-%m-%d 00:00:00')
+    
+    # Map source hour columns to target hour columns
+    # Source mapping based on standard 12h clock interpretation in this context:
+    # 1:00 AM -> 1, ..., 11:00 AM -> 11
+    # 12:00 AM -> 12 (Noon)
+    # 1:00 PM -> 13, ..., 11:00 PM -> 23
+    # 12:00 PM -> 24 (Midnight)
+    
+    hour_mapping = {
+        '1:00 AM': 1,
+        '2:00 AM': 2,
+        '3:00 AM': 3,
+        '4:00 AM': 4,
+        '5:00 AM': 5,
+        '6:00 AM': 6,
+        '7:00 AM': 7,
+        '8:00 AM': 8,
+        '9:00 AM': 9,
+        '10:00 AM': 10,
+        '11:00 AM': 11,
+        '12:00 AM': 12, # Noon
+        '1:00 PM': 13,
+        '2:00 PM': 14,
+        '3:00 PM': 15,
+        '4:00 PM': 16,
+        '5:00 PM': 17,
+        '6:00 PM': 18,
+        '7:00 PM': 19,
+        '8:00 PM': 20,
+        '9:00 PM': 21,
+        '10:00 PM': 22,
+        '11:00 PM': 23,
+        '12:00 PM': 24  # Midnight
+    }
+    
+    for src_col, hr_idx in hour_mapping.items():
+        out[f'Hr {hr_idx}'] = source[src_col]
+        
+    return out.reset_index(drop=True)
+```

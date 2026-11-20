@@ -1,0 +1,25 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `Date` column from string format (e.g., "7/3/2013") to a pandas datetime object.
+2.  **Format Date**: Convert the datetime object to the target string format `YYYY-MM-DD HH:MM:SS` (specifically `2013-01-01 00:00:00`) and assign to `date`.
+3.  **Rename Columns**: Map the source columns `1` through `24` to target columns `value1` through `value24`.
+4.  **Select Columns**: Construct the final DataFrame containing only the `date` column and the 24 renamed value columns, preserving the original row order.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date string to datetime
+    dates = pd.to_datetime(source['Date'])
+    
+    # Format to YYYY-MM-DD HH:MM:SS
+    formatted_dates = dates.dt.strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Create the result dataframe starting with the date column
+    result = pd.DataFrame({'date': formatted_dates}, index=source.index)
+    
+    # Rename and add the 24 hourly value columns
+    for h in range(1, 25):
+        result[f'value{h}'] = source[h]
+        
+    return result.reset_index(drop=True)
+```

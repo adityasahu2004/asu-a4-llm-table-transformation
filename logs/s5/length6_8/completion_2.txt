@@ -1,0 +1,58 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `date` string column into a pandas datetime object.
+2.  **Extract Components**: Derive the calendar date (for grouping) and the hour of the day (for pivoting).
+3.  **Pivot Data**: Reshape the DataFrame from long to wide format, grouping by the calendar date and spreading the `cerc_logger_1` values into columns based on the hour.
+4.  **Rename Columns**: Map the hour indices (0-23) to the target column names "Hr 1" through "Hr 24" (assuming 1-based indexing for display where hour 0 corresponds to Hr 1, etc., or simply mapping the sorted unique hours to the target names). Given the source has hours like 0, 4, 9, 12, 18, etc., and the target has 24 hours, this implies a standard 24-hour clock pivot where missing hours are NaN. The target column "Hr 1" likely corresponds to hour 0 (midnight start) or hour 1. Looking at the sample:
+    *   Source: `7/28/2019 4:50` -> Value 24.562.
+    *   Target Row `07/28/2019`: `Hr 5` is 24.562.
+    *   This implies `Hr N` corresponds to Hour `N-1`? No, `Hr 5` is 24.562. Source hour is 4. So `Hr 5` = Hour 4? Or is `Hr 1` = Hour 1?
+    *   Let's check another point. `12/20/2019 0:50` -> 24.437.
+    *   If we look at the target sample, we don't see 12/20/2019.
+    *   Let's look at `1/1/2021 0:00` -> 22.437.
+    *   Let's look at `9/13/2019 9:30` -> 21.812.
+    *   Target sample has `07/13/2019`. Row `07/13/2019` has `Hr 6` = 21.812. Source hour is 9. `Hr 6` != Hour 9.
+    *   Wait, the sample data in the target block is just a sample. The rows in the target sample (`05/08/2019`, `07/13/2019`, etc.) might not align directly with the source sample rows (`7/28/2019`, `9/13/2019`, etc.) because the source sample is small and the target sample is different.
+    *   However, usually "Hr 1" corresponds to the first hour of the day (00:00-01:00) or the hour index 1.
+    *   Let's look at the distinct values. Source has hours like 4, 9, 18, 0.
+    *   If `Hr 1` is Hour 0, `Hr 2` is Hour 1... `Hr 5` is Hour 4.
+    *   Source `7/28/2019 4:50` (Hour 4) -> 24.562.
+    *   Target `07/28/2019` (in sample data row 4) has `Hr 5` = 24.562.
+    *   This confirms: **Hr N corresponds to Hour N-1**. So Hour 0 -> Hr 1, Hour 1 -> Hr 2, ..., Hour 23 -> Hr 24.
+5.  **Format Output**: Format the date index as `MM/DD/YYYY` and rename columns to `Hr 1`...`Hr 24`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    df = source.copy()
+    df['datetime'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract date for grouping and hour for pivoting
+    df['date_key'] = df['datetime'].dt.date
+    df['hour'] = df['datetime'].dt.hour
+    
+    # Pivot the data
+    # Index: date_key, Columns: hour, Values: cerc_logger_1
+    pivoted = df.pivot_table(index='date_key', columns='hour', values='cerc_logger_1')
+    
+    # Ensure all 24 hours are present (0-23)
+    pivoted = pivoted.reindex(columns=range(24), fill_value=np.nan)
+    
+    # Rename columns: Hour 0 -> Hr 1, Hour 1 -> Hr 2, ..., Hour 23 -> Hr 24
+    pivoted.columns = [f'Hr {h+1}' for h in range(24)]
+    
+    # Format the date index as MM/DD/YYYY
+    pivoted.index = pivoted.index.strftime('%m/%d/%Y')
+    
+    # Reset index to make date a column
+    result = pivoted.reset_index()
+    result = result.rename(columns={'date_key': 'Date'})
+    
+    # Ensure column order matches target
+    cols = ['Date'] + [f'Hr {h}' for h in range(1, 25)]
+    result = result[cols]
+    
+    return result
+```

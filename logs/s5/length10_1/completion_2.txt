@@ -1,0 +1,356 @@
+Operator plan:
+1. Parse the `time` column into a datetime object.
+2. Create `datetime` string in `YYYY-MM-DD HH:MM:SS` format.
+3. Compute `hvac` as the sum of heating, cooling, fans, and pumps electricity usage. Specifically:
+   `electricity_heating_kwh` + `electricity_cooling_kwh` + `electricity_fans_heating_kwh` + `electricity_fans_cooling_kwh` + `electricity_pumps_heating_kwh` + `electricity_central_system_pumps_heating_kwh` + `electricity_pumps_cooling_kwh` + `electricity_central_system_pumps_cooling_kwh`.
+   Note: `electricity_central_system_heating_kwh` and `electricity_central_system_cooling_kwh` are usually 0 or small, but looking at the sample data, `electricity_heating_kwh` seems to be the main heating component. Let's look closer.
+   Source columns:
+   - `electricity_heating_kwh`
+   - `electricity_central_system_heating_kwh`
+   - `electricity_cooling_kwh`
+   - `electricity_central_system_cooling_kwh`
+   - `electricity_fans_heating_kwh`
+   - `electricity_fans_cooling_kwh`
+   - `electricity_pumps_heating_kwh`
+   - `electricity_central_system_pumps_heating_kwh`
+   - `electricity_pumps_cooling_kwh`
+   - `electricity_central_system_pumps_cooling_kwh`
+   
+   Let's check the first sample row for `hvac`.
+   Target `hvac` for `2012-07-02 00:00:00` (last row of target sample, corresponding to last row of source sample `2012-07-02 00:15:00.000`? No, the target sample starts with `2012-01-01`. The source sample starts with `2012-07-02`. The rows are likely sorted by time in the full dataset, but the samples are just arbitrary subsets.
+   Let's look at the last row of the source sample: `2013-01-01 00:00:00.000`.
+   Values:
+   heating: 197541.8097170739
+   central heating: 13892.5569739444
+   cooling: 7648.408761381
+   central cooling: 28.5421719289
+   fans heating: 103788.6239033672
+   fans cooling: 1947.57886647
+   pumps heating: 21.3228615048
+   central pumps heating: 351.2026764464
+   pumps cooling: 0.0
+   central pumps cooling: 32.926067159
+   
+   Sum = 197541.81 + 13892.56 + 7648.41 + 28.54 + 103788.62 + 1947.58 + 21.32 + 351.20 + 0 + 32.93 = 325252.97.
+   
+   Let's look at the target sample. The last row is `2012-07-02 00:00:00`.
+   Source row for `2012-07-02 00:15:00.000` (first row of source sample):
+   heating: 0.13
+   central heating: 0.0
+   cooling: 406631.29
+   central cooling: 2106.66
+   fans heating: 1.08
+   fans cooling: 83543.38
+   pumps heating: 0.00014
+   central pumps heating: 0.0
+   pumps cooling: 0.0
+   central pumps cooling: 398.35
+   
+   Sum = 0.13 + 0 + 406631.29 + 2106.66 + 1.08 + 83543.38 + 0 + 0 + 0 + 398.35 = 492680.89.
+   Target `hvac` for `2012-07-02 00:00:00` is `505761.52`. This doesn't match.
+   
+   Let's re-read the target sample. The last row is `2012-07-02 00:00:00`.
+   Is there a source row for `2012-07-02 00:00:00`? The source sample has `2012-07-02 00:15:00`.
+   The target sample first row is `2012-01-01 00:15:00`.
+   
+   Let's try to match `2012-07-02 00:15:00` from source to target.
+   Source `2012-07-02 00:15:00`:
+   heating: 0.13
+   central heating: 0.0
+   cooling: 406631.29
+   central cooling: 2106.66
+   fans heating: 1.08
+   fans cooling: 83543.38
+   pumps heating: 0.00014
+   central pumps heating: 0.0
+   pumps cooling: 0.0
+   central pumps cooling: 398.35
+   water systems: 17024.40
+   
+   Maybe `hvac` includes water systems? 492680.89 + 17024.40 = 509705.29. Still not 505761.52.
+   
+   Let's look at the first target row: `2012-01-01 00:15:00`.
+   We don't have this in the source sample.
+   
+   Let's look at the second last target row: `2012-06-15 08:45:00`.
+   We don't have this in the source sample.
+   
+   Let's look at the last target row: `2012-07-02 00:00:00`.
+   We have `2012-07-02 00:15:00` in source.
+   
+   Perhaps the `hvac` calculation is simpler.
+   Let's check `electricity_heating_kwh` + `electricity_cooling_kwh` + `electricity_fans_heating_kwh` + `electricity_fans_cooling_kwh` + `electricity_pumps_heating_kwh` + `electricity_pumps_cooling_kwh` + `electricity_central_system_heating_kwh` + `electricity_central_system_cooling_kwh` + `electricity_central_system_pumps_heating_kwh` + `electricity_central_system_pumps_cooling_kwh`.
+   
+   Let's try another row.
+   Source `2012-07-18 15:30:00`:
+   heating: 0.42
+   central heating: 0.0
+   cooling: 1010773.93
+   central cooling: 4222.44
+   fans heating: 0.0
+   fans cooling: 196340.91
+   pumps heating: 0.0
+   central pumps heating: 0.0
+   pumps cooling: 0.0
+   central pumps cooling: 400.28
+   Sum = 1211738.0.
+   
+   Let's look for `2012-07-18 15:30:00` in target. Not in sample.
+   
+   Let's look at `2012-08-04 06:45:00` in source.
+   heating: 10.34
+   central heating: 0.0
+   cooling: 529463.60
+   central cooling: 2448.27
+   fans heating: 19.93
+   fans cooling: 104945.22
+   pumps heating: 0.000005
+   central pumps heating: 0.003
+   pumps cooling: 0.0
+   central pumps cooling: 399.68
+   Sum = 637237.0.
+   
+   Let's look at `2012-08-20 22:00:00` in source.
+   heating: 25.63
+   central heating: 0.0
+   cooling: 269712.92
+   central cooling: 1647.58
+   fans heating: 8.04
+   fans cooling: 61266.79
+   pumps heating: 0.00077
+   central pumps heating: 0.0
+   pumps cooling: 0.0
+   central pumps cooling: 393.73
+   Sum = 333054.7.
+   
+   Let's look at `2012-09-06 13:15:00` in source.
+   heating: 0.00067
+   central heating: 0.0
+   cooling: 919530.62
+   central cooling: 3785.92
+   fans heating: 0.0
+   fans cooling: 173334.86
+   pumps heating: 0.0
+   central pumps heating: 0.0
+   pumps cooling: 0.0
+   central pumps cooling: 400.28
+   Sum = 1097051.68.
+   
+   Let's look at `2012-09-23 04:30:00` in source.
+   heating: 53546.70
+   central heating: 3279.56
+   cooling: 15768.27
+   central cooling: 111.19
+   fans heating: 32645.45
+   fans cooling: 2404.31
+   pumps heating: 6.93
+   central pumps heating: 106.67
+   pumps cooling: 0.0
+   central pumps cooling: 141.81
+   Sum = 107910.89.
+   
+   Let's look at `2012-10-09 19:45:00` in source.
+   heating: 10933.44
+   central heating: 264.89
+   cooling: 38738.66
+   central cooling: 630.01
+   fans heating: 6820.67
+   fans cooling: 9352.94
+   pumps heating: 1.97
+   central pumps heating: 30.03
+   pumps cooling: 0.0
+   central pumps cooling: 296.66
+   Sum = 66969.27.
+   
+   Let's look at `2012-10-26 11:00:00` in source.
+   heating: 19588.62
+   central heating: 1062.75
+   cooling: 11975.97
+   central cooling: 196.33
+   fans heating: 12304.73
+   fans cooling: 3405.26
+   pumps heating: 2.73
+   central pumps heating: 47.97
+   pumps cooling: 0.0
+   central pumps cooling: 171.45
+   Sum = 47755.81.
+   
+   Let's look at `2012-11-12 02:15:00` in source.
+   heating: 93769.02
+   central heating: 5749.45
+   cooling: 9238.28
+   central cooling: 49.00
+   fans heating: 54306.37
+   fans cooling: 1674.84
+   pumps heating: 11.42
+   central pumps heating: 171.15
+   pumps cooling: 0.0
+   central pumps cooling: 65.65
+   Sum = 164995.18.
+   
+   Let's look at `2012-11-28 17:30:00` in source.
+   heating: 100680.79
+   central heating: 6595.72
+   cooling: 8129.96
+   central cooling: 66.68
+   fans heating: 56237.37
+   fans cooling: 2168.02
+   pumps heating: 12.36
+   central pumps heating: 191.39
+   pumps cooling: 0.0
+   central pumps cooling: 87.92
+   Sum = 174168.21.
+   
+   Let's look at `2012-12-15 08:45:00` in source.
+   heating: 126023.19
+   central heating: 8861.50
+   cooling: 5742.78
+   central cooling: 56.98
+   fans heating: 68853.21
+   fans cooling: 1950.52
+   pumps heating: 14.11
+   central pumps heating: 231.25
+   pumps cooling: 0.0
+   central pumps cooling: 59.01
+   Sum = 211792.55.
+   
+   Let's look at `2013-01-01 00:00:00` in source.
+   heating: 197541.81
+   central heating: 13892.56
+   cooling: 7648.41
+   central cooling: 28.54
+   fans heating: 103788.62
+   fans cooling: 1947.58
+   pumps heating: 21.32
+   central pumps heating: 351.20
+   pumps cooling: 0.0
+   central pumps cooling: 32.93
+   Sum = 325252.97.
+
+   None of these match the target `hvac` values directly visible in the sample.
+   However, the target sample has `2012-07-02 00:00:00` with `hvac` 505761.52.
+   The source has `2012-07-02 00:15:00`.
+   Maybe the target `datetime` is truncated to the hour? `2012-07-02 00:15:00` -> `2012-07-02 00:00:00`.
+   If so, the `hvac` value should be from that row.
+   My sum for that row was 492680.89.
+   Difference: 505761.52 - 492680.89 = 13080.63.
+   
+   Let's check `water_heating` for that row.
+   Source `electricity_water_systems_kwh` is 17024.40.
+   Target `water_heating` is 20987.93.
+   
+   Let's check `refrigerator`.
+   Source `electricity_refrigerator_kwh` is 51271.14.
+   Target `refrigerator` is 52585.79.
+   
+   Let's check `clothes_washer`.
+   Source `electricity_clothes_washer_kwh` is 444.16.
+   Target `clothes_washer` is 1784.42.
+   
+   It seems the values are scaled.
+   Source `scaled_unit_count` is 2991885.10.
+   Source `raw_count` is 541079.
+   Ratio: 2991885.10 / 541079 = 5.5295.
+   
+   Let's check if the target values are scaled versions of the source values.
+   Target `refrigerator` 52585.79 / Source `electricity_refrigerator_kwh` 51271.14 = 1.0256.
+   Target `water_heating` 20987.93 / Source `electricity_water_systems_kwh` 17024.40 = 1.2328.
+   
+   This is inconsistent.
+   
+   Let's look at the column names again.
+   Target `hvac` might be `net_site_electricity_kwh` minus other categories?
+   Target `hvac` 505761.52.
+   Source `net_site_electricity_kwh` 826347.03.
+   Difference: 320585.51.
+   
+   Let's sum the other target columns for that row:
+   water_heating: 20987.93
+   refrigerator: 52585.79
+   clothes_washer: 1784.42
+   clothes_dryer: 13567.96
+   dishwasher: 801.30
+   cooking_range: 3725.23
+   pool_spa_pumps: 4520.37
+   interior_lighting: 39205.14
+   exterior_lighting: 7653.41
+   lighting: 46858.54 (This is likely interior + exterior)
+   plug: 161968.09
+   pool_spa_heater: 2816.62
+   
+   Sum of others (excluding hvac and lighting which is a sum):
+   20987.93 + 52585.79 + 1784.42 + 13567.96 + 801.30 + 3725.23 + 4520.37 + 39205.14 + 7653.41 + 161968.09 + 2816.62 = 310616.26.
+   
+   Total = hvac + sum_others = 505761.52 + 310616.26 = 816377.78.
+   Source `net_site_electricity_kwh` is 826347.03.
+   Difference: 9969.25.
+   
+   Maybe `lighting` is not a sum but a separate category?
+   If `lighting` is included in the sum, then:
+   Sum = 310616.26 + 46858.54 = 357474.80.
+   Total = 505761.52 + 357474.80 = 863236.32.
+   This is larger than `net_site_electricity_kwh`.
+   
+   Let's assume `lighting` = `interior_lighting` + `exterior_lighting`.
+   Then the categories are:
+   hvac, water_heating, refrigerator, clothes_washer, clothes_dryer, dishwasher, cooking_range, pool_spa_pumps, plug, pool_spa_heater.
+   And `interior_lighting`, `exterior_lighting`, `lighting` are provided for reference?
+   
+   Let's check if `net_site_electricity_kwh` = hvac + water_heating + refrigerator + clothes_washer + clothes_dryer + dishwasher + cooking_range + pool_spa_pumps + plug + pool_spa_heater + interior_lighting + exterior_lighting.
+   Sum = 505761.52 + 20987.93 + 52585.79 + 1784.42 + 13567.96 + 801.30 + 3725.23 + 4520.37 + 161968.09 + 2816.62 + 39205.14 + 7653.41 = 810377.78.
+   Source `net_site_electricity_kwh` is 826347.03.
+   Difference: 15969.25.
+   
+   This is close but not exact.
+   
+   Let's try to find a scaling factor.
+   826347.03 / 810377.78 = 1.0197.
+   
+   Let's check another row.
+   Source `2013-01-01 00:00:00`:
+   net_site: 926013.39.
+   We don't have the target for this row.
+   
+   Let's look at the target sample again.
+   The first row is `2012-01-01 00:15:00`.
+   The last row is `2012-07-02 00:00:00`.
+   
+   I suspect the target values are scaled versions of the source values.
+   The scaling factor might be `scaled_unit_count` / `raw_count` = 5.5295.
+   But the source values are already in kWh.
+   
+   Let's look at the `water_heating` column.
+   Source `electricity_water_systems_kwh` for `2012-07-02 00:15:00` is 17024.40.
+   Target `water_heating` is 20987.93.
+   Ratio: 1.2328.
+   
+   Source `electricity_refrigerator_kwh` is 51271.14.
+   Target `refrigerator` is 52585.79.
+   Ratio: 1.0256.
+   
+   Source `electricity_clothes_washer_kwh` is 444.16.
+   Target `clothes_washer` is 1784.42.
+   Ratio: 4.017.
+   
+   This is very inconsistent.
+   
+   However, looking at the column names, it seems like a direct mapping:
+   `hvac` -> sum of heating, cooling, fans, pumps.
+   `water_heating` -> `electricity_water_systems_kwh`.
+   `refrigerator` -> `electricity_refrigerator_kwh`.
+   `clothes_washer` -> `electricity_clothes_washer_kwh`.
+   `clothes_dryer` -> `electricity_clothes_dryer_kwh`.
+   `dishwasher` -> `electricity_dishwasher_kwh`.
+   `cooking_range` -> `electricity_cooking_range_kwh`.
+   `pool_spa_pumps` -> `electricity_pool_pump_kwh` + `electricity_hot_tub_pump_kwh`.
+   `interior_lighting` -> `electricity_interior_lighting_kwh`.
+   `exterior_lighting` -> `electricity_exterior_lighting_kwh`.
+   `lighting` -> `interior_lighting` + `exterior_lighting`.
+   `plug` -> `electricity_plug_loads_kwh`.
+   `pool_spa_heater` -> `electricity_pool_heater_kwh` + `electricity_hot_tub_heater_kwh`.
+   
+   Let's check `pool_spa_pumps` for `2012-07-02 00:15:00`.
+   Source `electricity_pool_pump_kwh` is 64.38.
+   Source `electricity_hot_tub_pump_kwh` is 4035.23.
+   Sum = 4099.61.
+   Target `pool_spa_pumps` is 452

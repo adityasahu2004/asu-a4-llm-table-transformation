@@ -1,0 +1,216 @@
+Operator plan:
+1. Parse `SEASON DAY TYPE` to extract month and day-type indicators. Map months to seasons (June/July/August -> SUMMER, others -> SPRING based on observed distinct values in target). Map 'WD' to WEEKDAY and 'WE' to WEEKEND.
+2. Keep `HOUR` as `hour`.
+3. Compute `temperature_range` as `T_MAX_1 - T_MIN_1` (converted to int). Note: The sample shows `temperature_range` values like 53 for June WE 13 (T_MIN=68, T_MAX=75 -> 7). Wait, looking at the sample data:
+   Source: `["RS0", "June WE", 13, 68, 75.0, ...]`
+   Target: `["SPRING", "WEEKDAY", 1, 53, ...]` -> This row doesn't match the first source row directly. The target sample is just a sample, not a direct row-to-row map of the provided source sample rows necessarily, or the order is different.
+   Let's look at the structure.
+   Source has 300 rows. Target has 300 rows.
+   Source `SEASON DAY TYPE` has 13 distinct values. Target `season` has 2, `daytype` has 2.
+   
+   Mapping Logic for Season:
+   June, July, August are Summer.
+   September, October, November, December are typically Fall/Winter.
+   The target only has "SPRING" and "SUMMER".
+   Let's look at the source sample distinct values for `SEASON DAY TYPE`:
+   "June WE", "July WD", "July WE", "August WD", "September WD", "September WE", "October WD", "October WE", "November WD", "November WE", "December WD", "December WE".
+   
+   If target only has SPRING and SUMMER, perhaps the data is split differently or "SPRING" covers the non-summer months? Or maybe the source contains other months not in the sample? The sample shows 12 distinct types. There are 13 distinct.
+   Let's assume standard meteorological seasons or just map based on the target distinct values.
+   Summer: June, July, August.
+   Spring: September, October, November, December? (This seems odd naming, but if those are the only two labels, it's the likely mapping for the non-summer months in this specific dataset context, or perhaps the "Spring" label is used for the heating season vs cooling season).
+   
+   Mapping Logic for Day Type:
+   WD -> WEEKDAY
+   WE -> WEEKEND
+
+4. `temperature_range`: In the target sample, row 1 is `53`. Source row 1 is `68` and `75`. `75-68 = 7`. This doesn't match 53.
+   Let's look at another row.
+   Target row 2: `62`. Source row 2: `67`, `78.5`. `78.5-67 = 11.5`.
+   
+   Wait, the target sample rows do not correspond to the source sample rows by index. The note says "Source row count describes a training sample only". The target sample is also a sample.
+   However, the transformation must be deterministic.
+   Let's look at `low_end` and `high_end`.
+   Target col `low_end` and `high_end`.
+   Source has `T_MIN_1` and `T_MAX_1`.
+   Target `low_end` values: 9, 0, 7, 13, 29, 29, 40, 40, 42, 50, 60, 67.
+   Source `T_MIN_1` values: 68, 67, 69, 59, 41, 39, 30, 44, 20, 25, 21, 19.
+   These don't match directly.
+   
+   Is it possible the target is derived from a different set of columns?
+   Source has `_1`, `_2`, `_3` columns.
+   Target has `constant`, `coefficient`, `low_end`, `high_end`.
+   Target `constant` and `coefficient` are all null.
+   
+   Let's re-read the target schema.
+   `temperature_range`: distinct 44.
+   `low_end`: distinct 65.
+   `high_end`: distinct 51.
+   
+   Maybe `temperature_range` is `T_MAX_1 - T_MIN_1`?
+   Let's check the distinct counts.
+   Source `T_MAX_1` distinct 99. `T_MIN_1` distinct 64.
+   
+   Let's look at the target sample `temperature_range` values: 53, 62, 54, 29, 53, 49, 38, 38, 31, 30, 23, 22.
+   Source sample `T_MAX_1 - T_MIN_1`:
+   1: 75-68=7
+   2: 78.5-67=11.5
+   3: 76-69=7
+   4: 68.5-59=9.5
+   5: 59.5-41=18.5
+   6: 57.5-39=18.5
+   7: 44.5-30=14.5
+   8: 61-44=17
+   9: 38-20=18
+   10: 42-25=17
+   11: 32.5-21=11.5
+   12: 35-19=16
+   
+   These are small integers/halves. The target values are large (20-60).
+   
+   What if `temperature_range` is related to `PROFILE_MIN` and `PROFILE_MAX`?
+   Source `PROFILE_MIN`: 0.616, 0.661, ...
+   Source `PROFILE_MAX`: 2.821, 3.159, ...
+   
+   What if the target `low_end` and `high_end` are `T_MIN_1` and `T_MAX_1` but transformed?
+   Or maybe `T_MIN_3` and `T_MAX_3`?
+   
+   Let's look at the column names in Target: `season`, `daytype`, `hour`, `temperature_range`, `constant`, `coefficient`, `low_end`, `high_end`.
+   
+   Hypothesis: The target `low_end` and `high_end` are `T_MIN_1` and `T_MAX_1` converted to integers?
+   Source `T_MIN_1` (int): 68, 67, 69, 59, 41, 39, 30, 44, 20, 25, 21, 19.
+   Target `low_end`: 9, 0, 7, 13, 29, 29, 40, 40, 42, 50, 60, 67.
+   No obvious mapping.
+   
+   Let's look at `T_MIN_2` and `T_MAX_2`.
+   Source `T_MIN_2`: 75, 78.5, 76, 68.5, 59.5, 57.5, 44.5, 61, 38, 42, 32.5, 35.
+   Source `T_MAX_2`: 82, 88, 79.5, 74.5, 68.5, 69, 56, 57, 57, 55, 43.5, 47.5.
+   
+   Let's look at `T_MIN_3` and `T_MAX_3`.
+   Source `T_MIN_3`: 82, 88, 79.5, 74.5, 68.5, 69, 56, 57, 57, 55, 43.5, 47.5.
+   Source `T_MAX_3`: 91, 101, 93, 85, 76, 76, 69, 76, 76, 68, 62, 64.
+   
+   Is it possible `low_end` is `T_MIN_1` and `high_end` is `T_MAX_1` from a *different* row or sorted?
+   
+   Let's look at the Target `hour` values: 1, 4, 7, 10, 13, 16, 20, 23, 2, 5, 8, 12.
+   Source `HOUR` values: 13, 16, 19, 22, 1, 4, 8, 11, 14, 17, 20, 24.
+   
+   The target sample hours are 1, 4, 7, 10, 13, 16, 20, 23, 2, 5, 8, 12.
+   The source sample hours are 13, 16, 19, 22, 1, 4, 8, 11, 14, 17, 20, 24.
+   
+   There is no direct row correspondence in the samples provided. This implies I must infer the logic from column semantics.
+   
+   Semantics:
+   `season`: Derived from `SEASON DAY TYPE`. Extract month. Jun/Jul/Aug -> SUMMER. Else -> SPRING (assuming only 2 seasons in target).
+   `daytype`: Derived from `SEASON DAY TYPE`. WD -> WEEKDAY, WE -> WEEKEND.
+   `hour`: From `HOUR`.
+   `temperature_range`: Likely `T_MAX_1 - T_MIN_1`? Or `PROFILE_MAX - PROFILE_MIN`?
+   `constant`: All null in target. Source has `CONSTANT_1`, `CONSTANT_2`, `CONSTANT_3`.
+   `coefficient`: All null in target. Source has `RH_1` (Relative Humidity?) or `WIND_1`.
+   `low_end`: Likely `T_MIN_1`?
+   `high_end`: Likely `T_MAX_1`?
+   
+   Let's check if `low_end` and `high_end` in target are just `T_MIN_1` and `T_MAX_1` cast to int.
+   Target `low_end` distinct 65. Source `T_MIN_1` distinct 64. Close.
+   Target `high_end` distinct 51. Source `T_MAX_1` distinct 99. Not close.
+   
+   Source `T_MIN_2` distinct 99.
+   Source `T_MIN_3` distinct 82.
+   
+   Source `PROFILE_MIN` distinct 13.
+   Source `PROFILE_MAX` distinct 13.
+   
+   Let's look at `temperature_range` distinct 44.
+   
+   Maybe `low_end` is `T_MIN_1` and `high_end` is `T_MAX_1` but the target sample values are from a different dataset instance? The prompt says "Source row count describes a training sample only, not the evaluation input." This usually implies the transformation logic is consistent, but the values in the target sample are from the *evaluation* target, which corresponds to the *evaluation* source. The provided source sample is from the *training* source.
+   
+   Therefore, I should rely on column names and types.
+   
+   `season`: Parse month from `SEASON DAY TYPE`. Map Jun, Jul, Aug to "SUMMER", others to "SPRING".
+   `daytype`: Parse WD/WE from `SEASON DAY TYPE`. Map WD to "WEEKDAY", WE to "WEEKEND".
+   `hour`: Copy `HOUR`.
+   `temperature_range`: `T_MAX_1 - T_MIN_1`? Or `PROFILE_MAX - PROFILE_MIN`?
+   Given the name `temperature_range`, `T_MAX_1 - T_MIN_1` is the most logical.
+   `constant`: Source has `CONSTANT_1`. Target has `constant` (all null in sample). Why null? Maybe it's not used or mapped from a column that is null? Or maybe `constant` is just a placeholder column that is always null in the target schema? The target schema shows `nulls: 300` for `constant` and `coefficient`. This suggests these columns are intentionally set to NaN or are not derived from non-null source data in a way that produces values, or the mapping is to a column that is entirely null. However, `CONSTANT_1` in source is not null.
+   Wait, if the target columns `constant` and `coefficient` are entirely null, I should just assign `np.nan` to them.
+   `low_end`: Likely `T_MIN_1`.
+   `high_end`: Likely `T_MAX_1`.
+   
+   Let's verify `temperature_range`. If `low_end` is `T_MIN_1` and `high_end` is `T_MAX_1`, then `temperature_range` is `high_end - low_end`.
+   
+   One detail: `SEASON DAY TYPE` format.
+   "June WE", "July WD".
+   Split by space. First part is Month. Second part is Type.
+   
+   Months:
+   June, July, August -> SUMMER
+   September, October, November, December -> SPRING (based on target distinct values).
+   
+   Day Types:
+   WD -> WEEKDAY
+   WE -> WEEKEND
+   
+   Columns to keep:
+   `season`, `daytype`, `hour`, `temperature_range`, `constant`, `coefficient`, `low_end`, `high_end`.
+   
+   Mapping:
+   `season`: derived
+   `daytype`: derived
+   `hour`: `HOUR`
+   `temperature_range`: `T_MAX_1 - T_MIN_1` (cast to int?)
+   `constant`: `np.nan`
+   `coefficient`: `np.nan`
+   `low_end`: `T_MIN_1` (cast to int?)
+   `high_end`: `T_MAX_1` (cast to int?)
+   
+   Checking dtypes:
+   Target `temperature_range`: int64.
+   Target `low_end`: int64.
+   Target `high_end`: int64.
+   
+   Source `T_MIN_1`: int64.
+   Source `T_MAX_1`: float64.
+   
+   So `low_end` = `T_MIN_1`.
+   `high_end` = `T_MAX_1`.astype(int).
+   `temperature_range` = `high_end - low_end`.
+
+   Let's double check if `constant` and `coefficient` should be null. The target sample shows `null` for all rows. The schema says `nulls: 300` (all rows). So yes, assign NaN.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Extract month and day type from SEASON DAY TYPE
+    parts = source['SEASON DAY TYPE'].str.split()
+    month = parts.str[0]
+    dtype_str = parts.str[1]
+    
+    # Map month to season
+    summer_months = ['June', 'July', 'August']
+    season = month.map(lambda m: 'SUMMER' if m in summer_months else 'SPRING')
+    
+    # Map day type
+    daytype = dtype_str.map({'WD': 'WEEKDAY', 'WE': 'WEEKEND'})
+    
+    # Construct output dataframe
+    out = pd.DataFrame(index=source.index)
+    out['season'] = season
+    out['daytype'] = daytype
+    out['hour'] = source['HOUR']
+    
+    # Temperature range calculations
+    low_end = source['T_MIN_1']
+    high_end = source['T_MAX_1'].astype(int)
+    
+    out['low_end'] = low_end
+    out['high_end'] = high_end
+    out['temperature_range'] = (high_end - low_end).astype(int)
+    
+    # Constant and coefficient are all null in target
+    out['constant'] = np.nan
+    out['coefficient'] = np.nan
+    
+    return out.reset_index(drop=True)
+```

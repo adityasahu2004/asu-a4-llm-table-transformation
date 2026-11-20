@@ -1,0 +1,108 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `date` column from string format (`M/D/YYYY`) to pandas datetime objects to extract month and hour information.
+2.  **Melt Data**: Transform the wide format (24 hourly columns) into a long format.
+    *   Identify the 24 time columns (e.g., "1:00 AM", "12:00 PM").
+    *   Use `pd.melt` to unpivot these columns into two new columns: `time_label` and `value`.
+    *   Keep the `date` column.
+3.  **Extract Hour**: Parse the `time_label` strings to determine the 24-hour integer hour (0-23).
+    *   Handle "12:00 AM" as hour 0.
+    *   Handle "12:00 PM" as hour 12.
+    *   Handle "X:00 AM" as hour X.
+    *   Handle "X:00 PM" as hour X + 12.
+4.  **Extract Month**: Extract the month number (1-12) from the parsed `date`.
+5.  **Aggregate**: Group by `hour` and `month`. Calculate the mean of the `value` for each group.
+6.  **Pivot**: Reshape the aggregated data back to a wide format where:
+    *   Rows are `hour`.
+    *   Columns are months (1-12).
+    *   Values are the calculated means.
+7.  **Format Output**:
+    *   Rename month columns to lowercase month names ("january", "february", etc.).
+    *   Ensure the `hour` column is present and sorted (or ordered as per target, though target sample is not strictly sorted, standard practice is usually sorted or index-based; looking at the target sample, it seems to just list rows. The target schema says `hour` is int64. I will sort by hour for determinism, or keep the natural order from pivot. The target sample shows hours 1, 11, 13... which is not sorted. However, `pivot_table` usually sorts index. Let's look closer. The target sample is just a *sample* of the 24 rows. It doesn't imply a specific sort order other than what `pivot_table` produces by default (sorted index). I will sort by hour to be safe and deterministic).
+    *   Fill missing values with NaN (default behavior).
+    *   Select only the columns present in the target schema. Note that the target schema includes months up to December, but the sample data only goes up to July. The transformation must be general, so it will produce columns for all months present in the source data. If the source data has data for August-December, they will appear. If not, they will be NaN. The target schema explicitly lists `august` through `december` with nulls, implying the source *might* have had data for them in the full dataset, or the target schema is fixed. I will generate columns for all 12 months based on the month numbers found in the data. If a month is missing from the source, it won't be in the pivot result unless we reindex. Given the target schema has specific columns, I should ensure all 12 month columns exist, filling with NaN if the source data doesn't cover that month.
+
+    *Refinement on Month Columns*: The target schema lists `january` through `december`. The source sample only has July data. The target sample shows `null` for `august` onwards. This suggests the transformation should always output 12 month columns, regardless of whether the source data contains that month. I will map month numbers 1-12 to their names and ensure all 12 columns are present in the final DataFrame, filling with NaN if no data exists for that month.
+
+8.  **Final Cleanup**: Reset index to make `hour` a column. Ensure column order matches target: `hour`, then months in chronological order.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse dates
+    source = source.copy()
+    source['date'] = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    
+    # 2. Identify time columns
+    # The time columns are all columns except 'date' and 'DSL' (if DSL is present)
+    # Based on schema, columns are 'date', 'DSL', and 24 time columns.
+    time_cols = [col for col in source.columns if col not in ['date', 'DSL']]
+    
+    # 3. Melt the dataframe
+    melted = pd.melt(
+        source, 
+        id_vars=['date'], 
+        value_vars=time_cols, 
+        var_name='time_label', 
+        value_name='value'
+    )
+    
+    # 4. Extract hour from time_label
+    def parse_hour(label):
+        # label format: "1:00 AM", "12:00 PM", etc.
+        parts = label.split(':')
+        hour_str = parts[0]
+        ampm = parts[1].strip()
+        hour = int(hour_str)
+        
+        if ampm == 'AM':
+            if hour == 12:
+                return 0
+            else:
+                return hour
+        else: # PM
+            if hour == 12:
+                return 12
+            else:
+                return hour + 12
+                
+    melted['hour'] = melted['time_label'].apply(parse_hour)
+    
+    # 5. Extract month from date
+    melted['month'] = melted['date'].dt.month
+    
+    # 6. Aggregate: Mean value per hour and month
+    aggregated = melted.groupby(['hour', 'month'])['value'].mean().reset_index()
+    
+    # 7. Pivot to wide format
+    # Index: hour, Columns: month, Values: value
+    pivoted = aggregated.pivot(index='hour', columns='month', values='value')
+    
+    # 8. Ensure all 12 months are present in columns, filling with NaN if missing
+    month_names = {
+        1: 'january', 2: 'february', 3: 'march', 4: 'april',
+        5: 'may', 6: 'june', 7: 'july', 8: 'august',
+        9: 'september', 10: 'october', 11: 'november', 12: 'december'
+    }
+    
+    # Reindex columns to ensure all 12 months are present
+    all_months = list(range(1, 13))
+    pivoted = pivoted.reindex(columns=all_months)
+    
+    # Rename columns to month names
+    pivoted = pivoted.rename(columns=month_names)
+    
+    # Reset index to make 'hour' a column
+    result = pivoted.reset_index()
+    
+    # Sort by hour to ensure deterministic order (optional but good practice)
+    result = result.sort_values('hour').reset_index(drop=True)
+    
+    # Select and order columns as per target schema
+    target_cols = ['hour'] + [month_names[i] for i in range(1, 13)]
+    result = result[target_cols]
+    
+    return result
+```

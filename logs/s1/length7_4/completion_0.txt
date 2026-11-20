@@ -1,0 +1,65 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `date` column from string format (`M/D/YYYY`) to datetime objects to enable date component extraction.
+2.  **Extract Date Components**:
+    *   Extract the `month` number and name.
+    *   Determine `daytype` based on the day of the week (Saturday/Sunday -> "weekend", otherwise "weekday").
+3.  **Rename Value Columns**: Map the source columns `value1` through `value24` to target columns `hr1` through `hr24`.
+4.  **Group and Aggregate**:
+    *   Group the data by the extracted `month` name and `daytype`.
+    *   Calculate the mean of the hourly values (`hr1`-`hr24`) for each group. This reduces the daily data points to a single representative profile per month/daytype combination.
+5.  **Format Output**:
+    *   Format the `month` column as a string with specific padding (e.g., "January  ", "February ") to match the target schema's distinct values. The target shows variable trailing spaces, likely to align to a fixed width or specific formatting. Observing the distinct values: "January  " (9 chars), "February " (9 chars), "March    " (9 chars), etc. It appears the month name is left-aligned and padded to 9 characters.
+    *   Reset the index to produce a clean DataFrame.
+    *   Ensure column order matches the target specification.
+
+### Assumptions
+*   The aggregation method is `mean` (average), which is standard for creating typical load profiles from daily data.
+*   The month string formatting is left-aligned with spaces to a length of 9 characters.
+*   "Weekend" includes Saturday and Sunday.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse dates
+    source = source.copy()
+    source['date_dt'] = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    
+    # 2. Extract month name and daytype
+    # Month name
+    source['month_name'] = source['date_dt'].dt.strftime('%B')
+    
+    # Day type: 5=Saturday, 6=Sunday
+    source['daytype'] = np.where(
+        source['date_dt'].dt.dayofweek.isin([5, 6]), 
+        'weekend', 
+        'weekday'
+    )
+    
+    # 3. Rename value columns to hr1...hr24
+    rename_map = {f'value{i}': f'hr{i}' for i in range(1, 25)}
+    source = source.rename(columns=rename_map)
+    
+    # 4. Group by month_name and daytype, and calculate mean for hr columns
+    hr_cols = [f'hr{i}' for i in range(1, 25)]
+    
+    grouped = source.groupby(['month_name', 'daytype'])[hr_cols].mean()
+    
+    # 5. Format month string to match target (Left aligned, padded to 9 chars)
+    # Target distinct values: "January  ", "February ", "March    ", etc.
+    # All seem to be 9 characters long.
+    result = grouped.reset_index()
+    result['month'] = result['month_name'].str.ljust(9)
+    
+    # 6. Select and order columns
+    final_cols = ['month', 'daytype'] + hr_cols
+    result = result[final_cols]
+    
+    # Ensure dtypes are float64 for hr columns (mean might produce float64 already, but ensure)
+    for col in hr_cols:
+        result[col] = result[col].astype('float64')
+        
+    return result
+```

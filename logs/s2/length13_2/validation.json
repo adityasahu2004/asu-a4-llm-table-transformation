@@ -1,0 +1,100 @@
+{
+  "case": "length13_2",
+  "length": 13,
+  "strategy": "s2",
+  "model": "qwen36-27b",
+  "is_demo": false,
+  "parameters": {
+    "output": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment",
+    "model": "qwen36-27b",
+    "base_url": "https://openai.rc.asu.edu/v1",
+    "max_tokens": 6000,
+    "reasoning_effort": "none",
+    "k": 5,
+    "sample_rows": 12,
+    "timeout": 120,
+    "replay_only": true,
+    "strategy": "s2",
+    "python": "3.14.4 (main, Apr  7 2026, 13:13:20) [Clang 21.0.0 (clang-2100.0.123.102)]",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "pandas": "3.1.1",
+    "held_out": [
+      "length1_1",
+      "length1_2",
+      "length1_3",
+      "length2_1",
+      "length3_1"
+    ],
+    "benchmark": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split"
+  },
+  "prompt_path": "logs/s2/length13_2/prompt.json",
+  "completion_path": "logs/s2/length13_2/response.json",
+  "execution": {
+    "status": "ok",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+    "seconds": 8.551779708002869,
+    "shape": [
+      137707,
+      7
+    ],
+    "fingerprint": "accb70109947008902b3890e6570c3338447917fdd17bde6a1c534d5b7fd5890"
+  },
+  "autopipeline": {
+    "accuracy": 0.0,
+    "is_correct": false,
+    "similarities": {},
+    "info": []
+  },
+  "hard_match": {
+    "accuracy": 0.6108497441254672,
+    "is_correct": false,
+    "similarities": [
+      1.0,
+      0.08739570246973646,
+      1.0,
+      0.09426536051181131,
+      1.0,
+      0.09428714589672275,
+      1.0
+    ],
+    "info": [
+      "datetime",
+      "domestic_water_heating",
+      "lighting",
+      "total"
+    ]
+  },
+  "hard_match_provenance": "course-provided hard_match.py and utils.py",
+  "exact_schema": true,
+  "generation": {
+    "request_hash": "32a5597004b39d6e91b14b87507c230e212c67ddc151e291742f1db1993048e8",
+    "usage": {
+      "completion_tokens": 1241,
+      "prompt_tokens": 59925,
+      "total_tokens": 61166,
+      "completion_tokens_details": null,
+      "prompt_tokens_details": {
+        "audio_tokens": null,
+        "cache_write_tokens": null,
+        "cached_tokens": 58240,
+        "image_tokens": null,
+        "text_tokens": null,
+        "created_cache_tokens": 896,
+        "multimodal_tokens": null
+      },
+      "co2_g": 1.963909,
+      "energy_wh": 5.827623
+    },
+    "latency_seconds": 45.436319874999754,
+    "api_attempts": 1,
+    "cached": true,
+    "candidate_count": 1,
+    "reasoning_effort_header": "none",
+    "selected_index": 0,
+    "clusters": {}
+  },
+  "wall_seconds": 59.08615470899895,
+  "replay_wall_seconds": 11.547482166999544
+}

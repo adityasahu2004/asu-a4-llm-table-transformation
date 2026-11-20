@@ -1,0 +1,31 @@
+**Operator Plan:**
+1.  **Date Parsing & Formatting**: Parse the `Date` column (format `E m/d/yyyy`) into datetime objects. Format these dates into the target string format `E mm/dd/yyyy` (e.g., "Wed 01/01/2003") and assign to the new column `Date`.
+2.  **Column Renaming**: Rename the 24 hourly columns (`1:00` through `24:00:00`) to the target names `Hr 1` through `Hr 24`. Note that the source column `24:00:00` maps to `Hr 24`.
+3.  **Selection**: Select the new `Date` column and the renamed hourly columns. Discard the `Segment` column.
+4.  **Output**: Return the resulting DataFrame.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the source date column to datetime
+    # Source format is "E m/d/yyyy" (e.g., "Thu 10/01/2009")
+    dt = pd.to_datetime(source['Date'], format='%a %m/%d/%Y')
+    
+    # Create the target date string: "E mm/dd/yyyy" (e.g., "Wed 01/01/2003")
+    out_date = dt.dt.strftime('%a %m/%d/%Y')
+    
+    # Initialize the output dataframe with the date column
+    result = pd.DataFrame({'Date': out_date}, index=source.index)
+    
+    # Map source hourly columns to target hourly columns
+    # Source: "1:00", "2:00", ..., "23:00", "24:00:00"
+    # Target: "Hr 1", "Hr 2", ..., "Hr 23", "Hr 24"
+    for h in range(1, 24):
+        result[f'Hr {h}'] = source[f'{h}:00']
+    
+    # Handle the 24th hour specifically due to different suffix in source
+    result['Hr 24'] = source['24:00:00']
+    
+    return result.reset_index(drop=True)
+```

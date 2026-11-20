@@ -1,0 +1,287 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `date` column from string format (`MM/DD/YYYY HH:MM`) to pandas datetime objects.
+2.  **Extract Date and Hour**:
+    *   Extract the calendar date (year-month-day) to group rows.
+    *   Extract the hour of the day (0-23) to determine which "Hour" column the value belongs to. Note that the target columns are "Hour 1" through "Hour 24". This implies a 1-based indexing where Hour 1 corresponds to 00:00-00:59, ..., Hour 24 corresponds to 23:00-23:59. So, `Hour_Index = hour + 1`.
+3.  **Pivot/Reshape**:
+    *   Group by the extracted calendar date.
+    *   Pivot the data such that each unique hour index (1-24) becomes a separate column named "Hour 1", "Hour 2", ..., "Hour 24".
+    *   The values in these columns will be the `zone_016_cooling_sp` values.
+4.  **Handle Missing Data**:
+    *   If a specific hour is missing for a date, the pivot will naturally produce NaNs.
+    *   The target schema shows specific dtypes for columns (float64 for hours 1-9, 22-24; int64 for hours 10-21). This suggests that for the "middle" hours (10-21), the data is consistently present and integer-valued in the target sample, while edge hours might have missing values or are treated as floats. However, standard pivot results in float64 if there are NaNs. We should ensure the final columns match the target names.
+    *   Looking closely at the target sample: Hours 10-21 are `int64` and have 0 nulls. Hours 1-9 and 22-24 are `float64` and have 1 null. This implies that for the dates in the target sample, hours 10-21 always had data, while others might have been missing for some dates. Since we must preserve NaNs, we will let the pivot handle the structure. We will not force integer conversion if it risks losing NaN information or if the data isn't strictly integer in the general case, but the prompt says "Preserve NaNs". The target schema explicitly lists dtypes. We will construct the columns and let pandas infer or cast if necessary, but typically `pivot` returns float64 if any NaN exists. The target shows mixed types. This is unusual for a single DataFrame column set in pandas (usually all float if one is float). However, looking at the sample data, the values are 73.0 or 73. The distinction might be due to how the target was generated (e.g., specific imputation or just observation of the sample). Given the instruction "Preserve NaNs", we should not fill NaNs. The dtype difference in the target schema might be an artifact of the specific sample provided (where hours 10-21 happened to have no nulls). We will generate the columns "Hour 1" to "Hour 24".
+5.  **Format Date Column**: Convert the grouped date index back to string format `MM/DD/YYYY` as seen in the target (`09/16/2018`).
+6.  **Sort and Reset**: Sort by date and reset index to produce the final DataFrame.
+
+**Assumptions**:
+*   "Hour 1" corresponds to the 0th hour (00:00-00:59).
+*   "Hour 24" corresponds to the 23rd hour (23:00-23:59).
+*   The input data contains at most one record per hour per day. If multiple exist, `pivot` will fail or require aggregation. Given the distinct count of dates in source (15117) vs target (53), and the nature of the data, it's likely one reading per hour or we take the first/mean. The sample shows distinct dates in source, but target has fewer rows (53). Wait, source has 15117 rows, target has 53. This is a massive reduction.
+*   Let's re-read the sample. Source sample has dates like `11/6/2018`, `11/11/2018`. Target sample has `09/16/2018`, `10/06/2018`. The target rows are *weekly* or *bi-weekly* summaries?
+*   Actually, look at the target sample data: All values are 73.0.
+*   Look at the source sample: Values are 73.0 or 84.0.
+*   The target has 53 rows. The source has 15117.
+*   Is it possible the target is a *weekly* average? Or a specific subset?
+*   Let's look at the target dates: `09/16/2018`, `10/06/2018`, `11/03/2018`, `10/31/2018`... The dates in the target sample are not sorted chronologically in the provided snippet (`10/31` comes after `11/03`).
+*   Wait, the target sample data provided in the JSON is just a *sample* of the target. The `first_last_non_null` for target date is `09/16/2018` to `10/20/2018`.
+*   The source `first_last_non_null` is `11/6/2018` to `1/18/2019`.
+*   There is a mismatch in the date ranges between the source sample and target sample provided in the JSON description. The source sample starts in Nov 2018. The target sample starts in Sep 2018. This implies the "sample" data in the JSON is just illustrative of the *schema* and *format*, not necessarily the same rows. The note says "Source row count describes a training sample only".
+*   However, the transformation must be general.
+*   The key transformation is clearly a **pivot** from long format (date, value) to wide format (date, Hour 1..24).
+*   The reduction from 15117 rows to 53 rows in the target description is suspicious. 15117 / 24 ≈ 629 days. 53 rows?
+*   Maybe the target is *weekly* data? 53 weeks in a year.
+*   If it's weekly, how are the hours aggregated? The target columns are "Hour 1" to "Hour 24". This suggests a daily profile.
+*   If the target has 53 rows, and columns Hour 1-24, it might be 53 *weeks*? But the date column is a single date string.
+*   Let's look at the target date format: `MM/DD/YYYY`.
+*   If the target represents weekly data, the date might be the start of the week?
+*   But the columns are "Hour 1" to "Hour 24". This looks like a daily load profile.
+*   If the source has ~15k rows, and we assume 24 readings per day, that's ~625 days.
+*   If the target has 53 rows, that's roughly 53 weeks.
+*   Hypothesis: The target is a **weekly average** of the daily hourly profiles? Or perhaps the target is just a subset of days?
+*   Let's look at the target sample dates again: `09/16/2018`, `10/06/2018`, `11/03/2018`.
+    *   Sep 16 to Oct 6 is ~20 days.
+    *   Oct 6 to Nov 3 is ~28 days.
+    *   These don't look like regular weekly intervals.
+*   Let's reconsider the row count. 15117 source rows. 53 target rows.
+*   Maybe the target is **monthly**? 15117 / 30 ≈ 500 days. 53 months? No.
+*   Maybe the target is **distinct days** where something happened?
+*   Let's look at the source distinct values for `zone_016_cooling_sp`: 73.0, 84.0.
+*   Target distinct values: 73.0 (and null).
+*   The target sample shows *only* 73.0.
+*   Is it possible the transformation filters for a specific value? No, that would be data-dependent.
+*   Is it possible the transformation aggregates by **Week**?
+    *   If we group by Week, we get ~52-53 rows for a year.
+    *   But what do the "Hour 1" columns represent in a weekly aggregation? Average of Hour 1 across all days in the week?
+    *   This is a common pattern in energy data: Weekly average load profiles.
+    *   Let's check the date format in target: `09/16/2018`. This is a specific day.
+    *   If it's a weekly average, the date might be the Monday of the week?
+    *   Sep 16, 2018 was a Sunday.
+    *   Oct 6, 2018 was a Saturday.
+    *   Nov 3, 2018 was a Saturday.
+    *   This doesn't seem to align with a standard "Monday start" week.
+
+Let's look closer at the source sample dates:
+`11/6/2018`, `11/11/2018`, `11/16/2018`... These are 5 days apart.
+`11/21`, `11/25` (4 days), `11/30` (5 days).
+The source data seems to be sampled every ~5 days?
+15117 rows / 5 days ≈ 3000 days? No.
+If the source is every 5 days, and has 15k rows, that's 3000 days ≈ 8 years.
+The date range in source sample is Nov 2018 to Jan 2019.
+The date range in target sample is Sep 2018 to Oct 2018.
+
+There is a significant disconnect between the provided source sample and target sample dates. This suggests the samples are just random slices.
+However, the structure change is clear:
+Source: Long format (Date, Value).
+Target: Wide format (Date, Hour 1..24).
+
+The row count reduction (15117 -> 53) is the biggest clue.
+If the source has 15117 rows, and the target has 53, and the target has 24 hour columns...
+Could the target be **Monthly** averages?
+15117 rows. If data is hourly, 15117/24 = 629 days.
+629 days is about 20 months.
+53 rows is not 20.
+
+What if the source data is **not** hourly?
+Source sample: `11/6/2018 21:45`, `11/11/2018 16:15`.
+The times are different.
+If the source is irregular time series, pivoting to "Hour 1-24" requires binning.
+
+Let's look at the target row count again: 53.
+53 is the number of weeks in a year (sometimes).
+If the target is **Weekly** data, and the source is daily or hourly...
+If the source has 15117 rows, and we assume it covers ~1 year (365 days), then 15117/365 ≈ 41 rows per day. That's not hourly (24).
+If it covers 2 years, 15117/730 ≈ 20 rows per day.
+If it covers 5 years, 15117/1825 ≈ 8 rows per day.
+
+Let's look at the source distinct dates: 15117.
+This means **every row has a unique timestamp**.
+So the source is a high-frequency time series.
+If the target has 53 rows, and 24 columns, it is likely a **Weekly Average Profile**.
+The date in the target likely represents the **Week Start** or **Week End** or a representative date for that week.
+Given `09/16/2018` (Sunday) and `10/06/2018` (Saturday), it's hard to pin down the exact week definition without more data.
+However, a common transformation for this type of problem (Energy/Building data) is:
+1. Parse date.
+2. Assign a Week Number or Week Start Date.
+3. Group by Week.
+4. For each hour of the day (0-23), calculate the mean (or median) of the values falling in that hour across all days in that week.
+5. Create columns Hour 1 (00:00-00:59) to Hour 24 (23:00-23:59).
+
+Let's verify this hypothesis.
+If we group by Week, we get ~52-53 rows for a year.
+The target has 53 rows.
+The target columns are Hour 1-24.
+The values in the target sample are all 73.0.
+In the source, values are 73.0 and 84.0.
+If we average 73 and 84, we get 78.5.
+The target sample *only* shows 73.0.
+This implies that for the weeks in the target sample, the value was consistently 73.0, or the aggregation method is different (e.g., mode, or filtering).
+Or, perhaps the target sample provided in the JSON is just a subset of rows where the value happened to be 73.0?
+The target schema says `distinct_values: [73.0, null]`. It does *not* list 84.0.
+This suggests that in the *entire* target dataset, the value is either 73.0 or null.
+This is strange if the source has 84.0.
+Unless... the transformation **filters** out rows with 84.0?
+Or maybe the 84.0 values are in hours/days that are not represented in the target sample?
+But the target sample shows *all* hours 1-24 as 73.0.
+If the source has 84.0, and we average, we should see non-73 values.
+If we take the **first** value? Or **last**?
+If we take the **mode**?
+
+Let's look at the source sample again.
+`11/6/2018 21:45` -> 73.0
+`1/13/2019 8:45` -> 84.0
+`1/18/2019 3:20` -> 73.0
+
+If the target is weekly averages, and the source has mixed values, the average would be mixed.
+The fact that the target distinct values are *only* 73.0 and null suggests that either:
+1. The 84.0 values are filtered out.
+2. The 84.0 values are in a different time period not covered by the target sample (but the target schema describes the *whole* target).
+3. The aggregation is not mean. Maybe it's "Value at a specific time"? No, it's hourly bins.
+
+Wait, look at the target `distinct_values` for `Hour 10` to `Hour 21`: `[73]`. (Integer).
+For `Hour 1` to `Hour 9`: `[73.0, null]`. (Float).
+This implies that for Hours 10-21, there were *no* nulls in the target dataset.
+For Hours 1-9 and 22-24, there *were* nulls.
+
+This pattern (nulls at start/end of day) often happens if data is missing for early morning/late night hours in the source, or if the "Week" grouping results in missing data for those hours.
+
+Let's assume the transformation is:
+1. Parse Date.
+2. Create a "Week" identifier. Since the target date is `MM/DD/YYYY`, we need to decide what date to put in the `date` column. Usually, it's the start of the week (Monday) or the end (Sunday).
+   - Sep 16, 2018 is a Sunday.
+   - Oct 6, 2018 is a Saturday.
+   - Nov 3, 2018 is a Saturday.
+   - Oct 31, 2018 is a Wednesday.
+   - The dates in the target sample are not consistent with a single "Start of Week" day.
+   - However, `09/16/2018` is the first date. `10/20/2018` is the last.
+   - Maybe the date is just the **Date** of the record, and the 53 rows are **53 specific days**?
+   - But why 53? And why the wide format?
+   - If it were 53 specific days, why would they be pivoted? Usually, you pivot if you have multiple readings per day.
+   - If the source has 15117 unique timestamps, and we select 53 days, we would have 53 * 24 = 1272 rows in long format. Pivoting gives 53 rows.
+   - How are the 53 days selected?
+   - Maybe they are **Weekends**? 53 weekends in a year?
+   - Sep 16 (Sun), Oct 6 (Sat), Nov 3 (Sat)...
+   - This seems plausible. The target might be **Weekend Days** only?
+   - But Oct 31 is a Wednesday. So not just weekends.
+
+Let's step back.
+The most standard transformation from Long (Timestamp, Value) to Wide (Date, Hour 1-24) with a significant row reduction is **Weekly Aggregation**.
+The date in the target likely represents the **Week**.
+The inconsistency in the day-of-week for the target dates might be due to the specific "Week Start" definition (e.g., ISO week, or custom).
+Or, the `date` column in the target is simply the **first date** of the week?
+Sep 16, 2018 (Sun) -> Week starting Sep 16?
+Oct 6, 2018 (Sat) -> Week starting Oct 6?
+Nov 3, 2018 (Sat) -> Week starting Nov 3?
+Oct 31, 2018 (Wed) -> Week starting Oct 31?
+This doesn't make sense as a "Start of Week".
+
+Alternative: The target `date` is the **Date** of the record, and the 53 rows are **Monthly** averages?
+No, 53 months is 4+ years.
+
+Let's look at the source row count again: 15117.
+If the data is from 2018-2019 (2 years), 15117 / 730 ≈ 20.7 rows/day.
+If the data is from 2018 only (1 year), 15117 / 365 ≈ 41.4 rows/day.
+If the data is hourly (24 rows/day), 15117 / 24 ≈ 629 days.
+629 days is ~1.7 years.
+If the target has 53 rows, and represents **Weeks**, then 53 weeks ≈ 1 year.
+This fits the "1.7 years" source data if the target only covers a specific 1-year period, or if the 53 rows are a subset.
+
+Given the ambiguity of the date selection, but the clarity of the **Pivot** operation, I will implement a **Weekly Pivot**.
+1. Parse `date`.
+2. Extract `Year`, `Week` (ISO week or similar).
+3. Extract `Hour` (0-23).
+4. Group by `Year` and `Week`.
+5. Pivot to get mean value for each Hour.
+6. Rename columns to "Hour 1" ... "Hour 24".
+7. For the `date` column in the target, I need to generate a date string.
+   - Common practice: Use the **Monday** of that week.
+   - Format: `MM/DD/YYYY`.
+
+However, the target sample dates (`09/16/2018`, `10/06/2018`) do not look like Mondays.
+Sep 16, 2018 was a Sunday.
+Oct 6, 2018 was a Saturday.
+Nov 3, 2018 was a Saturday.
+Oct 31, 2018 was a Wednesday.
+
+Is it possible the target is **Daily** data, but only for **53 specific days**?
+Which 53 days?
+Maybe the days where `zone_016_cooling_sp` changed?
+Source distinct values: 73.0, 84.0.
+If we filter for days where the value is 73.0?
+But the target has 53 rows.
+
+Let's try a different angle.
+What if the transformation is simply:
+1. Parse Date.
+2. Group by **Date** (Calendar Day).
+3. Pivot to Hours.
+4. **Filter** the resulting DataFrame to keep only 53 rows?
+   - Which 53?
+   - The target sample dates are scattered.
+
+Actually, looking at the target sample data again:
+`09/16/2018`
+`10/06/2018`
+`11/03/2018`
+`10/31/2018`
+`10/25/2018`
+`09/24/2018`
+`10/21/2018`
+`09/17/2018`
+`10/11/2018`
+`11/02/2018`
+`10/02/2018`
+`10/20/2018`
+
+These dates are not sorted.
+The `first_last_non_null` in target schema is `09/16/2018` to `10/20/2018`.
+This range is about 1 month.
+53 rows in 1 month? That's almost every day.
+Sep 16 to Oct 20 is 34 days.
+53 rows is more than 34 days.
+So it's not "Every Day".
+
+Wait, `first_last_non_null` might just be the min and max of the *sample* provided, not the whole dataset.
+The target has 53 rows total.
+If the target covers a year, 53 rows is weekly.
+If the target covers a month, 53 rows is daily + something.
+
+Let's assume the standard **Weekly Average** transformation.
+The date in the target will be the **Start of the Week** (Monday).
+I will format it as `MM/DD/YYYY`.
+I will calculate the mean of `zone_016_cooling_sp` for each hour bin.
+
+One detail: The target columns `Hour 10` to `Hour 21` are `int64`.
+This implies that for these hours, the mean was an integer (or the data was integer and no nulls).
+Pandas `pivot_table` with `aggfunc='mean'` returns float.
+To get `int64`, we might need to cast if there are no nulls.
+But `Hour 1` is `float64`.
+I will perform the pivot and then attempt to cast columns to `int64` if they have no nulls, otherwise keep as `float64`. This matches the target schema's mixed types.
+
+**Refined Plan**:
+1. Parse `date` to datetime.
+2. Create `Year` and `Week` columns. Use `dt.isocalendar().week` and `dt.isocalendar().year`.
+3. Create `Hour` column (0-23).
+4. Group by `Year`, `Week`.
+5. Pivot: Index=`Year, Week`, Columns=`Hour`, Values=`zone_016_cooling_sp`, Aggfunc=`mean`.
+6. Rename columns to `Hour 1` ... `Hour 24`.
+7. Create a `date` column for the output. Use the Monday of the ISO week.
+   - `pd.to_datetime(f"{Year}-W{Week}-1")`? Or calculate Monday from the min date in the group.
+   - Let's use `dt.to_period('W').start_time` to get the Monday.
+8. Format `date` as `MM/DD/YYYY`.
+9. Reset index.
+10. Sort by `date`.
+11. Cast columns: If a column has no nulls, try casting to `int64`. Else `float64`.
+
+**Note on Date Format**:
+The target sample has `09/16/2018`.
+If I use ISO Week Monday for the week containing Sep 16, 2018 (Sunday):
+Sep 16, 2018 is in ISO Week 38.
+Monday of Week 38, 2018 is Sep 17, 2018.
+The target has `09/16/2018`.
+This suggests the "Week" might start on **Sunday**?
+If Week starts on Sunday:
+Sep 16, 2018 (Sunday) is the start.
+Oct 6, 2018 (Saturday) is the end of that week? No, Oct 6 is a Saturday.
+If the target date is the **Start of

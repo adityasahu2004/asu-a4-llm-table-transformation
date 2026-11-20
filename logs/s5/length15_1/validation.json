@@ -1,0 +1,138 @@
+{
+  "case": "length15_1",
+  "length": 15,
+  "strategy": "s5",
+  "model": "qwen36-27b",
+  "is_demo": false,
+  "parameters": {
+    "output": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment",
+    "model": "qwen36-27b",
+    "base_url": "https://openai.rc.asu.edu/v1",
+    "max_tokens": 6000,
+    "reasoning_effort": "none",
+    "k": 5,
+    "sample_rows": 12,
+    "timeout": 120,
+    "api_timeout": 3600,
+    "replay_only": false,
+    "strategy": "s5",
+    "python": "3.14.4 (main, Apr  7 2026, 13:13:20) [Clang 21.0.0 (clang-2100.0.123.102)]",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "pandas": "3.1.1",
+    "held_out": [
+      "length1_1",
+      "length1_2",
+      "length1_3",
+      "length2_1",
+      "length3_1"
+    ],
+    "benchmark": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split"
+  },
+  "prompt_path": "logs/s5/length15_1/prompt.json",
+  "completion_path": "logs/s5/length15_1/response.json",
+  "execution": {
+    "status": "ok",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:19: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+    "seconds": 1.2008784580029896,
+    "shape": [
+      72,
+      8
+    ],
+    "fingerprint": "a7d58d1f4232f04028a32779584976761527e7c6e20b84741a4e96f0390523d6"
+  },
+  "autopipeline": {
+    "accuracy": 0.0,
+    "is_correct": false,
+    "similarities": {},
+    "info": []
+  },
+  "hard_match": {
+    "accuracy": 0.625,
+    "is_correct": false,
+    "similarities": [
+      1.0,
+      1.0,
+      0.0,
+      1.0,
+      0.0,
+      1.0,
+      0.0,
+      1.0
+    ],
+    "info": [
+      "season",
+      "hour",
+      "domestic_water_heating",
+      "lighting",
+      "total"
+    ]
+  },
+  "hard_match_provenance": "course-provided hard_match.py and utils.py",
+  "exact_schema": true,
+  "generation": {
+    "candidate_count": 6,
+    "selected_index": 0,
+    "baseline_index": 0,
+    "selection_reason": "SC winner retained: no strict constraint improvement",
+    "constraints": {
+      "columns": [
+        "season",
+        "hour",
+        "hvac",
+        "domestic_water_heating",
+        "major_appliances",
+        "lighting",
+        "miscellaneous_plug_loads",
+        "total"
+      ],
+      "relations": []
+    },
+    "policy": {
+      "version": "schema-weekday-v1",
+      "pool": "five few-shot SC samples + one greedy few-shot sample",
+      "constraints": [
+        "exact target schema",
+        "uniquely identified date-to-weekday relation"
+      ],
+      "target_rows": "the same 12-row prompt sample as the baselines",
+      "output_rows": "up to 128 evenly spaced training-output rows",
+      "selection": "strictly lower lexicographic constraint loss; preserve SC winner on ties",
+      "forbidden_inputs": [
+        "test_0.csv",
+        "validator results",
+        "case-specific rules",
+        "target row counts"
+      ]
+    },
+    "usage": {
+      "prompt_tokens": 96582,
+      "completion_tokens": 12990,
+      "total_tokens": 109572
+    },
+    "api_attempts": 2,
+    "marginal_api_attempts": 0,
+    "latency_seconds": 269.49934891599696,
+    "inherited_api_seconds": 269.49934891599696,
+    "clusters": {
+      "30ed947fe75e5e3e55b2c9a9600d099b4da052b1717519f36777c97a6bdf95ad": [
+        0
+      ],
+      "9c05c5de2a190c8fe6c3de539c1b14f356e483f424bf234e73fe9c1bc46f4d59": [
+        1
+      ],
+      "0e16ecf9e74ce02178698ba63ccfd5aaef7b27ff68a45a611b227d925cedb5b0": [
+        2
+      ],
+      "0eb0388eaf950f79cbb527fb0b4f50674e3947720583d349c6602fbfa962900e": [
+        3
+      ],
+      "29577816e1fe78969dffc316a760cd80c0bd3df1e79f2fdc394182f3a9897ea8": [
+        4
+      ]
+    },
+    "cost_basis": "standalone logical pool cost; reused requests have zero marginal API cost"
+  },
+  "wall_seconds": 278.2770589159991
+}

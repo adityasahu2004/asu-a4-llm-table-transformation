@@ -1,0 +1,49 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `date` column from `M/D/YYYY` format to a pandas datetime object.
+2.  **Shift Date**: Subtract 180 days from the parsed datetime to align the dates with the target schema (e.g., `7/3/2015` becomes `2015-01-05`, but looking at the sample, `7/3/2015` in source maps to `2015-01-01`? No, let's look closer.
+    *   Source first row: `7/3/2015`. Target first row: `2015-01-01 00:00:00`.
+    *   Source last row: `12/31/2015`. Target last row: `2015-07-02 00:00:00`.
+    *   Difference between `7/3/2015` and `1/1/2015` is 183 days?
+        *   Jan (31) + Feb (28) + Mar (31) + Apr (30) + May (31) + Jun (30) = 181 days.
+        *   July 3rd is the 184th day of the year. Jan 1st is the 1st. Difference is 183 days.
+    *   Let's check the last row. `12/31/2015` is day 365. `7/2/2015` is day 183. Difference is 182 days.
+    *   Wait, the target has 183 rows, source has 182 rows. The target includes `2015-01-01` and ends at `2015-07-02`.
+    *   The source starts at `7/3/2015`.
+    *   If we subtract 183 days from `7/3/2015`, we get `1/1/2015`.
+    *   If we subtract 183 days from `12/31/2015`, we get `7/1/2015`.
+    *   The target ends at `7/2/2015`. This implies the target has one extra row or the shift is different.
+    *   Actually, looking at the distinct counts: Source has 182 distinct dates. Target has 183 distinct dates.
+    *   The prompt says "Source row count describes a training sample only". The transformation must be general.
+    *   However, usually these tasks involve a fixed shift or formatting.
+    *   Let's look at the values.
+        *   Source `7/3/2015` Hour 1: `0.0002398657`. Target `2015-01-01` value1: `0.0002398657`.
+        *   Source `7/19/2015` Hour 1: `0.0002398657`. Target `2015-01-17` value1: `0.0002398657`.
+        *   `7/3/2015` - 183 days = `1/1/2015`.
+        *   `7/19/2015` - 183 days = `1/17/2015`.
+        *   So the operation is `date - 183 days`.
+    *   Why does the target have 183 rows? The sample data provided for target shows 12 rows, same as source sample. The schema says 183 vs 182. It's possible the evaluation set has a different size, or there's a generated row. But since I cannot generate data not in source, I will apply the shift to the source rows. If the target has an extra row, it might be an artifact of the specific training sample generation (e.g., including the start date of a period). However, the instruction says "Compute the result only from the source DataFrame". I will shift the dates. If the source has 182 rows, the output will have 182 rows. The schema difference might be due to the specific training split including an edge case or the source sample being truncated. I will stick to the deterministic transformation: Shift date by -183 days.
+
+3.  **Rename Columns**: Map `Hour 1` to `value1`, ..., `Hour 24` to `value24`.
+4.  **Format Date**: Format the shifted date as `YYYY-MM-DD 00:00:00`.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date from M/D/YYYY format
+    dt = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    
+    # Shift the date by 183 days to match the target timeline
+    # 7/3/2015 - 183 days = 1/1/2015
+    shifted_dt = dt - pd.Timedelta(days=183)
+    
+    # Create the output dataframe
+    out = pd.DataFrame()
+    out['date'] = shifted_dt.dt.strftime('%Y-%m-%d 00:00:00')
+    
+    # Rename hourly columns to value1..value24
+    for i in range(1, 25):
+        out[f'value{i}'] = source[f'Hour {i}']
+        
+    return out
+```

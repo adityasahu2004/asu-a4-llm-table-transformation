@@ -1,0 +1,77 @@
+[
+  {
+    "index": 0,
+    "finish_reason": "stop",
+    "path": "generated/s4/length8_4/candidates/0.py",
+    "execution": {
+      "status": "execution_error",
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\nTraceback (most recent call last):\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py\", line 21, in <module>\n    output = namespace['transform'](source)\n  File \"transform.py\", line 25, in transform\n    long_df['hour'] = long_df['hour_col'].apply(lambda x: int(x.split('_')[1][:2]))\n                      ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/series.py\", line 5575, in apply\n    ).apply()\n      ~~~~~^^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/apply.py\", line 1749, in apply\n    return self.apply_standard()\n           ~~~~~~~~~~~~~~~~~~~^^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/apply.py\", line 1807, in apply_standard\n    mapped = obj._map_values(mapper=curried)\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/base.py\", line 1076, in _map_values\n    return arr.map(mapper, na_action=na_action)\n           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/arrays/base.py\", line 3006, in map\n    result = map_array(self, mapper, na_action=na_action)\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/algorithms.py\", line 2007, in map_array\n    return lib.map_infer(values, mapper)\n           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^\n  File \"pandas/_libs/lib.pyx\", line 3390, in pandas._libs.lib.map_infer\n  File \"transform.py\", line 25, in <lambda>\n    long_df['hour'] = long_df['hour_col'].apply(lambda x: int(x.split('_')[1][:2]))\n                                                          ~~~^^^^^^^^^^^^^^^^^^^^^\nValueError: invalid literal for int() with base 10: 'HO'\n",
+      "seconds": 0.6823628339989227
+    }
+  },
+  {
+    "index": 1,
+    "finish_reason": "stop",
+    "path": "generated/s4/length8_4/candidates/1.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+      "seconds": 0.6737117919983575,
+      "shape": [
+        24,
+        13
+      ],
+      "fingerprint": "a9c1d34cbf97c4c15d76fb775a027e3e5a0d2b86ef54091b9149eaad744981b0"
+    }
+  },
+  {
+    "index": 2,
+    "finish_reason": "stop",
+    "path": "generated/s4/length8_4/candidates/2.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+      "seconds": 0.6675688329996774,
+      "shape": [
+        24,
+        13
+      ],
+      "fingerprint": "f805a2c8fed13472871240151ea4c8f90d1532af6a44756f95a47c12dfda1778"
+    }
+  },
+  {
+    "index": 3,
+    "finish_reason": "stop",
+    "path": "generated/s4/length8_4/candidates/3.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+      "seconds": 0.6585225419985363,
+      "shape": [
+        24,
+        13
+      ],
+      "fingerprint": "072c8e04817444cf2aa6243062ee8aa63070f9ae3c83d0752dda8549538ede2d"
+    }
+  },
+  {
+    "index": 4,
+    "finish_reason": "stop",
+    "path": "generated/s4/length8_4/candidates/4.py",
+    "execution": {
+      "status": "execution_error",
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\nTraceback (most recent call last):\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py\", line 21, in <module>\n    output = namespace['transform'](source)\n  File \"transform.py\", line 34, in transform\n    result['hour'] = result['hour'].astype(int)\n                     ~~~~~~~~~~~~~~~~~~~~~^^^^^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/generic.py\", line 6781, in astype\n    new_data = self._mgr.astype(dtype=dtype, errors=errors)\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/internals/managers.py\", line 632, in astype\n    return self.apply(\"astype\", dtype=dtype, errors=errors)\n           ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/internals/managers.py\", line 456, in apply\n    applied = getattr(b, f)(**kwargs)\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/internals/blocks.py\", line 623, in astype\n    new_values = astype_array_safe(values, dtype, errors=errors)\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/dtypes/astype.py\", line 245, in astype_array_safe\n    new_values = astype_array(values, dtype, copy=copy)\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/dtypes/astype.py\", line 187, in astype_array\n    values = values.astype(dtype, copy=copy)\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/arrays/string_.py\", line 957, in astype\n    return super().astype(dtype, copy)\n           ~~~~~~~~~~~~~~^^^^^^^^^^^^^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/arrays/numpy_.py\", line 334, in astype\n    result = astype_array(self._ndarray, dtype=dtype, copy=copy)\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/dtypes/astype.py\", line 190, in astype_array\n    values = _astype_nansafe(values, dtype, copy=copy)\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/dtypes/astype.py\", line 139, in _astype_nansafe\n    return arr.astype(dtype, copy=True)\n           ~~~~~~~~~~^^^^^^^^^^^^^^^^^^\nValueError: invalid literal for int() with base 10: 'PCT_HOURLY_0100'\n",
+      "seconds": 0.6628653750012745
+    }
+  }
+]

@@ -1,0 +1,22 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `Date` column from `str` (format `%m/%d/%Y`) to `datetime` objects.
+2.  **Format Date**: Convert the parsed datetime objects to the target string format `MM/DD/YYYY` and assign to column `date`.
+3.  **Rename Columns**: Map the source integer columns (`1` through `24`) to the target column names (`Hour 1` through `Hour 24`).
+4.  **Select & Construct**: Create the final DataFrame containing only the `date` column and the renamed hourly columns, preserving the original row order and data values.
+
+```python
+import pandas as pd
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    dt = pd.to_datetime(source['Date'], format='%m/%d/%Y')
+    
+    # Create the target date string column
+    out = pd.DataFrame()
+    out['date'] = dt.dt.strftime('%m/%d/%Y')
+    
+    # Rename and select the hourly columns
+    for h in range(1, 25):
+        out[f'Hour {h}'] = source[str(h)]
+        
+    return out
+```

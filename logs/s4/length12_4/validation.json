@@ -1,0 +1,131 @@
+{
+  "case": "length12_4",
+  "length": 12,
+  "strategy": "s4",
+  "model": "qwen36-27b",
+  "is_demo": false,
+  "parameters": {
+    "output": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment",
+    "model": "qwen36-27b",
+    "base_url": "https://openai.rc.asu.edu/v1",
+    "max_tokens": 6000,
+    "reasoning_effort": "none",
+    "k": 5,
+    "sample_rows": 12,
+    "timeout": 120,
+    "api_timeout": 3600,
+    "replay_only": true,
+    "strategy": "s4",
+    "python": "3.14.4 (main, Apr  7 2026, 13:13:20) [Clang 21.0.0 (clang-2100.0.123.102)]",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "pandas": "3.1.1",
+    "held_out": [
+      "length1_1",
+      "length1_2",
+      "length1_3",
+      "length2_1",
+      "length3_1"
+    ],
+    "benchmark": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split"
+  },
+  "prompt_path": "logs/s4/length12_4/prompt.json",
+  "completion_path": "logs/s4/length12_4/response.json",
+  "execution": {
+    "status": "ok",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+    "seconds": 1.042519333997916,
+    "shape": [
+      96,
+      15
+    ],
+    "fingerprint": "f553d14f41b18c9a31f189189e9240a59283a13cf1052b2dfa6a7d9b572a1c64"
+  },
+  "autopipeline": {
+    "accuracy": 0.0,
+    "is_correct": false,
+    "similarities": {},
+    "info": []
+  },
+  "hard_match": {
+    "accuracy": 0.7333333333333333,
+    "is_correct": false,
+    "similarities": [
+      1.0,
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0,
+      0.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "info": [
+      "season",
+      "hour",
+      "clothes_washer",
+      "clothes_dryer",
+      "cooking_range",
+      "pool_spa_pumps",
+      "interior_lighting",
+      "exterior_lighting",
+      "lighting",
+      "plug",
+      "pool_spa_heater"
+    ]
+  },
+  "hard_match_provenance": "course-provided hard_match.py and utils.py",
+  "exact_schema": true,
+  "generation": {
+    "request_hash": "c04440ef8914a9ab6f3e92ff90870c33d2cdeecd683e2e9cc8fa543dd35aa501",
+    "usage": {
+      "completion_tokens": 10708,
+      "prompt_tokens": 40209,
+      "total_tokens": 50917,
+      "completion_tokens_details": null,
+      "prompt_tokens_details": {
+        "audio_tokens": null,
+        "cache_write_tokens": null,
+        "cached_tokens": 39424,
+        "image_tokens": null,
+        "text_tokens": null,
+        "created_cache_tokens": 0,
+        "multimodal_tokens": null
+      },
+      "co2_g": 0.984215,
+      "energy_wh": 2.920519
+    },
+    "latency_seconds": 140.88522079199902,
+    "api_attempts": 1,
+    "cached": true,
+    "candidate_count": 5,
+    "api_timeout_seconds": 3600,
+    "reasoning_effort_header": "none",
+    "selected_index": 0,
+    "clusters": {
+      "b9804bc8765deb600e3e4229138177c001ac3793d8688cb24eece0d57f9202a1": [
+        0,
+        1
+      ],
+      "c509994036a5326fba504d66fac1ca3686158ea76c6208583a8f36f09d1d3555": [
+        2
+      ],
+      "60e79fe82781ce47302de574fa6c45978193a052db107fc49a1c029e062a8fa0": [
+        3
+      ],
+      "709568a20a27b16513ce5016b2f13dde151774824ae809f8fe2c0d7a20f878f6": [
+        4
+      ]
+    }
+  },
+  "wall_seconds": 148.4301119590018,
+  "replay_wall_seconds": 7.110682791004365
+}

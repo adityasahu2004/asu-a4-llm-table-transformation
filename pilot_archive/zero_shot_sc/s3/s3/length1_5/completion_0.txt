@@ -1,0 +1,185 @@
+### Operator Plan
+
+1.  **Date Parsing and Shifting**:
+    *   Parse the source `date` column (format `M/D/YYYY`) into datetime objects.
+    *   Observe that the target dates are exactly 14 days prior to the source dates (e.g., Source `7/3/2015` -> Target `Thu 01/01/2015` is incorrect? Let's re-check.
+        *   Source `7/3/2015` (Friday). Target `Thu 01/01/2015`. Difference: ~6 months.
+        *   Source `12/31/2015`. Target `Thu 07/02/2015`. Difference: ~6 months.
+        *   Let's check the first sample row: Source `7/3/2015`. Target `Thu 01/01/2015`.
+        *   Let's check the last sample row: Source `12/31/2015`. Target `Thu 07/02/2015`.
+        *   Wait, the target sample shows `Thu 01/01/2015` as the first row and `Thu 07/02/2015` as the last.
+        *   The source sample shows `7/3/2015` as first and `12/31/2015` as last.
+        *   Let's look at the mapping more closely.
+        *   Source `7/3/2015` -> Target `Thu 01/01/2015`? No, that's a huge jump.
+        *   Let's look at the second source row `7/19/2015`. Is there a corresponding target row? The target sample has `Sat 01/17/2015`.
+        *   Let's look at the date difference.
+        *   `7/3/2015` minus `1/1/2015` is 183 days.
+        *   `12/31/2015` minus `7/2/2015` is 182 days.
+        *   This implies a shift of approximately 6 months (specifically 182 or 183 days).
+        *   However, looking at the *structure* of the data, it seems more likely that the source data is "Hourly consumption" for a given day, and the target is also "Hourly consumption" for a given day.
+        *   Let's re-read the target first/last non-null: `Thu 01/01/2015` to `Thu 07/02/2015`.
+        *   Source first/last: `7/3/2015` to `12/31/2015`.
+        *   The source has 182 rows. The target has 183 rows.
+        *   It appears the source data is shifted by exactly **182 days** forward relative to the target? Or target is 182 days back?
+        *   Let's check `7/3/2015` - 182 days = `1/3/2015`. That is not `1/1/2015`.
+        *   Let's check `7/3/2015` - 183 days = `1/2/2015`.
+        *   Let's look at the specific values.
+        *   Source Row 1: `7/3/2015`. Values: H1-H5=0.0002398657, H6=0.0001199328, H7=0, H8=0, H9-H16=0, H17=0, H18=0, H19=0, H20=0, H21=0, H22=0.0002398657...
+        *   Target Row 1: `Thu 01/01/2015`. Values: H1-H5=0.0002398657, H6=0.0002398657, H7=0.0002398657, H8=0.0001199328, H9-H16=0, H17=0.0001199328, H18=0.0002398657...
+        *   The values do **not** match between Source Row 1 and Target Row 1.
+        *   Let's look for a row in the source that matches Target Row 1.
+        *   Target Row 1 (`01/01/2015`): H6 is `0.0002398657`.
+        *   Source Row 1 (`7/3/2015`): H6 is `0.0001199328`.
+        *   Source Row 4 (`8/21/2015`): H6 is `0.0002398657`.
+        *   This suggests a simple date shift might not be the only transformation, or the rows are reordered?
+        *   Actually, let's look at the Target Row 12 (`Thu 07/02/2015`).
+        *   Target Row 12: H6=`0.0001199328`, H7=`0.0`, H8=`0.0`, H17=`0.0`, H18=`0.0`, H19=`0.0`, H20=`0.0`, H21=`0.0`.
+        *   Source Row 1 (`7/3/2015`): H6=`0.0001199328`, H7=`0.0`, H8=`0.0`, H17=`0.0`, H18=`0.0`, H19=`0.0`, H20=`0.0`, H21=`0.0`.
+        *   The values for Source Row 1 (`7/3/2015`) match Target Row 12 (`07/02/2015`) almost exactly?
+            *   Source `7/3/2015` H1-H5: `0.0002398657`. Target `07/02/2015` H1-H5: `0.0002398657`.
+            *   Source `7/3/2015` H6: `0.0001199328`. Target `07/02/2015` H6: `0.0001199328`.
+            *   Source `7/3/2015` H7: `0.0`. Target `07/02/2015` H7: `0.0`.
+            *   Source `7/3/2015` H8: `0.0`. Target `07/02/2015` H8: `0.0`.
+            *   Source `7/3/2015` H17: `0.0`. Target `07/02/2015` H17: `0.0`.
+            *   Source `7/3/2015` H22: `0.0002398657`. Target `07/02/2015` H22: `0.0002398657`.
+        *   It appears **Source Date - 1 Day = Target Date**.
+        *   Let's verify: `7/3/2015` - 1 day = `7/2/2015`. Target is `Thu 07/02/2015`. Correct.
+        *   Let's verify the last row: Source `12/31/2015` - 1 day = `12/30/2015`.
+        *   But the last target row is `Thu 07/02/2015`? No, the target sample *ends* with `Thu 07/02/2015` in the provided snippet, but the target metadata says distinct dates are `Thu 01/01/2015` to `Thu 07/02/2015`.
+        *   Wait, the source metadata says distinct dates are `7/3/2015` to `12/31/2015`.
+        *   The target metadata says distinct dates are `Thu 01/01/2015` to `Thu 07/02/2015`.
+        *   This range (Jan 1 to Jul 2) is roughly 6 months. The source range (Jul 3 to Dec 31) is roughly 6 months.
+        *   If Source `7/3/2015` maps to Target `7/2/2015`, then Source `12/31/2015` should map to Target `12/30/2015`.
+        *   But the target *only* has dates up to `07/02/2015`?
+        *   Let's re-read the target `first_last_non_null`.
+        *   Target: `Thu 01/01/2015` to `Thu 07/02/2015`.
+        *   Source: `7/3/2015` to `12/31/2015`.
+        *   This implies the target data is from the *first half* of the year, and source is from the *second half*.
+        *   Is it possible the source is shifted by **182 days** (6 months)?
+        *   `7/3/2015` - 182 days = `1/3/2015`. Close to `1/1/2015`.
+        *   `12/31/2015` - 182 days = `7/2/2015`. Matches `Thu 07/02/2015`.
+        *   Let's check the first target date: `Thu 01/01/2015`.
+        *   `1/1/2015` + 182 days = `7/1/2015`.
+        *   Source starts `7/3/2015`.
+        *   There is a slight mismatch in the start date if we assume a constant shift.
+        *   Let's look at the row counts. Source: 182. Target: 183.
+        *   Days between `1/1/2015` and `7/2/2015` inclusive:
+            *   Jan (31) + Feb (28) + Mar (31) + Apr (30) + May (31) + Jun (30) + Jul (2) = 183 days.
+        *   Days between `7/3/2015` and `12/31/2015` inclusive:
+            *   Jul (29) + Aug (31) + Sep (30) + Oct (31) + Nov (30) + Dec (31) = 182 days.
+        *   So the Target covers the period `2015-01-01` to `2015-07-02`.
+        *   The Source covers the period `2015-07-03` to `2015-12-31`.
+        *   The transformation is likely: **Target Date = Source Date - 182 days**.
+        *   Let's verify the value mapping with this hypothesis.
+        *   If `Target Date = Source Date - 182 days`, then Source `7/3/2015` -> Target `1/3/2015`.
+        *   Does Target have a row for `1/3/2015`? Yes, `Tue 01/06/2015` is in the sample? No, sample has `Tue 02/03/2015`.
+        *   Let's check the sample data values again.
+        *   Source `7/3/2015` (Row 1) has H6=`0.0001199328`.
+        *   If this maps to `1/3/2015`, does Target `1/3/2015` have H6=`0.0001199328`?
+        *   The target sample doesn't explicitly show `1/3/2015`. It shows `01/01`, `01/17`, `02/03`.
+        *   Let's check Source `8/21/2015` (Row 4). `8/21/2015` - 182 days = `2/2/2015`.
+        *   Target sample has `Tue 02/03/2015`. Close.
+        *   Let's check the values for Source `8/21/2015`: H6=`0.0002398657`, H7=`0.0`.
+        *   Target `02/03/2015` (Row 3): H6=`0.0002398657`, H7=`0.0002398657`. Mismatch.
+        *   Target `02/03/2015` H7 is `0.0002398657`. Source `8/21/2015` H7 is `0.0`.
+        *   Let's check Source `9/6/2015` (Row 5). `9/6/2015` - 182 days = `3/8/2015`.
+        *   Target sample has `Sun 03/08/2015` (Row 5).
+        *   Source `9/6/2015` Values: H1-H5=`0.0002398657`, H6=`0.0002398657`, H7=`0.0`, H8=`0.0`, H17=`0.0`, H18=`0.0`, H19=`0.0`, H20=`0.0`, H21=`0.0`, H22=`0.0002398657`.
+        *   Target `03/08/2015` Values: H1-H2=`0.0002398657`, H3=`0.0`, H4=`0.0002398657`, H5=`0.0002398657`, H6=`0.0002398657`, H7=`0.0002398657`, H8=`0.0`, H17=`0.0`, H18=`0.0`, H19=`0.0`, H20=`0.0`, H21=`0.0002398657`.
+        *   Mismatch in H3, H4, H5, H7.
+        *   
+        *   **Alternative Hypothesis**: The data is not just shifted. Is it reversed? Or sorted differently?
+        *   Source is sorted by Date Ascending.
+        *   Target is sorted by Date Ascending.
+        *   
+        *   Let's look at the Target `Thu 01/01/2015` again.
+        *   Values: H6=`0.0002398657`, H7=`0.0002398657`, H8=`0.0001199328`.
+        *   Which Source row has these values?
+        *   Source `12/31/2015` (Last Row): H6=`0.0002398657`, H7=`0.0001199328`, H8=`0.0`. No.
+        *   Source `12/14/2015`: H6=`0.0002398657`, H7=`0.0002398657`, H8=`0.0`. No.
+        *   
+        *   Let's look at Target `Thu 07/02/2015` (Last Row).
+        *   Values: H6=`0.0001199328`, H7=`0.0`, H8=`0.0`, H17=`0.0`, H18=`0.0`, H19=`0.0`, H20=`0.0`, H21=`0.0`.
+        *   This matches Source `7/3/2015` (First Row) perfectly.
+        *   
+        *   So, **Source First Row -> Target Last Row**.
+        *   **Source Last Row -> Target First Row**?
+        *   Let's check Source Last Row `12/31/2015`.
+        *   Values: H6=`0.0002398657`, H7=`0.0001199328`, H8=`0.0`, H17=`0.0001199328`, H18=`0.0002398657`.
+        *   Target First Row `01/01/2015`.
+        *   Values: H6=`0.0002398657`, H7=`0.0002398657`, H8=`0.0001199328`, H17=`0.0001199328`, H18=`0.0002398657`.
+        *   Mismatch in H7, H8.
+        *   
+        *   Let's check Source `12/14/2015` (Second to last).
+        *   Values: H6=`0.0002398657`, H7=`0.0002398657`, H8=`0.0`, H17=`0.0001199328`, H18=`0.0002398657`.
+        *   Target `01/01/2015`: H6=`0.0002398657`, H7=`0.0002398657`, H8=`0.0001199328`.
+        *   Still mismatch in H8.
+        *   
+        *   Let's look at the Target `Sat 01/17/2015` (Row 2).
+        *   Values: H6=`0.0002398657`, H7=`0.0002398657`, H8=`0.0`.
+        *   Source `11/28/2015` (Row 11).
+        *   Values: H6=`0.0002398657`, H7=`0.0001199328`, H8=`0.0`. Mismatch H7.
+        *   
+        *   There seems to be a specific date mapping.
+        *   Source `7/3/2015` -> Target `07/02/2015` (Shift -1 day).
+        *   Source `7/19/2015` -> Target `07/18/2015`?
+        *   Target sample doesn't have `07/18`.
+        *   
+        *   Wait, look at the Target dates again.
+        *   `Thu 01/01/2015`
+        *   `Sat 01/17/2015`
+        *   `Tue 02/03/2015`
+        *   `Thu 02/19/2015`
+        *   `Sun 03/08/2015`
+        *   `Tue 03/24/2015`
+        *   `Fri 04/10/2015`
+        *   `Sun 04/26/2015`
+        *   `Wed 05/13/2015`
+        *   `Fri 05/29/2015`
+        *   `Mon 06/15/2015`
+        *   `Thu 07/02/2015`
+        *   
+        *   These dates are roughly 2 weeks apart.
+        *   Source dates:
+        *   `7/3/2015`
+        *   `7/19/2015`
+        *   `8/4/2015`
+        *   `8/21/2015`
+        *   `9/6/2015`
+        *   `9/23/2015`
+        *   `10/9/2015`
+        *   `10/26/2015`
+        *   `11/11/2015`
+        *   `11/28/2015`
+        *   `12/14/2015`
+        *   `12/31/2015`
+        *   
+        *   The Source sample provided in the JSON is a *subset* (12 rows) of the 182 rows.
+        *   The Target sample provided is a *subset* (12 rows) of the 183 rows.
+        *   
+        *   Let's align the samples by index.
+        *   Source Sample Row 0 (`7/3/2015`) matches Target Sample Row 11 (`07/02/2015`) in values.
+        *   Source Sample Row 11 (`12/31/2015`) matches Target Sample Row 0 (`01/01/2015`) in values?
+            *   Source `12/31`: H6=`0.0002398657`, H7=`0.0001199328`, H8=`0.0`, H17=`0.0001199328`.
+            *   Target `01/01`: H6=`0.0002398657`, H7=`0.0002398657`, H8=`0.0001199328`, H17=`0.0001199328`.
+            *   Mismatch H7, H8.
+        *   
+        *   Let's try matching Source `12/14/2015` (Sample Row 10) with Target `01/01/2015`.
+            *   Source `12/14`: H6=`0.0002398657`, H7=`0.0002398657`, H8=`0.0`.
+            *   Target `01/01`: H6=`0.0002398657`, H7=`0.0002398657`, H8=`0.0001199328`.
+            *   Mismatch H8.
+        *   
+        *   Let's try matching Source `11/28/2015` (Sample Row 9) with Target `01/01/2015`.
+            *   Source `11/28`: H6=`0.0002398657`, H7=`0.0001199328`, H8=`0.0`.
+            *   Mismatch.
+        *   
+        *   Let's look at Target `01/01/2015` again.
+        *   H8 is `0.0001199328`.
+        *   Which source row has H8=`0.0001199328`?
+        *   Source `12/31/2015` has H8=`0.0`.
+        *   Source `12/14/2015` has H8=`0.0`.
+        *   Source `11/28/2015` has H8=`0.0`.
+        *   Source `11/11/2015` has H8=`0.0`.
+        *   Source `10/26/2015` has H8=`0.0`.
+        *   Source `10/9/2015` has H8=`0.0`.
+        *   Source `9/23/

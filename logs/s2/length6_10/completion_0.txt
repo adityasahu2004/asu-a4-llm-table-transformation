@@ -1,0 +1,80 @@
+Operator plan:
+1. Parse the `date` column into a datetime object.
+2. Extract the date part (YYYY-MM-DD) to group by day.
+3. Extract the hour part (0-23) from the datetime.
+4. Pivot the data so that each unique date becomes a row, and each hour (1-24) becomes a column. Note: The target columns are "Hr 1" to "Hr 24". Standard 24-hour clock is 0-23. Usually "Hr 1" corresponds to 00:00-01:00 (hour 0) or 01:00-02:00 (hour 1). Let's look at the source data.
+   Source: "11/6/2018 21:45" -> Hour 21.
+   Target: "Hr 21" has value 73.0.
+   If "Hr 1" is hour 0, then "Hr 21" is hour 20.
+   If "Hr 1" is hour 1, then "Hr 21" is hour 21.
+   Let's check the distinct values. The source has times like 21:45. The hour is 21.
+   In the target, "Hr 21" is populated.
+   If we map hour 0 -> "Hr 1", hour 1 -> "Hr 2", ..., hour 23 -> "Hr 24".
+   Then hour 21 -> "Hr 22".
+   If we map hour 1 -> "Hr 1", ..., hour 23 -> "Hr 23", and hour 0 -> "Hr 24"? Or hour 0 -> "Hr 1"?
+   Let's look at the sample target data. All values are 73.0. This doesn't help distinguish mapping.
+   However, standard convention in many energy datasets:
+   Hour 1 = 00:00-01:00 (Hour 0)
+   Hour 24 = 23:00-00:00 (Hour 23)
+   Let's assume Hour N corresponds to datetime hour N-1.
+   So, `hour` from datetime (0-23) maps to `Hr {hour+1}`.
+   
+   Wait, let's re-read the source.
+   "11/6/2018 21:45" -> Hour 21.
+   If mapping is `Hr {hour+1}`, then 21 -> Hr 22.
+   If mapping is `Hr {hour}` for 1-23 and `Hr 24` for 0?
+   Let's look at the target column names: "Hr 1" ... "Hr 24".
+   Commonly, Hour 1 is 12am-1am (00:00). Hour 24 is 11pm-12am (23:00).
+   So, datetime hour 0 -> "Hr 1".
+   datetime hour 21 -> "Hr 22".
+   
+   Let's check if there's any other clue.
+   Source distinct values for `zone_016_cooling_sp` are 73.0 and 84.0.
+   Target distinct values are 73.0.
+   The sample target rows all have 73.0.
+   
+   Let's assume the standard mapping:
+   Hour 0 -> Hr 1
+   Hour 1 -> Hr 2
+   ...
+   Hour 23 -> Hr 24
+   
+   Steps:
+   1. Parse `date` to datetime.
+   2. Create a column `Date` formatted as MM/DD/YYYY.
+   3. Create a column `Hour` from the datetime hour.
+   4. Pivot: index=`Date`, columns=`Hour`, values=`zone_016_cooling_sp`.
+   5. Rename columns: 0->"Hr 1", 1->"Hr 2", ..., 23->"Hr 24".
+   6. Ensure all 24 columns exist, filling NaNs if a specific hour is missing for a day.
+   7. Reset index.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    df = source.copy()
+    df['datetime'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract date and hour
+    df['Date'] = df['datetime'].dt.strftime('%m/%d/%Y')
+    df['Hour'] = df['datetime'].dt.hour
+    
+    # Pivot the data
+    # Index: Date, Columns: Hour, Values: zone_016_cooling_sp
+    pivoted = df.pivot_table(index='Date', columns='Hour', values='zone_016_cooling_sp', aggfunc='first')
+    
+    # Ensure all hours 0-23 are present
+    all_hours = range(24)
+    pivoted = pivoted.reindex(columns=all_hours)
+    
+    # Rename columns to Hr 1 ... Hr 24
+    # Hour 0 -> Hr 1, Hour 1 -> Hr 2, ..., Hour 23 -> Hr 24
+    pivoted.columns = [f'Hr {h+1}' for h in pivoted.columns]
+    
+    # Reset index to make Date a column
+    result = pivoted.reset_index()
+    
+    return result
+```

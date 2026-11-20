@@ -1,0 +1,123 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `date` column from string format (`M/D/YYYY H:MM`) to pandas datetime objects.
+2.  **Extract Date and Hour**:
+    *   Extract the calendar date (year-month-day) to group records.
+    *   Extract the hour of the day (0-23) to determine which "Hr" column the value belongs to.
+3.  **Pivot/Reshape**:
+    *   Group by the extracted calendar date.
+    *   Pivot the data such that each unique hour (0-23) becomes a separate column.
+    *   The values in these columns will be the `cerc_logger_1` measurements.
+    *   Since the target columns are named `Hr 1` to `Hr 24`, we map hour 0 to `Hr 1`, hour 1 to `Hr 2`, ..., hour 23 to `Hr 24`. This implies a 1-based indexing for the hour columns corresponding to the 24 hours of the day.
+4.  **Format Output**:
+    *   Rename the index (date) to `Date`.
+    *   Format the `Date` column as `MM/DD/YYYY` strings.
+    *   Rename the hour columns to `Hr 1`, `Hr 2`, ..., `Hr 24`.
+    *   Ensure the final DataFrame has the correct column order and types.
+    *   Sort the result by `Date` to match typical time-series output expectations (though the sample isn't strictly sorted, standard practice is chronological; however, looking at the sample, it seems somewhat random or reverse chronological? Let's check the sample: `05/08/2019`, `07/13/2019`, `07/09/2018`... it's not sorted. The prompt says "Compute the result only from the source DataFrame". Usually, pivot tables are sorted by index. I will sort by Date ascending as is standard for time series unless specified otherwise, but given the distinct count matches the row count of the target, it's a simple aggregation. I will sort by Date to ensure deterministic output).
+
+*Self-Correction on Hour Mapping*:
+The source has hours like `4:50`, `9:30`.
+Target has `Hr 1` ... `Hr 24`.
+Standard 24-hour clock: 00:00-00:59 is Hour 0. 01:00-01:59 is Hour 1.
+If `Hr 1` corresponds to the first hour of the day (00:00-00:59), then `Hr 1` = Hour 0.
+If `Hr 1` corresponds to 01:00-01:59, then `Hr 1` = Hour 1.
+Let's look at the data.
+Source: `7/28/2019 4:50` -> Value 24.562.
+Target: `07/28/2019` row.
+`Hr 1`: 24.25
+`Hr 2`: 24.375
+`Hr 3`: 24.437
+`Hr 4`: 24.562
+`Hr 5`: 24.562
+...
+The value 24.562 appears in `Hr 4` and `Hr 5`.
+The source time is 4:50. This falls in the 4th hour (04:00-04:59).
+If `Hr 1` is Hour 0, then `Hr 5` is Hour 4.
+If `Hr 1` is Hour 1, then `Hr 4` is Hour 3.
+Since 4:50 is in Hour 4 (0-indexed), and the value is in `Hr 5`, it strongly suggests `Hr N` corresponds to Hour `N-1`.
+So, `Hr 1` = Hour 0, `Hr 2` = Hour 1, ..., `Hr 24` = Hour 23.
+
+Let's double check with another point.
+Source: `9/13/2019 9:30` -> 21.812.
+Target: `09/13/2019` is not in the sample, but `07/13/2019` is.
+Let's look at `12/20/2019 0:50` -> 24.437.
+Target `12/20/2019` is not in sample.
+Let's look at `2/5/2020 6:40` -> 23.5.
+Target `02/05/2020` not in sample.
+
+Let's look at `07/28/2019` in target again.
+`Hr 4` is 24.562. `Hr 5` is 24.562.
+Source has `7/28/2019 4:50` (Hour 4).
+If `Hr 5` is Hour 4, then `Hr 1` is Hour 0.
+This confirms the mapping: `Hour` (0-23) -> `Hr {Hour + 1}`.
+
+5.  **Final Steps**:
+    *   Reset index.
+    *   Format Date column.
+    *   Select and order columns: `Date`, `Hr 1` ... `Hr 24`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse the date column
+    # Format is M/D/YYYY H:MM
+    df = source.copy()
+    df['datetime'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # 2. Extract date and hour
+    df['date_only'] = df['datetime'].dt.date
+    df['hour'] = df['datetime'].dt.hour
+    
+    # 3. Pivot the data
+    # We want to group by date_only and spread the hours into columns
+    # The value to aggregate is cerc_logger_1
+    # Since there might be multiple entries per hour or missing hours, 
+    # we need to handle aggregation. The problem implies a single value per hour 
+    # or an average if multiple exist. Given the distinct counts and nature of 
+    # logger data, it's likely one reading per hour or we take the mean/first.
+    # Looking at the target, there are NaNs for missing hours.
+    # Let's use 'first' or 'mean'. Usually, if there's only one, it doesn't matter.
+    # If there are multiple, 'mean' is safer for sensor data, but 'first' preserves 
+    # the specific reading if it's a snapshot. 
+    # However, looking at the source sample, the times are irregular (4:50, 9:30).
+    # It's possible there is only one reading per hour in the full dataset, 
+    # or we need to aggregate. Let's assume 'first' for simplicity unless 
+    # duplicates are common. Actually, 'mean' is more robust for "logger" data 
+    # which might have multiple samples. But let's look at the distinct counts.
+    # Source distinct: 1279. Rows: 74848. This suggests many duplicates or 
+    # repeated values. Wait, 74848 rows / 521 days ~ 143 readings per day?
+    # That's more than 24. So there are multiple readings per hour.
+    # We should probably take the mean or median. Let's use mean.
+    
+    pivot_df = df.pivot_table(
+        index='date_only',
+        columns='hour',
+        values='cerc_logger_1',
+        aggfunc='mean'
+    )
+    
+    # 4. Rename columns to Hr 1 ... Hr 24
+    # Hour 0 -> Hr 1, Hour 1 -> Hr 2, ..., Hour 23 -> Hr 24
+    pivot_df.columns = [f'Hr {h + 1}' for h in pivot_df.columns]
+    
+    # 5. Reset index and format Date
+    pivot_df = pivot_df.reset_index()
+    pivot_df.rename(columns={'date_only': 'Date'}, inplace=True)
+    
+    # Format Date as MM/DD/YYYY
+    pivot_df['Date'] = pd.to_datetime(pivot_df['Date']).dt.strftime('%m/%d/%Y')
+    
+    # 6. Ensure all Hr columns are present and ordered
+    expected_cols = ['Date'] + [f'Hr {i}' for i in range(1, 25)]
+    
+    # Reindex to ensure all columns exist (filling NaNs for missing hours)
+    pivot_df = pivot_df.reindex(columns=expected_cols)
+    
+    # Sort by Date to ensure deterministic order
+    pivot_df = pivot_df.sort_values('Date').reset_index(drop=True)
+    
+    return pivot_df
+```

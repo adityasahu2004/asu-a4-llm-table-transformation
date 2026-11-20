@@ -1,0 +1,133 @@
+**Operator plan:**
+1.  **Parse Dates**: Convert the `date` column from `MM/DD/YYYY` string format to pandas datetime objects.
+2.  **Extract Features**:
+    *   `month`: Extract the full month name (e.g., "January") from the parsed dates.
+    *   `daytype`: Determine if the day is a "weekday" (Monday-Friday) or "weekend" (Saturday-Sunday).
+3.  **Map Hour Columns**: The source has 24 hourly columns labeled in 12-hour AM/PM format (`1:00 AM` ... `12:00 PM` ... `11:00 PM`). These need to be mapped to sequential 24-hour indices (`hr1` ... `hr24`).
+    *   `1:00 AM` -> `hr1`
+    *   ...
+    *   `11:00 AM` -> `hr11`
+    *   `12:00 AM` (Midnight) -> `hr12` (Note: In 12-hour clock, 12:00 AM is 00:00, which is the 12th hour of the previous day or start of current? Looking at the source order: `1:00 AM`...`11:00 AM`, `12:00 AM`, `1:00 PM`...`12:00 PM`.
+    *   Let's check the standard 24-hour sequence: 1, 2, ..., 11, 12, 13, ..., 24.
+    *   Source columns order:
+        1.  `1:00 AM` (Hour 1)
+        2.  `2:00 AM` (Hour 2)
+        ...
+        11. `11:00 AM` (Hour 11)
+        12. `12:00 AM` (This is midnight, usually Hour 0 or 24. However, in many energy datasets, "12:00 AM" appearing after 11 AM is often a label error for 12:00 PM (Noon) or it represents the hour starting at midnight. Let's look at the values.
+        *   Source: `1:00 AM`...`11:00 AM`, `12:00 AM`, `1:00 PM`...`11:00 PM`, `12:00 PM`.
+        *   Wait, the source column list is: `1:00 AM` ... `11:00 AM`, `12:00 AM`, `1:00 PM` ... `11:00 PM`, `12:00 PM`.
+        *   Standard time progression: 12 AM (0:00), 1 AM, ..., 11 AM, 12 PM (12:00), 1 PM, ..., 11 PM.
+        *   The source list seems to have `12:00 AM` in the middle and `12:00 PM` at the end.
+        *   Let's check the target sample values against the source sample values to deduce the mapping.
+        *   Source Row 0 (`7/3/2014`):
+            *   `1:00 AM`: 1.035932
+            *   `2:00 AM`: 0.432909
+            *   ...
+            *   `11:00 AM`: 0.253739
+            *   `12:00 AM`: 0.153621  <-- This is the 12th column in source.
+            *   `1:00 PM`: 0.323493
+            *   ...
+            *   `11:00 PM`: 0.077916
+            *   `12:00 PM`: 0.0
+        *   Target Row 0 (`January`, `weekday`):
+            *   `hr1`: 0.401886
+            *   `hr2`: 0.047515
+            *   ...
+            *   `hr11`: 0.579675
+            *   `hr12`: 0.373929
+            *   `hr13`: 0.395818
+            *   ...
+            *   `hr24`: 1.149117
+        *   The target row 0 does *not* match source row 0. The source dates are in 2014. The target dates start in January (presumably 2014 or 2015?). The note says "Source row count describes a training sample only". The target sample has different data.
+        *   However, we can infer the *structure* of the mapping from the column names and standard conventions.
+        *   Standard 24-hour profile usually starts at Hour 1 (1:00 AM - 2:00 AM) or Hour 0 (12:00 AM - 1:00 AM).
+        *   Target columns are `hr1` to `hr24`.
+        *   Common convention: `hr1` = 1:00 AM - 2:00 AM? Or `hr1` = 12:00 AM - 1:00 AM?
+        *   Let's look at the source columns again.
+            *   `1:00 AM`
+            *   `2:00 AM`
+            *   ...
+            *   `11:00 AM`
+            *   `12:00 AM` (This label is weird here. It's likely `12:00 PM` (Noon) mislabeled or it's the midnight hour. Given it's between 11 AM and 1 PM, it is almost certainly Noon (12:00 PM).
+            *   `1:00 PM`
+            *   ...
+            *   `11:00 PM`
+            *   `12:00 PM` (This is at the end. This is likely Midnight (12:00 AM) mislabeled or it's the last hour of the day).
+        *   If `12:00 AM` (middle) is Noon and `12:00 PM` (end) is Midnight:
+            *   Sequence: 1AM, 2AM, ..., 11AM, 12PM(Noon), 1PM, ..., 11PM, 12AM(Midnight).
+            *   This covers 1:00-2:00 through 12:00-1:00 (next day).
+            *   If `hr1` corresponds to `1:00 AM`, then:
+                *   `hr1` <- `1:00 AM`
+                *   `hr2` <- `2:00 AM`
+                *   ...
+                *   `hr11` <- `11:00 AM`
+                *   `hr12` <- `12:00 AM` (Noon)
+                *   `hr13` <- `1:00 PM`
+                *   ...
+                *   `hr23` <- `11:00 PM`
+                *   `hr24` <- `12:00 PM` (Midnight)
+        *   Let's verify this hypothesis. In many US energy datasets, Hour 1 is 1:00 AM - 2:00 AM and Hour 24 is 12:00 AM - 1:00 AM (midnight to 1am).
+        *   So the mapping is simply positional based on the source column order provided in the schema, assuming the source columns are ordered chronologically from 1AM to Midnight.
+        *   Source Column Order:
+            1. `1:00 AM`
+            2. `2:00 AM`
+            3. `3:00 AM`
+            4. `4:00 AM`
+            5. `5:00 AM`
+            6. `6:00 AM`
+            7. `7:00 AM`
+            8. `8:00 AM`
+            9. `9:00 AM`
+            10. `10:00 AM`
+            11. `11:00 AM`
+            12. `12:00 AM` (Noon)
+            13. `1:00 PM`
+            14. `2:00 PM`
+            15. `3:00 PM`
+            16. `4:00 PM`
+            17. `5:00 PM`
+            18. `6:00 PM`
+            19. `7:00 PM`
+            20. `8:00 PM`
+            21. `9:00 PM`
+            22. `10:00 PM`
+            23. `11:00 PM`
+            24. `12:00 PM` (Midnight)
+        *   Target Columns: `hr1` to `hr24`.
+        *   We will map the i-th hour column in the source (excluding date/DSL) to `hr{i+1}`.
+
+4.  **Drop DSL**: The `DSL` column is not in the target.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    dates = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    
+    # Create output dataframe
+    out = pd.DataFrame()
+    
+    # Extract month name
+    out['month'] = dates.dt.strftime('%B')
+    
+    # Extract daytype: weekday (Mon-Fri) or weekend (Sat-Sun)
+    # dayofweek: Monday=0, ..., Sunday=6
+    out['daytype'] = dates.dt.dayofweek.apply(lambda x: 'weekday' if x < 5 else 'weekend')
+    
+    # Define the mapping from source hour columns to target hr columns
+    # Source columns in order:
+    src_hour_cols = [
+        '1:00 AM', '2:00 AM', '3:00 AM', '4:00 AM', '5:00 AM', '6:00 AM',
+        '7:00 AM', '8:00 AM', '9:00 AM', '10:00 AM', '11:00 AM', '12:00 AM',
+        '1:00 PM', '2:00 PM', '3:00 PM', '4:00 PM', '5:00 PM', '6:00 PM',
+        '7:00 PM', '8:00 PM', '9:00 PM', '10:00 PM', '11:00 PM', '12:00 PM'
+    ]
+    
+    # Map to hr1 ... hr24
+    for i, col in enumerate(src_hour_cols):
+        out[f'hr{i+1}'] = source[col]
+        
+    return out.reset_index(drop=True)
+```

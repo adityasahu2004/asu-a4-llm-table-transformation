@@ -1,0 +1,24 @@
+import pandas as pd
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    out = pd.DataFrame(index=source.index)
+    
+    # Parse date to preserve the original string representation including weekday
+    # The source format is "Thu 10/01/2009", target is same format "Wed 01/01/2003"
+    # We can just use the source string directly if the format matches, 
+    # but to be safe and deterministic, we parse and re-format.
+    dates = pd.to_datetime(source['Date'], format='%a %m/%d/%Y')
+    out['date'] = dates.dt.strftime('%a %m/%d/%Y')
+    
+    # Map hourly columns to value columns
+    # Source columns: "1:00", "2:00", ..., "23:00", "24:00:00"
+    # Target columns: "value1", "value2", ..., "value23", "value24"
+    
+    for h in range(1, 25):
+        if h < 24:
+            src_col = f"{h}:00"
+        else:
+            src_col = "24:00:00"
+        
+        out[f"value{h}"] = source[src_col]
+        
+    return out.reset_index(drop=True)

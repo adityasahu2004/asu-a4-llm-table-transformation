@@ -1,0 +1,178 @@
+Operator plan:
+1. Parse `local_15min` into a datetime object to extract hour and month.
+2. Derive `season` from the month (Dec-Feb: Winter, Mar-May: Spring, Jun-Aug: Summer, Sep-Nov: Fall).
+3. Derive `hour` (0-23) from the timestamp.
+4. Define mapping of source columns to target categories:
+   - `hvac`: air1_sum, air2_sum, air3_sum, airwindowunit1_sum, housefan1_sum, furnace1_sum, furnace2_sum, heater1_sum, heater2_sum, heater3_sum, jacuzzi1_sum, pool1_sum, pool2_sum, poolpump1_sum, pump1_sum, sprinkler1_sum, waterheater1_sum, waterheater2_sum, wellpump1_sum.
+   - `domestic_water_heating`: waterheater1_sum, waterheater2_sum. (Note: Often overlaps with hvac in some schemas, but here likely distinct or included in total. Looking at target values, `total` is sum of all 5. Let's look at standard CALTRACK or similar load disaggregation. Usually:
+     - HVAC: Air handlers, furnaces, heaters, AC.
+     - Water Heating: Water heaters.
+     - Major Appliances: Clotheswasher, dishwasher, dryer, fridge, oven, microwave, etc.
+     - Lighting: Lights, plugs (sometimes).
+     - Misc Plug Loads: Electronics, etc.
+     
+     Let's refine based on common sense and column names:
+     - `hvac`: `air1_sum`, `air2_sum`, `air3_sum`, `airwindowunit1_sum`, `furnace1_sum`, `furnace2_sum`, `heater1_sum`, `heater2_sum`, `heater3_sum`, `housefan1_sum`, `jacuzzi1_sum` (pool heater?), `poolpump1_sum` (maybe not), `sprinkler1_sum` (maybe not). Let's stick to core HVAC: Air, Furnace, Heater.
+     - `domestic_water_heating`: `waterheater1_sum`, `waterheater2_sum`.
+     - `major_appliances`: `clotheswasher1_sum`, `clotheswasher_dryg1_sum`, `dishwasher1_sum`, `drye1_sum`, `dryg1_sum`, `oven1_sum`, `oven2_sum`, `refrigerator1_sum`, `refrigerator2_sum`, `microwave1_sum`, `freezer1_sum`, `icemaker1_sum`, `winecooler1_sum`, `disposal1_sum`, `range1_sum`.
+     - `lighting`: `lights_plugs1_sum`...`lights_plugs6_sum`, `poollight1_sum`, `outsidelights_plugs1_sum`, `outsidelights_plugs2_sum`. Note: "lights_plugs" suggests mixed. Often "Lighting" is just lights, "Plug loads" are plugs. However, we have a `miscellaneous_plug_loads` category. Let's assume `lights_plugs*` columns might need splitting or are grouped. Given the column name `lights_plugs`, it's ambiguous. Let's look at `miscellaneous_plug_loads`. This usually includes computers, TVs, etc. We don't have specific columns for those. We have `kitchenapp`, `kitchen`, `livingroom`, `bedroom`, `bathroom`, `office`, `garage`, `utilityroom`, `diningroom`. These are likely plug loads or general usage.
+     
+     Let's look at the target `total`. It is the sum of the 5 categories.
+     
+     Let's try a standard mapping:
+     - **HVAC**: `air1_sum`, `air2_sum`, `air3_sum`, `airwindowunit1_sum`, `furnace1_sum`, `furnace2_sum`, `heater1_sum`, `heater2_sum`, `heater3_sum`, `housefan1_sum`. (Excluding pool/jacuzzi as they are often separate or misc).
+     - **Domestic Water Heating**: `waterheater1_sum`, `waterheater2_sum`.
+     - **Major Appliances**: `clotheswasher1_sum`, `clotheswasher_dryg1_sum`, `dishwasher1_sum`, `drye1_sum`, `dryg1_sum`, `oven1_sum`, `oven2_sum`, `refrigerator1_sum`, `refrigerator2_sum`, `microwave1_sum`, `freezer1_sum`, `icemaker1_sum`, `winecooler1_sum`, `disposal1_sum`, `range1_sum`.
+     - **Lighting**: `lights_plugs1_sum` through `lights_plugs6_sum`? Or just parts? The name `lights_plugs` is tricky. If we assume `lights_plugs` are split, we don't have enough info. However, often in these datasets, `lights_plugs` might be treated as `miscellaneous_plug_loads` or `lighting`. Let's look at `kitchenapp`, `livingroom`, etc. These are likely `miscellaneous_plug_loads`.
+     - Let's assume:
+       - `lighting`: `outsidelights_plugs1_sum`, `outsidelights_plugs2_sum`, `poollight1_sum`. And perhaps the `lights_plugs` columns are actually `miscellaneous_plug_loads`? Or `lighting`?
+       - Let's look at the distinct values in target.
+       
+     Alternative Interpretation:
+     - `hvac`: Air, Furnace, Heater, Housefan.
+     - `domestic_water_heating`: Waterheaters.
+     - `major_appliances`: Washer, Dryer, Dishwasher, Fridge, Oven, Microwave, Freezer, Disposal, Range, IceMaker, WineCooler.
+     - `lighting`: `lights_plugs1_sum`...`lights_plugs6_sum`? No, that name implies plugs.
+     - `miscellaneous_plug_loads`: `kitchen1`, `kitchen2`, `kitchenapp1`, `kitchenapp2`, `livingroom1`, `livingroom2`, `bedroom1`...`bedroom5`, `bathroom1`, `bathroom2`, `office1`, `garage1`, `garage2`, `utilityroom1`, `diningroom1`, `diningroom2`, `shed1`, `aquarium1`, `car1`, `car2`, `circpump1`, `security1`, `sewerpump1`, `sumppump1`, `venthood1`, `wellpump1`, `battery1`, `pool1`, `pool2`, `poolpump1`, `jacuzzi1`, `sprinkler1`, `heater1` (already in HVAC?), `heater2` (HVAC?), `heater3` (HVAC?).
+     
+     This is complex. Let's look for a simpler pattern.
+     Maybe `lights_plugs*` are `miscellaneous_plug_loads`? And `lighting` is empty or derived from somewhere else?
+     Or maybe `lights_plugs*` are `lighting`?
+     
+     Let's check the sum of `total`.
+     
+     Let's try this grouping which is common in CALTRACK:
+     - **HVAC**: `air1_sum`, `air2_sum`, `air3_sum`, `airwindowunit1_sum`, `furnace1_sum`, `furnace2_sum`, `heater1_sum`, `heater2_sum`, `heater3_sum`, `housefan1_sum`.
+     - **Water Heating**: `waterheater1_sum`, `waterheater2_sum`.
+     - **Major Appliances**: `clotheswasher1_sum`, `clotheswasher_dryg1_sum`, `dishwasher1_sum`, `drye1_sum`, `dryg1_sum`, `oven1_sum`, `oven2_sum`, `refrigerator1_sum`, `refrigerator2_sum`, `microwave1_sum`, `freezer1_sum`, `icemaker1_sum`, `winecooler1_sum`, `disposal1_sum`, `range1_sum`.
+     - **Lighting**: `lights_plugs1_sum`, `lights_plugs2_sum`, `lights_plugs3_sum`, `lights_plugs4_sum`, `lights_plugs5_sum`, `lights_plugs6_sum`, `poollight1_sum`, `outsidelights_plugs1_sum`, `outsidelights_plugs2_sum`. (Assuming "lights_plugs" columns are primarily lighting or the dataset labels lighting+plugs as lighting for simplicity, or perhaps `miscellaneous` takes the rest).
+     - **Miscellaneous Plug Loads**: `kitchen1_sum`, `kitchen2_sum`, `kitchenapp1_sum`, `kitchenapp2_sum`, `livingroom1_sum`, `livingroom2_sum`, `bedroom1_sum`, `bedroom2_sum`, `bedroom3_sum`, `bedroom4_sum`, `bedroom5_sum`, `bathroom1_sum`, `bathroom2_sum`, `office1_sum`, `garage1_sum`, `garage2_sum`, `utilityroom1_sum`, `diningroom1_sum`, `diningroom2_sum`, `shed1_sum`, `aquarium1_sum`, `car1_sum`, `car2_sum`, `circpump1_sum`, `security1_sum`, `sewerpump1_sum`, `sumppump1_sum`, `venthood1_sum`, `wellpump1_sum`, `battery1_sum`, `pool1_sum`, `pool2_sum`, `poolpump1_sum`, `jacuzzi1_sum`, `sprinkler1_sum`, `pump1_sum`, `grid_sum` (maybe not), `solar_sum` (maybe not).
+     
+     Wait, `grid_sum` and `solar_sum` are totals/production, not loads. They should probably be excluded from the component sums if `total` is the sum of the 5 components.
+     
+     Let's refine `lighting` vs `misc`.
+     Usually, `lights_plugs` columns in these datasets (like from the REDD or similar) are indeed plug loads. If `lighting` is a category, where are the pure lighting columns? We don't see "lighting1_sum". We see "lights_plugs1_sum". It is highly probable that `lights_plugs*` maps to `miscellaneous_plug_loads` or `lighting`.
+     
+     Let's look at the `total` value in the sample: ~244k for Summer 19:00.
+     
+     Let's assume:
+     - `hvac`: air1-3, airwindowunit1, furnace1-2, heater1-3, housefan1.
+     - `domestic_water_heating`: waterheater1-2.
+     - `major_appliances`: clotheswasher1, clotheswasher_dryg1, dishwasher1, drye1, dryg1, oven1-2, refrigerator1-2, microwave1, freezer1, icemaker1, winecooler1, disposal1, range1.
+     - `lighting`: lights_plugs1-6, poollight1, outsidelights_plugs1-2.
+     - `miscellaneous_plug_loads`: kitchen1-2, kitchenapp1-2, livingroom1-2, bedroom1-5, bathroom1-2, office1, garage1-2, utilityroom1, diningroom1-2, shed1, aquarium1, car1-2, circpump1, security1, sewerpump1, sumppump1, venthood1, wellpump1, battery1, pool1-2, poolpump1, jacuzzi1, sprinkler1, pump1.
+     
+     This covers most columns. `grid_sum`, `solar_sum`, `solar2_sum` are likely excluded.
+     
+5. Group by `season` and `hour`.
+6. Sum the respective columns for each category.
+7. Calculate `total` as the sum of the 5 categories.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse datetime
+    dt = pd.to_datetime(source['local_15min'], format='%m/%d/%Y %H:%M')
+    
+    # Derive hour and season
+    hour = dt.dt.hour
+    month = dt.dt.month
+    
+    def get_season(m):
+        if m in [12, 1, 2]:
+            return 'Winter'
+        elif m in [3, 4, 5]:
+            return 'Spring'
+        elif m in [6, 7, 8]:
+            return 'Summer'
+        else:
+            return 'Fall'
+            
+    season = month.apply(get_season)
+    
+    # Define columns for each category
+    hvac_cols = [
+        'air1_sum', 'air2_sum', 'air3_sum', 'airwindowunit1_sum',
+        'furnace1_sum', 'furnace2_sum',
+        'heater1_sum', 'heater2_sum', 'heater3_sum',
+        'housefan1_sum'
+    ]
+    
+    dwh_cols = [
+        'waterheater1_sum', 'waterheater2_sum'
+    ]
+    
+    major_appl_cols = [
+        'clotheswasher1_sum', 'clotheswasher_dryg1_sum',
+        'dishwasher1_sum', 'drye1_sum', 'dryg1_sum',
+        'oven1_sum', 'oven2_sum',
+        'refrigerator1_sum', 'refrigerator2_sum',
+        'microwave1_sum', 'freezer1_sum', 'icemaker1_sum',
+        'winecooler1_sum', 'disposal1_sum', 'range1_sum'
+    ]
+    
+    lighting_cols = [
+        'lights_plugs1_sum', 'lights_plugs2_sum', 'lights_plugs3_sum',
+        'lights_plugs4_sum', 'lights_plugs5_sum', 'lights_plugs6_sum',
+        'poollight1_sum', 'outsidelights_plugs1_sum', 'outsidelights_plugs2_sum'
+    ]
+    
+    misc_plug_cols = [
+        'kitchen1_sum', 'kitchen2_sum', 'kitchenapp1_sum', 'kitchenapp2_sum',
+        'livingroom1_sum', 'livingroom2_sum',
+        'bedroom1_sum', 'bedroom2_sum', 'bedroom3_sum', 'bedroom4_sum', 'bedroom5_sum',
+        'bathroom1_sum', 'bathroom2_sum',
+        'office1_sum',
+        'garage1_sum', 'garage2_sum',
+        'utilityroom1_sum',
+        'diningroom1_sum', 'diningroom2_sum',
+        'shed1_sum', 'aquarium1_sum',
+        'car1_sum', 'car2_sum',
+        'circpump1_sum', 'security1_sum', 'sewerpump1_sum', 'sumppump1_sum',
+        'venthood1_sum', 'wellpump1_sum', 'battery1_sum',
+        'pool1_sum', 'pool2_sum', 'poolpump1_sum',
+        'jacuzzi1_sum', 'sprinkler1_sum', 'pump1_sum'
+    ]
+    
+    # Create a temporary dataframe with the derived keys and the sum columns
+    # We fill NaNs with 0 for summing purposes
+    temp = source[hvac_cols + dwh_cols + major_appl_cols + lighting_cols + misc_plug_cols].copy()
+    temp = temp.fillna(0)
+    
+    temp['season'] = season
+    temp['hour'] = hour
+    
+    # Group and sum
+    grouped = temp.groupby(['season', 'hour'])
+    
+    hvac = grouped[hvac_cols].sum().sum(axis=1)
+    dwh = grouped[dwh_cols].sum().sum(axis=1)
+    major = grouped[major_appl_cols].sum().sum(axis=1)
+    light = grouped[lighting_cols].sum().sum(axis=1)
+    misc = grouped[misc_plug_cols].sum().sum(axis=1)
+    
+    # Construct result
+    result = pd.DataFrame({
+        'season': hvac.index.get_level_values('season'),
+        'hour': hvac.index.get_level_values('hour'),
+        'hvac': hvac.values,
+        'domestic_water_heating': dwh.values,
+        'major_appliances': major.values,
+        'lighting': light.values,
+        'miscellaneous_plug_loads': misc.values
+    })
+    
+    result['total'] = result['hvac'] + result['domestic_water_heating'] + \
+                      result['major_appliances'] + result['lighting'] + \
+                      result['miscellaneous_plug_loads']
+    
+    # Ensure integer hour
+    result['hour'] = result['hour'].astype(int)
+    
+    # Sort for consistency, though not strictly required by schema
+    # The sample is not sorted, but let's return as is from groupby
+    
+    return result[['season', 'hour', 'hvac', 'domestic_water_heating', 'major_appliances', 'lighting', 'miscellaneous_plug_loads', 'total']]
+```

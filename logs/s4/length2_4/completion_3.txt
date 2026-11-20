@@ -1,0 +1,234 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the source `Date` column (format `%m/%d/%Y`) to a pandas datetime object.
+2.  **Generate Rows**: The target row count (183) is exactly one greater than the source row count (182). The target sample shows dates starting from `1/1/2013` (which is 2 days before the first source date `7/3/2013`? No, `7/3/2013` is a Tuesday. `1/1/2013` is a Tuesday. The dates in the target sample are `1/1/2013`, `1/17/2013`, `2/3/2013`... these are bi-weekly Tuesdays. The source dates are `7/3/2013`, `7/19/2013`... also bi-weekly Tuesdays. The target contains the source dates plus one preceding date `1/1/2013`? Actually, looking at the distinct counts: Source has 182 distinct dates. Target has 183 distinct dates. The target `first_last_non_null` is `1/1/2013` to `7/2/2013`. Wait, the source `first_last_non_null` is `7/3/2013` to `12/31/2013`.
+    *   Correction: The target sample data shows `1/1/2013` through `7/2/2013`. The source sample data shows `7/3/2013` through `12/31/2013`.
+    *   Let's look at the structure again. The target `dt_strata` has 183 distinct values. The source `Date` has 182 distinct values.
+    *   The target `dow` is derived from the date. `1/1/2013` is Tuesday (2 in 0-indexed Mon=0? Or 1-indexed Mon=1? Target distinct values are `0,1,2,3,4,5,6`. `1/1/2013` is Tuesday. If Mon=0, Tue=1. If Mon=1, Tue=2. The target sample row for `1/1/2013` has `dow` 2. So `dow` is likely 1-indexed (Mon=1, Tue=2, ..., Sun=7) OR it's `dayofweek` + 1? Let's check `7/3/2013`. It's a Tuesday. In the source, there is no `dow` column. In the target, `7/2/2013` is Monday. `7/2/2013` is Monday. If Mon=1, Tue=2.
+    *   Let's check the target sample row for `1/1/2013` (Tuesday). `dow` is 2.
+    *   Let's check `2/3/2013` (Sunday). `dow` is 0? No, `2/3/2013` is a Sunday. The sample says `dow` is 0.
+    *   Let's check `1/17/2013` (Thursday). `dow` is 4.
+    *   Let's check `3/8/2013` (Friday). `dow` is 5.
+    *   Let's check `4/10/2013` (Wednesday). `dow` is 3.
+    *   Let's check `5/13/2013` (Monday). `dow` is 1.
+    *   Let's check `6/15/2013` (Saturday). `dow` is 6.
+    *   Mapping: Mon=1, Tue=2, Wed=3, Thu=4, Fri=5, Sat=6, Sun=0. This corresponds to Python's `datetime.weekday()` where Mon=0...Sun=6? No. Python `weekday()`: Mon=0, Tue=1... Sun=6.
+    *   Here: Mon=1, Tue=2... Sat=6, Sun=0. This looks like `dayofweek` + 1, but modulo 7? Or just `dayofweek` + 1 where Sunday wraps to 0?
+    *   Actually, standard ISO weekday is Mon=1...Sun=7.
+    *   Let's look at the mapping again:
+        *   Mon (5/13/13) -> 1
+        *   Tue (1/1/13) -> 2
+        *   Wed (4/10/13) -> 3
+        *   Thu (1/17/13) -> 4
+        *   Fri (3/8/13) -> 5
+        *   Sat (6/15/13) -> 6
+        *   Sun (2/3/13) -> 0
+    *   This is `dayofweek` (Mon=0) + 1, except Sunday becomes 0 instead of 7.
+    *   Calculation: `dow = (dayofweek + 1) % 7`?
+        *   Mon (0) -> 1 % 7 = 1. Correct.
+        *   Sun (6) -> 7 % 7 = 0. Correct.
+        *   Tue (1) -> 2 % 7 = 2. Correct.
+    *   So `dow` = `(dt.dayofweek + 1) % 7`.
+
+3.  **Handle Rows**: The target has 183 rows, source has 182. The target dates range from `1/1/2013` to `7/2/2013` in the sample? No, the sample is just a subset. The `first_last_non_null` for target `dt_strata` is `1/1/2013` to `7/2/2013`? Wait, the source `first_last_non_null` is `7/3/2013` to `12/31/2013`. The target `first_last_non_null` is `1/1/2013` to `7/2/2013`. This implies the target dataset is *different* from the source dataset in terms of content?
+    *   Re-reading the prompt: "Source row count describes a training sample only, not the evaluation input."
+    *   However, usually in these tasks, the transformation logic must apply to the *evaluation* source. The evaluation source will have its own dates.
+    *   Wait, look at the target sample data values. `1/1/2013` row has values `0.89, 0.80...`.
+    *   Look at the source sample data. `7/3/2013` has `0.56, 0.51...`.
+    *   The values in the target sample do *not* match the values in the source sample for the same dates (because the dates are different).
+    *   BUT, look at the last row of the target sample: `7/2/2013`.
+    *   Look at the first row of the source sample: `7/3/2013`.
+    *   Is there a shift?
+    *   Let's check if the target rows are just the source rows shifted by -1 day?
+    *   Source `7/3/2013` (Tue). Target `7/2/2013` (Mon).
+    *   Source `7/19/2013` (Tue). Target `7/18/2013`?
+    *   The target sample includes `1/1/2013`. The source sample starts at `7/3/2013`.
+    *   This suggests the target dataframe is constructed from the source dataframe by shifting the date back by 1 day?
+    *   Let's check the values.
+    *   Target `7/2/2013` values: `0.66, 0.61, 0.58...`
+    *   Source `7/3/2013` values: `0.56, 0.51, 0.49...`
+    *   They are different.
+    *   Target `1/1/2013` values: `0.89, 0.80...`
+    *   Is there a source row for `1/2/2013`? The source sample doesn't show it.
+    *   However, the problem states "Infer the transformation... from the source schema and target specification".
+    *   If the target dates are `Source Date - 1 day`, then the values should correspond to the source row's values.
+    *   Let's assume the transformation is: For each row in Source, create a row in Target with `Date - 1 day` and the same hourly values.
+    *   Why is there 1 extra row in Target (183 vs 182)?
+    *   If the source covers `7/3/2013` to `12/31/2013` (182 days, every other Tuesday? No, 182 days is half a year. 7/3 to 12/31 is approx 181 days. If it's every Tuesday, 182/2 = 91 weeks? No.
+    *   Let's count the source distinct dates: 182.
+    *   Let's count the target distinct dates: 183.
+    *   If the source is every Tuesday from 7/3/2013 to 12/31/2013, that's 26 weeks. 26 Tuesdays.
+    *   Wait, the source `distinct` is 182. The source `rows` is 182.
+    *   The target `distinct` is 183. The target `rows` is 183.
+    *   If the source data is daily? No, 182 distinct dates in 6 months? That's every other day? Or every weekday?
+    *   7/3/2013 is Tue. 7/19/2013 is Tue. The sample shows 2-week intervals.
+    *   But `distinct` is 182. If it were every 2 weeks, distinct would be ~26.
+    *   Therefore, the source likely contains **daily** data, but the sample only shows every 2 weeks.
+    *   182 days is exactly 26 weeks.
+    *   So the source is daily data for 26 weeks.
+    *   The target is daily data for 26 weeks + 1 day?
+    *   Target `first_last`: `1/1/2013` to `7/2/2013`.
+    *   Source `first_last`: `7/3/2013` to `12/31/2013`.
+    *   These ranges are disjoint. This implies the "Target" provided in the prompt is from a *different* time period than the "Source" provided in the prompt.
+    *   This is a common pattern in these "infer transformation" tasks where the sample data is from a training set, but the logic must be general.
+    *   However, usually the logic is `Target = f(Source)`.
+    *   If the dates are disjoint, how can `Target` be derived from `Source`?
+    *   Perhaps the `Date` in Source is `Target Date + 1 day`?
+    *   If I shift Source `7/3/2013` back by 1 day, I get `7/2/2013`.
+    *   If I shift Source `12/31/2013` back by 1 day, I get `12/30/2013`.
+    *   The target sample shows `1/1/2013` to `7/2/2013`.
+    *   This implies the Source for the *evaluation* will likely cover dates that, when shifted back, match the expected target range. Or, more likely, the transformation is simply:
+        1.  Parse `Date`.
+        2.  Subtract 1 day from the date to get `dt_strata`.
+        3.  Calculate `dow` based on the *new* date (`dt_strata`).
+        4.  Rename columns `1`-`24` to `pct_hourly_0100`-`pct_hourly_2400`.
+        5.  Add a `pct_hourly_2500` column with `NaN` (or null).
+    *   Why 183 rows vs 182?
+    *   If the source has 182 rows, and we just transform them, we get 182 rows.
+    *   The target has 183 rows.
+    *   Is there a row added?
+    *   Look at the target `first_last`: `1/1/2013` to `7/2/2013`.
+    *   Look at the source `first_last`: `7/3/2013` to `12/31/2013`.
+    *   These are completely different years/periods.
+    *   This suggests the "Target" block in the prompt is **not** the result of transforming the "Source" block in the prompt. It is a separate example of the target schema.
+    *   Wait, the prompt says "Infer the transformation from this schema/sample block".
+    *   If the source and target samples are from different datasets, I must infer the *structural* transformation.
+    *   Structural transformation:
+        *   Input: `Date`, `Class`, `1`...`24`.
+        *   Output: `dt_strata`, `dow`, `pct_hourly_0100`...`pct_hourly_2400`, `pct_hourly_2500`.
+        *   `dt_strata`: Format `m/d/yyyy`. Derived from `Date`.
+        *   `dow`: Integer 0-6. Derived from `dt_strata`. Formula: `(dayofweek + 1) % 7`.
+        *   `pct_hourly_*`: Renamed from `1`...`24`.
+        *   `pct_hourly_2500`: New column, all nulls.
+        *   Row count difference (182 vs 183): This might be due to the specific sample data provided (e.g., maybe the source sample is missing a row, or the target sample includes an extra day). But since I cannot copy data, I must assume a 1-to-1 row mapping unless there's an obvious aggregation/expansion. Given the hourly data is preserved 1-to-1, it's likely a 1-to-1 row transformation. The row count discrepancy in the metadata might be due to the specific subsets shown (e.g., target includes Jan 1, source starts July 3). I will assume the transformation applies to each row independently.
+
+    *   Refining `dow`:
+        *   Target `1/1/2013` (Tue) -> 2.
+        *   Target `2/3/2013` (Sun) -> 0.
+        *   Target `5/13/2013` (Mon) -> 1.
+        *   Formula: `dt.weekday()` returns Mon=0...Sun=6.
+        *   We want Mon=1, Tue=2, ..., Sat=6, Sun=0.
+        *   `dt.weekday() + 1` gives Mon=1...Sun=7.
+        *   `(dt.weekday() + 1) % 7` gives Mon=1...Sat=6, Sun=0.
+        *   This matches.
+
+    *   Refining `dt_strata` format:
+        *   Target: `1/1/2013`, `7/2/2013`.
+        *   Source: `7/3/2013`.
+        *   Format is `%m/%d/%Y` (no leading zeros for month/day).
+
+    *   Refining Columns:
+        *   Source `1` -> Target `pct_hourly_0100`.
+        *   Source `2` -> Target `pct_hourly_0200`.
+        *   ...
+        *   Source `24` -> Target `pct_hourly_2400`.
+        *   Target `pct_hourly_2500` is added, filled with `NaN`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the source Date column
+    # The source format is M/D/YYYY or MM/DD/YYYY
+    dt_series = pd.to_datetime(source['Date'])
+    
+    # Create the output DataFrame
+    out = pd.DataFrame()
+    
+    # Calculate dt_strata: Date - 1 day? 
+    # The prompt samples are disjoint. However, typically these tasks imply a direct mapping.
+    # If we look at the previous examples, the date was often shifted or reformatted.
+    # Given the disjoint nature, and the "183 vs 182" count, it's highly probable the evaluation 
+    # source will have dates that map 1-to-1 to the target dates.
+    # The most robust assumption for "Infer transformation" when samples are disjoint is 
+    # to apply the structural changes. 
+    # Does the date change? 
+    # In the previous example, Source DT_STRATA was used directly.
+    # Here, Source is 'Date'. Target is 'dt_strata'.
+    # If I assume 1-to-1, I should probably keep the date as is, or shift it?
+    # Let's look at the DOW.
+    # If I keep the date as is:
+    # Source 7/3/2013 (Tue). Target DOW for Tue is 2.
+    # If I shift date back 1 day:
+    # Source 7/3/2013 -> 7/2/2013 (Mon). Target DOW for Mon is 1.
+    # The target sample for 7/2/2013 (Mon) has DOW 2? No, 7/2/2013 is Monday.
+    # Wait, 7/2/2013 is Monday. 
+    # My previous analysis: 1/1/2013 (Tue) -> 2. 2/3/2013 (Sun) -> 0.
+    # If 7/2/2013 is Monday, DOW should be 1.
+    # Let's check the target sample for 7/2/2013.
+    # The last row of target sample is 7/2/2013.
+    # The DOW column for that row is 2.
+    # 7/2/2013 is a Monday.
+    # If Mon=1, why is DOW 2?
+    # Maybe 7/2/2013 is NOT Monday?
+    # 2013 is not a leap year.
+    # Jan 1 2013 was Tuesday.
+    # July 2 2013:
+    # Jan: 31, Feb: 28, Mar: 31, Apr: 30, May: 31, Jun: 30.
+    # Days from Jan 1 to Jul 2: 31+28+31+30+31+30 + 1 = 182 days.
+    # 182 % 7 = 0.
+    # So July 2 is the same day of week as Jan 1.
+    # Jan 1 was Tuesday. So July 2 is Tuesday.
+    # Ah! 7/2/2013 is Tuesday.
+    # My previous mental calendar was wrong.
+    # So:
+    # 1/1/2013 (Tue) -> DOW 2.
+    # 7/2/2013 (Tue) -> DOW 2.
+    # This is consistent.
+    
+    # Now, does the date shift?
+    # Source sample starts 7/3/2013.
+    # Target sample ends 7/2/2013.
+    # If the transformation is 1-to-1, and the samples are just different slices, 
+    # I should check if Source Date maps to Target dt_strata directly or shifted.
+    # If I assume no shift: Source 7/3/2013 (Wed) -> Target 7/3/2013 (Wed).
+    # Wed DOW should be 3.
+    # If I assume -1 day shift: Source 7/3/2013 -> Target 7/2/2013 (Tue).
+    # Tue DOW should be 2.
+    
+    # Let's look at the row counts again.
+    # Source: 182 rows.
+    # Target: 183 rows.
+    # This implies the Target has one more row than the Source.
+    # This often happens if the Target includes a "previous day" or "next day" boundary.
+    # Or if the Source is missing a row in the sample.
+    # However, without explicit instruction to add rows, and given the "untrusted data" constraint,
+    # I should stick to transforming the existing rows.
+    # The discrepancy in sample sizes (182 vs 183) might be an artifact of the sample selection 
+    # (e.g. target sample includes Jan 1, source sample starts later).
+    # I will assume a 1-to-1 row mapping.
+    
+    # Regarding the date shift:
+    # In many energy/load forecasting datasets, "Date" might be the billing date or 
+    # the date of the record, while the load profile is for the previous day.
+    # However, without clear evidence (like matching values), I will assume the date 
+    # in `dt_strata` is the same as `Date` in the source, just reformatted.
+    # Why? Because the target sample `7/2/2013` has values `0.66...`.
+    # The source sample `7/3/2013` has values `0.56...`.
+    # They are different.
+    # If I look for `7/2/2013` in the source... it's not in the sample.
+    # If I look for `7/3/2013` in the target... it's not in the sample.
+    # I cannot verify the shift.
+    # Standard practice: If not specified, keep the date.
+    # BUT, the column name `dt_strata` and `dow` suggests a time-series index.
+    # I will keep the date as is.
+    
+    # Wait, looking at the previous turn (Task 2), the source `CST` was parsed and used directly.
+    # In Task 1, `DT_STRATA` was parsed and used directly.
+    # I will assume `dt_strata` = `Date` formatted.
+    
+    out['dt_strata'] = dt_series.dt.strftime('%m/%d/%Y')
+    
+    # Calculate DOW
+    # Mon=1, Tue=2, ..., Sat=6, Sun=0
+    out['dow'] = (dt_series.dt.weekday + 1) % 7
+    
+    # Rename hourly columns
+    for h in range(1, 25):
+        out[f'pct_hourly_{h:02d}00'] = source[str(h)]
+        
+    # Add pct_hourly_2500 as null
+    out['pct_hourly_2500'] = np.nan
+    
+    return out
+```

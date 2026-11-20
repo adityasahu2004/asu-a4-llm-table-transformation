@@ -1,0 +1,81 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `Date` column to datetime objects to extract the month.
+2.  **Melt/Unpivot**: Transform the wide format (columns 1-24) into a long format with columns `hour` (integer 1-24) and `value` (the measurement).
+3.  **Group and Aggregate**: Group the data by `hour` and `month` (1-12). Calculate the mean of `value` for each group.
+4.  **Pivot**: Reshape the aggregated data back to a wide format where rows are `hour` and columns are months.
+5.  **Format Output**:
+    *   Rename month columns to lowercase English names (january, february, etc.).
+    *   Ensure the `hour` column is integer type.
+    *   Sort by `hour` to match the target schema order (though the sample is unsorted, standard practice for this type of profile is sorted or consistent; the target sample shows specific hours but the schema implies a full set of 24 hours. The target row count is 24, implying all hours are present. The sample data provided in the target is a subset and unsorted, but the schema says 24 distinct hours. I will return all 24 hours sorted by hour for determinism, or preserve the order if implied. Given the target sample is unsorted, but the schema has 24 rows, I will generate all 24 rows. The sample order in the target is `1, 11, 13...` which looks random or specific. However, usually, these transformations result in a sorted index or natural order. I will sort by `hour` as it is the most robust deterministic output for a "profile" table, unless the specific permutation is required. Looking at the target sample again: `1, 11, 13, 15, 17, 19, 20, 22, 24, 4, 6, 9`. This is not sorted. It is not reverse sorted. It might be the order of appearance in the source? No, source is sorted by date. It might be random. However, the prompt says "Infer a general transformation". A general transformation for a monthly profile is typically sorted by hour. The "distinct" count is 24. I will sort by hour to ensure a canonical representation, as "unsorted" is not a deterministic property without a specific key. *Correction*: The target sample is just a sample. The schema defines the structure. I will sort by `hour` ascending.
+    *   Handle missing months: If a month is not present in the source data (e.g., August in the sample source which only has Jul-Dec), the pivot will naturally produce NaNs for those columns, which matches the target schema (nulls: 24 for august).
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse Date and extract month
+    source = source.copy()
+    source['dt'] = pd.to_datetime(source['Date'], format='%m/%d/%Y')
+    source['month'] = source['dt'].dt.month
+    
+    # 2. Melt the hourly columns (1-24)
+    # The columns are named '1', '2', ..., '24'
+    hour_cols = [str(i) for i in range(1, 25)]
+    melted = source.melt(
+        id_vars=['month'], 
+        value_vars=hour_cols, 
+        var_name='hour', 
+        value_name='value'
+    )
+    
+    # Convert hour to integer
+    melted['hour'] = melted['hour'].astype(int)
+    
+    # 3. Group by hour and month, calculate mean
+    # Note: The target sample shows specific values. Let's verify if it's mean or sum.
+    # Source has 182 rows (Jul-Dec 2013). 
+    # Target has 24 rows.
+    # Target 'january' has values. Source has no January. 
+    # Wait, the source sample provided in the prompt is ONLY Jul-Dec 2013.
+    # But the target schema has 'january' with distinct values and no nulls.
+    # This implies the *evaluation* source will contain data for all months, 
+    # or the transformation is generic.
+    # The target sample data for 'january' is NOT null.
+    # The source sample provided is just a "training sample".
+    # The transformation must be general.
+    # I will compute the mean.
+    
+    grouped = melted.groupby(['hour', 'month'])['value'].mean().reset_index()
+    
+    # 4. Pivot to wide format
+    pivoted = grouped.pivot(index='hour', columns='month', values='value')
+    
+    # 5. Rename columns to month names
+    month_names = {
+        1: 'january', 2: 'february', 3: 'march', 4: 'april',
+        5: 'may', 6: 'june', 7: 'july', 8: 'august',
+        9: 'september', 10: 'october', 11: 'november', 12: 'december'
+    }
+    pivoted.rename(columns=month_names, inplace=True)
+    
+    # Ensure all month columns exist, even if empty (NaN)
+    for m in month_names.values():
+        if m not in pivoted.columns:
+            pivoted[m] = np.nan
+            
+    # Select and order columns as per target schema
+    target_cols = [month_names[i] for i in range(1, 13)]
+    pivoted = pivoted[target_cols]
+    
+    # Reset index to make 'hour' a column
+    pivoted = pivoted.reset_index()
+    
+    # Ensure hour is int64
+    pivoted['hour'] = pivoted['hour'].astype('int64')
+    
+    # Sort by hour to ensure deterministic order
+    pivoted = pivoted.sort_values('hour').reset_index(drop=True)
+    
+    return pivoted
+```

@@ -1,0 +1,58 @@
+Operator plan:
+1. Parse the `date` column into datetime objects to extract the month.
+2. Select the 24 hourly columns (`Hour 1` to `Hour 24`).
+3. Group the data by month (1-7 based on the target schema's non-null columns, though we will compute all 12 and let NaNs handle missing months if any, but specifically the target shows NaNs for Aug-Dec).
+4. For each month present in the source (July 2015 to December 2015), calculate the mean value for each hour across all days in that month.
+5. Construct the target DataFrame with columns `hour` (1-24) and month names (`january` through `december`).
+6. Populate the month columns with the calculated means. Months not present in the source data (or specifically August-December in the sample target output which seem to be null) will be handled. Note: The source data only contains July-December 2015. The target sample shows values for Jan-July and NaNs for Aug-Dec. This implies the target schema expects a standard 12-month structure, but since the source only has Jul-Dec, and the sample target has Jan-Jun filled (likely from a larger evaluation set or a different interpretation), I must strictly follow the source.
+   *Correction*: The source sample provided is only a *sample* of the training data. The note says "Source row count describes a training sample only". The evaluation input might contain data for all months. However, the transformation must be general.
+   Looking at the target sample: It has values for `january` through `july` and `NaN` for `august` through `december`. The source sample provided in the prompt *only* has `7/3/2015` to `12/31/2015`.
+   Wait, the target sample data shows values for January, February, etc. This contradicts the source sample provided which only has July-December.
+   *Re-reading the prompt*: "Infer a general transformation from the source schema and target specification... The evaluation source contains different rows".
+   The source schema has `date`. The target schema has months `january` to `december`.
+   The transformation is: Pivot the data by Month, calculating the mean hourly value for each month.
+   
+   Steps:
+   1. Parse `date`.
+   2. Create a DataFrame with `hour` 1-24.
+   3. For each month (1-12), group the source data by month, then take the mean of each `Hour X` column.
+   4. Assign these means to the corresponding month column in the target.
+   5. Ensure column order is `hour`, `january`, ..., `december`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date to extract month
+    source['parsed_date'] = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    source['month'] = source['parsed_date'].dt.month
+    
+    # Define target columns
+    month_cols = [
+        'january', 'february', 'march', 'april', 'may', 'june',
+        'july', 'august', 'september', 'october', 'november', 'december'
+    ]
+    
+    # Initialize result dataframe with hour column
+    res = pd.DataFrame({'hour': range(1, 25)})
+    
+    # Calculate mean for each hour for each month
+    # We group by month, then for each group, we take the mean of the hour columns
+    grouped = source.groupby('month')
+    
+    for i, month_name in enumerate(month_cols, start=1):
+        if i in grouped.groups:
+            month_data = grouped.get_group(i)
+            # Select hour columns
+            hour_cols = [f'Hour {h}' for h in range(1, 25)]
+            # Calculate mean for each hour column
+            means = month_data[hour_cols].mean()
+            # Assign to the result dataframe
+            res[month_name] = means.values
+        else:
+            # If month not present, fill with NaN
+            res[month_name] = np.nan
+            
+    return res
+```

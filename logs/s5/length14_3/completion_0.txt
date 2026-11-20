@@ -1,0 +1,143 @@
+Operator plan:
+1. Parse `timestamp` to extract `month` and `hour`.
+2. Identify and rename source columns to target categories:
+   - `HVAC`: Sum of "AC COMPRESSOR WHS [emon ch3,4]", "AIR HANDLER WHS [emon ch5,6]", and "Minisplit WHS (2-CTs) [xpod chA-7,8]".
+   - `domestic_water_heating`: "WATER HEATER WHS [emon ch7,8]".
+   - `major_appliances`: Sum of "DRYER WHS (1-CT) [emon ch9]", "RANGE WHS (1-CT) [emon ch10]", "DISH WASHER WHS [emon ch11]", "Primary Fridge WHS [emon ch12]", "2nd Fridge WHS [emon ch13]", and "Dryer WHS (2-CTs) [xpod chA-9,10]". Note: The target values for major appliances are significantly larger than the sum of these specific columns in the sample, but looking at the target sample values vs source, there is a scaling or aggregation factor. However, the row count drops from 1.3M to 288 (12 months * 24 hours). This implies aggregation.
+   - Let's look at the target row count: 288 rows. This is exactly 12 months * 24 hours.
+   - The source has ~1.3M rows.
+   - The target columns are integers (mostly) and one float.
+   - The target values are large (e.g., 172,992,524).
+   - The source values are small (e.g., 386.0).
+   - This suggests we are summing up the energy usage across all sites and all days for each month-hour bin.
+   - `lighting`: The target distinct values are `[0]`. So this column is just 0.
+   - `miscellaneous_plug_loads`: This is a float.
+   - `Total`: This is an integer.
+
+   Let's verify the aggregation logic.
+   Source `TOTAL BLDG WHS [emon ch1,2]` seems to be the total building load.
+   Target `Total` column values are around 20-40 million.
+   If we sum `TOTAL BLDG WHS` for a specific month/hour across all sites and days:
+   There are ~31 days/month * 24 hours/day * 31 sites = ~22,700 data points per month-hour bin on average.
+   Average load per site is maybe 1000-2000 Wh?
+   22,700 * 1500 = 34,050,000. This matches the magnitude of the target `Total` (23M - 40M).
+   
+   So the transformation is:
+   1. Filter out rows where values are 32767 (invalid/missing data marker) if necessary, or just sum them. Given 32767 is likely a "no data" flag, it might skew sums if not handled. However, standard pandas sum will include them. Let's look at the sample. Site 11 has all 32767. Site 62 has all 32767. Site 3 has all 32767. Site 35 has mixed.
+   If we simply sum, 32767 * N will be huge.
+   Let's check if 32767 should be treated as NaN.
+   If I treat 32767 as NaN, the sums will be based on valid data.
+   
+   Let's map the columns:
+   - `HVAC`: `AC COMPRESSOR WHS [emon ch3,4]` + `AIR HANDLER WHS [emon ch5,6]` + `Minisplit WHS (2-CTs) [xpod chA-7,8]`
+   - `domestic_water_heating`: `WATER HEATER WHS [emon ch7,8]`
+   - `major_appliances`: `DRYER WHS (1-CT) [emon ch9]` + `RANGE WHS (1-CT) [emon ch10]` + `DISH WASHER WHS [emon ch11]` + `Primary Fridge WHS [emon ch12]` + `2nd Fridge WHS [emon ch13]` + `Dryer WHS (2-CTs) [xpod chA-9,10]`
+   - `lighting`: 0
+   - `miscellaneous_plug_loads`: This is tricky. Which columns map here?
+     Remaining load columns: `SPARE1 WHS (1-CT) [emon ch14]`, `SPARE2 WHS (1-CT) [xpod chA-1]`, `SPARE3 WHS (1-CT) [xpod chA-2]`, `POOL PUMP WHS (2-CTs) [xpod chA-3,4]`, `SPARE4 WHS (2-CTs) [xpod chA-5,6]`, `Calculated Unmeasured loads (Whr)`.
+     Usually, "miscellaneous plug loads" includes things like pool pumps, spare channels (which might be plugged loads), and calculated unmeasured.
+   - `Total`: `TOTAL BLDG WHS [emon ch1,2]`
+
+   Let's refine the column mapping for `miscellaneous_plug_loads`.
+   The target `miscellaneous_plug_loads` is a float. The others are int64.
+   `Calculated Unmeasured loads (Whr)` is a float in source.
+   
+   Let's try summing the specific columns for each category.
+   
+   Steps:
+   1. Replace 32767 with NaN.
+   2. Create `month` and `hour` from `timestamp`.
+   3. Define column groups.
+   4. Sum each group across all rows for each (month, hour) bin.
+   5. Construct the final dataframe with the specified columns.
+
+   Column Mapping Hypothesis:
+   - `HVAC`: `AC COMPRESSOR WHS [emon ch3,4]`, `AIR HANDLER WHS [emon ch5,6]`, `Minisplit WHS (2-CTs) [xpod chA-7,8]`
+   - `domestic_water_heating`: `WATER HEATER WHS [emon ch7,8]`
+   - `major_appliances`: `DRYER WHS (1-CT) [emon ch9]`, `RANGE WHS (1-CT) [emon ch10]`, `DISH WASHER WHS [emon ch11]`, `Primary Fridge WHS [emon ch12]`, `2nd Fridge WHS [emon ch13]`, `Dryer WHS (2-CTs) [xpod chA-9,10]`
+   - `miscellaneous_plug_loads`: `SPARE1 WHS (1-CT) [emon ch14]`, `SPARE2 WHS (1-CT) [xpod chA-1]`, `SPARE3 WHS (1-CT) [xpod chA-2]`, `POOL PUMP WHS (2-CTs) [xpod chA-3,4]`, `SPARE4 WHS (2-CTs) [xpod chA-5,6]`, `Calculated Unmeasured loads (Whr)`
+   - `Total`: `TOTAL BLDG WHS [emon ch1,2]`
+   - `lighting`: 0
+
+   Let's check the types.
+   Target `HVAC`, `domestic_water_heating`, `major_appliances`, `Total` are int64.
+   Target `miscellaneous_plug_loads` is float64.
+   Target `lighting` is int64 (0).
+
+   This fits the source dtypes if we cast the sums.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Replace invalid data marker 32767 with NaN
+    df = source.replace(32767, np.nan)
+    
+    # Parse timestamp
+    ts = pd.to_datetime(df['timestamp'])
+    df['month'] = ts.dt.month
+    df['hour'] = ts.dt.hour
+    
+    # Define column groups
+    hvac_cols = [
+        'AC COMPRESSOR WHS [emon ch3,4]',
+        'AIR HANDLER WHS [emon ch5,6]',
+        'Minisplit WHS (2-CTs) [xpod chA-7,8]'
+    ]
+    
+    dwh_cols = [
+        'WATER HEATER WHS [emon ch7,8]'
+    ]
+    
+    major_appl_cols = [
+        'DRYER WHS (1-CT) [emon ch9]',
+        'RANGE WHS (1-CT) [emon ch10]',
+        'DISH WASHER WHS [emon ch11]',
+        'Primary Fridge WHS [emon ch12]',
+        '2nd Fridge WHS [emon ch13]',
+        'Dryer WHS (2-CTs) [xpod chA-9,10]'
+    ]
+    
+    misc_cols = [
+        'SPARE1 WHS (1-CT) [emon ch14]',
+        'SPARE2 WHS (1-CT) [xpod chA-1]',
+        'SPARE3 WHS (1-CT) [xpod chA-2]',
+        'POOL PUMP WHS (2-CTs) [xpod chA-3,4]',
+        'SPARE4 WHS (2-CTs) [xpod chA-5,6]',
+        'Calculated Unmeasured loads (Whr)'
+    ]
+    
+    total_col = 'TOTAL BLDG WHS [emon ch1,2]'
+    
+    # Calculate sums for each group
+    df['HVAC'] = df[hvac_cols].sum(axis=1)
+    df['domestic_water_heating'] = df[dwh_cols].sum(axis=1)
+    df['major_appliances'] = df[major_appl_cols].sum(axis=1)
+    df['miscellaneous_plug_loads'] = df[misc_cols].sum(axis=1)
+    df['Total'] = df[total_col]
+    df['lighting'] = 0
+    
+    # Group by month and hour and sum
+    agg_df = df.groupby(['month', 'hour']).agg(
+        HVAC=('HVAC', 'sum'),
+        domestic_water_heating=('domestic_water_heating', 'sum'),
+        major_appliances=('major_appliances', 'sum'),
+        lighting=('lighting', 'sum'),
+        miscellaneous_plug_loads=('miscellaneous_plug_loads', 'sum'),
+        Total=('Total', 'sum')
+    ).reset_index()
+    
+    # Ensure correct dtypes
+    agg_df['HVAC'] = agg_df['HVAC'].astype('int64')
+    agg_df['domestic_water_heating'] = agg_df['domestic_water_heating'].astype('int64')
+    agg_df['major_appliances'] = agg_df['major_appliances'].astype('int64')
+    agg_df['lighting'] = agg_df['lighting'].astype('int64')
+    agg_df['miscellaneous_plug_loads'] = agg_df['miscellaneous_plug_loads'].astype('float64')
+    agg_df['Total'] = agg_df['Total'].astype('int64')
+    
+    # Reorder columns to match target
+    result = agg_df[['month', 'hour', 'HVAC', 'domestic_water_heating', 'major_appliances', 'lighting', 'miscellaneous_plug_loads', 'Total']]
+    
+    return result
+```

@@ -1,0 +1,73 @@
+[
+  {
+    "index": 0,
+    "finish_reason": "stop",
+    "path": "generated/s4/length14_4/candidates/0.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+      "seconds": 2.088910874997964,
+      "shape": [
+        288,
+        8
+      ],
+      "fingerprint": "9a3ba0c8ce3cfbb482990947a5e547e3af0a5f115e4f25731dfd29ec96a8ea1f"
+    }
+  },
+  {
+    "index": 1,
+    "finish_reason": "stop",
+    "path": "generated/s4/length14_4/candidates/1.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+      "seconds": 1.6140197499989881,
+      "shape": [
+        288,
+        8
+      ],
+      "fingerprint": "4589bf330a3e1a357aeac23d5c72511ba1dbe323379c66112b99e56e4c5e0338"
+    }
+  },
+  {
+    "index": 2,
+    "finish_reason": "stop",
+    "path": "generated/s4/length14_4/candidates/2.py",
+    "execution": {
+      "status": "execution_error",
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\nTraceback (most recent call last):\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/indexes/base.py\", line 3816, in get_loc\n    return self._engine.get_loc(casted_key)\n           ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^\n  File \"pandas/_libs/index.pyx\", line 172, in pandas._libs.index.IndexEngine.get_loc\n  File \"pandas/_libs/index.pyx\", line 178, in pandas._libs.index.IndexEngine.get_loc\nTypeError: '36        False\n37        False\n38        False\n39        False\n40        False\n          ...  \n258367    False\n258368    False\n258369    False\n258370    False\n258371    False\nName: End Use Category, Length: 95616, dtype: bool' is an invalid key\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/series.py\", line 1240, in __setitem__\n    self._set_with_engine(key, value)\n    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/series.py\", line 1290, in _set_with_engine\n    loc = self.index.get_loc(key)\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/indexes/base.py\", line 3828, in get_loc\n    self._check_indexing_error(key)\n    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/indexes/base.py\", line 6372, in _check_indexing_error\n    raise InvalidIndexError(key)\npandas.errors.InvalidIndexError: 36        False\n37        False\n38        False\n39        False\n40        False\n          ...  \n258367    False\n258368    False\n258369    False\n258370    False\n258371    False\nName: End Use Category, Length: 95616, dtype: bool\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/internals/blocks.py\", line 1252, in putmask\n    casted = np_can_hold_element(values.dtype, new)\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/dtypes/cast.py\", line 1859, in np_can_hold_element\n    raise LossySetitemError\npandas.errors.LossySetitemError\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py\", line 21, in <module>\n    output = namespace['transform'](source)\n  File \"transform.py\", line 26, in transform\n    categories[mask_misc] = 'miscellaneous_plug_loads'\n    ~~~~~~~~~~^^^^^^^^^^^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/series.py\", line 1280, in __setitem__\n    self._where(~key, value, inplace=True)\n    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/generic.py\", line 10543, in _where\n    new_data = self._mgr.putmask(mask=cond, new=other, align=align)\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/internals/managers.py\", line 502, in putmask\n    return self.apply(\n           ~~~~~~~~~~^\n        \"putmask\",\n        ^^^^^^^^^^\n    ...<2 lines>...\n        new=new,\n        ^^^^^^^^\n    )\n    ^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/internals/managers.py\", line 456, in apply\n    applied = getattr(b, f)(**kwargs)\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/internals/blocks.py\", line 1265, in putmask\n    return self.coerce_to_target_dtype(\n           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^\n        new, raise_on_upcast=True\n        ^^^^^^^^^^^^^^^^^^^^^^^^^\n    ).putmask(mask, new)\n    ^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/internals/blocks.py\", line 484, in coerce_to_target_dtype\n    raise TypeError(f\"Invalid value '{other}' for dtype '{self.values.dtype}'\")\nTypeError: Invalid value 'miscellaneous_plug_loads' for dtype 'float64'\n",
+      "seconds": 1.3275869170029182
+    }
+  },
+  {
+    "index": 3,
+    "finish_reason": "length",
+    "execution": {
+      "status": "extraction_error",
+      "error": "No fenced Python block"
+    }
+  },
+  {
+    "index": 4,
+    "finish_reason": "stop",
+    "path": "generated/s4/length14_4/candidates/4.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+      "seconds": 1.6960092500012252,
+      "shape": [
+        288,
+        8
+      ],
+      "fingerprint": "087ae1ce31d36a9c5c8ba5d35afc2af5abd2c15ab7e3571877edd93b546b524d"
+    }
+  }
+]

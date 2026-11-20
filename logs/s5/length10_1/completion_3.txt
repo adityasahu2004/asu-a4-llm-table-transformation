@@ -1,0 +1,68 @@
+Operator plan:
+1. Parse the `time` column into a datetime object and format it as `YYYY-MM-DD HH:MM:SS` for the `datetime` column.
+2. Compute `hvac` by summing all electricity consumption columns related to heating, cooling, fans, and pumps. Specifically: `electricity_heating_kwh`, `electricity_central_system_heating_kwh`, `electricity_cooling_kwh`, `electricity_central_system_cooling_kwh`, `electricity_fans_heating_kwh`, `electricity_fans_cooling_kwh`, `electricity_pumps_heating_kwh`, `electricity_central_system_pumps_heating_kwh`, `electricity_pumps_cooling_kwh`, and `electricity_central_system_pumps_cooling_kwh`.
+3. Map `electricity_water_systems_kwh` to `water_heating`.
+4. Map `electricity_refrigerator_kwh` to `refrigerator`.
+5. Map `electricity_clothes_washer_kwh` to `clothes_washer`.
+6. Map `electricity_clothes_dryer_kwh` to `clothes_dryer`.
+7. Map `electricity_dishwasher_kwh` to `dishwasher`.
+8. Map `electricity_cooking_range_kwh` to `cooking_range`.
+9. Compute `pool_spa_pumps` by summing `electricity_pool_pump_kwh` and `electricity_hot_tub_pump_kwh`.
+10. Map `electricity_interior_lighting_kwh` to `interior_lighting`.
+11. Map `electricity_exterior_lighting_kwh` to `exterior_lighting`.
+12. Compute `lighting` by summing `interior_lighting` and `exterior_lighting`.
+13. Map `electricity_plug_loads_kwh` to `plug`.
+14. Compute `pool_spa_heater` by summing `electricity_pool_heater_kwh` and `electricity_hot_tub_heater_kwh`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse time and format
+    dt = pd.to_datetime(source['time'], format='%Y-%m-%d %H:%M:%S.%f')
+    out = pd.DataFrame()
+    out['datetime'] = dt.dt.strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Define HVAC components
+    hvac_cols = [
+        'electricity_heating_kwh',
+        'electricity_central_system_heating_kwh',
+        'electricity_cooling_kwh',
+        'electricity_central_system_cooling_kwh',
+        'electricity_fans_heating_kwh',
+        'electricity_fans_cooling_kwh',
+        'electricity_pumps_heating_kwh',
+        'electricity_central_system_pumps_heating_kwh',
+        'electricity_pumps_cooling_kwh',
+        'electricity_central_system_pumps_cooling_kwh'
+    ]
+    
+    # Compute hvac
+    out['hvac'] = source[hvac_cols].sum(axis=1)
+    
+    # Direct mappings
+    out['water_heating'] = source['electricity_water_systems_kwh']
+    out['refrigerator'] = source['electricity_refrigerator_kwh']
+    out['clothes_washer'] = source['electricity_clothes_washer_kwh']
+    out['clothes_dryer'] = source['electricity_clothes_dryer_kwh']
+    out['dishwasher'] = source['electricity_dishwasher_kwh']
+    out['cooking_range'] = source['electricity_cooking_range_kwh']
+    out['interior_lighting'] = source['electricity_interior_lighting_kwh']
+    out['exterior_lighting'] = source['electricity_exterior_lighting_kwh']
+    out['plug'] = source['electricity_plug_loads_kwh']
+    
+    # Computed columns
+    out['pool_spa_pumps'] = source['electricity_pool_pump_kwh'] + source['electricity_hot_tub_pump_kwh']
+    out['lighting'] = out['interior_lighting'] + out['exterior_lighting']
+    out['pool_spa_heater'] = source['electricity_pool_heater_kwh'] + source['electricity_hot_tub_heater_kwh']
+    
+    # Ensure column order matches target
+    target_cols = [
+        'datetime', 'hvac', 'water_heating', 'refrigerator', 'clothes_washer', 
+        'clothes_dryer', 'dishwasher', 'cooking_range', 'pool_spa_pumps', 
+        'interior_lighting', 'exterior_lighting', 'lighting', 'plug', 'pool_spa_heater'
+    ]
+    
+    return out[target_cols].reset_index(drop=True)
+```

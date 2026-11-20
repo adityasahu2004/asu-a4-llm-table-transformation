@@ -1,0 +1,360 @@
+To infer the transformation, we analyze the mapping from source columns to target columns and the aggregation logic.
+
+**1. Target Structure:**
+The target has 288 rows, which corresponds to $12 \text{ months} \times 24 \text{ hours}$. The columns `month` and `hour` are integers. This implies a groupby operation on the time components of the `timestamp` column.
+
+**2. Time Parsing:**
+The source `timestamp` is a string in format `YYYY-MM-DD HH:MM:SS`. We need to parse this into a datetime object to extract `month` and `hour`.
+
+**3. Column Mapping and Aggregation:**
+The target columns represent aggregated energy usage (likely in Watt-hours or similar units, given the large integer values) for specific categories. The source data contains instantaneous power readings (Watts) or cumulative energy. Given the magnitude of the target values (e.g., ~170 million for HVAC in a month/hour bin), and the source having ~1.3 million rows over ~3 years, let's look at the aggregation.
+If we sum the source values (which appear to be Watts or Whr depending on the column name, but "WHS" often implies Watt-Hours in some contexts, or just Watts. Let's look at `TOTAL BLDG WHS`. If it's Watts, summing over all sites and timestamps in a month/hour bin would yield a large number. If it's Whr, summing them also yields a large number.
+Let's look at the distinct values. `TOTAL BLDG WHS` has 14899 distinct values.
+The target `Total` column sums to values like 23 million.
+Let's assume the source values are in Watts (instantaneous) or Whr (energy per interval). The column names say "WHS" which might mean "Watt Hours" or just a sensor ID suffix. However, `Calculated Energy Use (Whr)` explicitly says Whr.
+Let's look at the aggregation. The target has 288 rows. The source has 1.3M rows.
+Groupby `month` and `hour`.
+What is the aggregation function? `sum` is the most likely candidate for energy/power data to get total consumption.
+
+Let's map the source columns to target categories:
+*   **HVAC**: Likely `AC COMPRESSOR WHS [emon ch3,4]` + `AIR HANDLER WHS [emon ch5,6]` + `Minisplit WHS (2-CTs) [xpod chA-7,8]`.
+*   **domestic_water_heating**: Likely `WATER HEATER WHS [emon ch7,8]`.
+*   **major_appliances**: Likely `DRYER WHS (1-CT) [emon ch9]` + `RANGE WHS (1-CT) [emon ch10]` + `DISH WASHER WHS [emon ch11]` + `Primary Fridge WHS [emon ch12]` + `2nd Fridge WHS [emon ch13]` + `Dryer WHS (2-CTs) [xpod chA-9,10]`. Note: Dryer appears twice (1-CT and 2-CTs). We should probably sum all dryer columns.
+*   **lighting**: The target distinct value is 0. This suggests either no lighting column was mapped or it's always 0. There is no explicit "Lighting" column in the source. It might be part of "Unmeasured" or just 0.
+*   **miscellaneous_plug_loads**: This is a float in the target. Likely `Calculated Unmeasured loads (Whr)` or a sum of spare channels? Or perhaps `SPARE1`, `SPARE2`, etc. Let's look at the values.
+*   **Total**: Likely `TOTAL BLDG WHS [emon ch1,2]` or `Calculated Energy Use (Whr)`.
+
+Let's refine the mapping by looking at typical energy disaggregation datasets (like REDD or similar).
+*   `TOTAL BLDG WHS` is the total building load.
+*   `AC COMPRESSOR` and `AIR HANDLER` are HVAC.
+*   `WATER HEATER` is DHW.
+*   `DRYER`, `RANGE`, `DISH WASHER`, `FRIDGE` are major appliances.
+*   `SPARE` channels and `Calculated Unmeasured` might be miscellaneous.
+
+Let's check the `Total` column in the target.
+Row 1: Month 1, Hour 19. Total = 23,224,878.
+If we sum `TOTAL BLDG WHS` for all sites in Jan, Hour 19, do we get this?
+There are 31 sites.
+If the data is hourly, there are ~31 * 31 (days in Jan) = ~961 rows for Jan Hour 19? No, the source has 1.3M rows over ~3 years. 1.3M / (365*24*3) ≈ 50 rows per hour? No, 31 sites * 24 hours * 365 days * 3 years ≈ 810,000 rows. The source has 1.3M, so maybe more frequent or more years.
+Actually, the distinct timestamps are 63,212.
+If we group by month and hour, we sum across all sites and all days in that month/hour.
+
+Let's hypothesize the column mappings:
+1.  **HVAC**: Sum of `AC COMPRESSOR WHS [emon ch3,4]`, `AIR HANDLER WHS [emon ch5,6]`, `Minisplit WHS (2-CTs) [xpod chA-7,8]`.
+2.  **domestic_water_heating**: Sum of `WATER HEATER WHS [emon ch7,8]`.
+3.  **major_appliances**: Sum of `DRYER WHS (1-CT) [emon ch9]`, `RANGE WHS (1-CT) [emon ch10]`, `DISH WASHER WHS [emon ch11]`, `Primary Fridge WHS [emon ch12]`, `2nd Fridge WHS [emon ch13]`, `Dryer WHS (2-CTs) [xpod chA-9,10]`.
+4.  **lighting**: 0.
+5.  **miscellaneous_plug_loads**: This is float. Maybe `Calculated Unmeasured loads (Whr)`? Or sum of `SPARE` channels?
+    Let's look at `Calculated Unmeasured loads (Whr)`.
+    Let's look at `Total`. Is it `TOTAL BLDG WHS [emon ch1,2]`?
+    
+    Let's check the sum of components vs Total.
+    In the target sample:
+    Row 1: HVAC=172,992,524, DHW=17,855,356, Major=217,672,288, Misc=110,685,071.2.
+    Sum of these = 172.9M + 17.8M + 217.6M + 110.6M ≈ 519M.
+    But Total is 23,224,878.
+    This doesn't add up. The Total is *smaller* than the components?
+    Wait, look at the target `Total` column values again.
+    Row 1: 23,224,878.
+    Row 2: 39,317,620.
+    
+    Let's re-read the source columns.
+    `TOTAL BLDG WHS [emon ch1,2]`
+    `Calculated Energy Use (Whr)`
+    
+    Maybe the target `Total` is NOT the sum of the other columns.
+    Or maybe my mapping is wrong.
+    
+    Let's look at the magnitudes.
+    Source `TOTAL BLDG WHS` values in sample: 386, 2069, 1155, 4347, 863, 539, 32767 (error), 6984, 32767 (error), 32767 (error), 1395, 32767 (error).
+    These look like Watts.
+    If we sum Watts over all sites and all days in a month for a specific hour:
+    Avg Watts ~ 1000?
+    Sites ~ 30.
+    Days in month ~ 30.
+    Sum = 1000 * 30 * 30 = 900,000.
+    The target values are ~20,000,000.
+    This is 20x larger.
+    Maybe the source is not Watts but something else? Or the aggregation is different?
+    
+    Wait, `TOTAL BLDG WHS` might be "Watt Hours" for the interval? If the interval is 1 hour, then 1 Whr = 1 Watt average.
+    
+    Let's look at `Calculated Energy Use (Whr)`.
+    Sample values: 386, 2070, 1155, 4347, 863, 539, 32767, 6984, 32767, 32767, 1395, 32767.
+    These are identical to `TOTAL BLDG WHS` in the first few rows.
+    
+    Let's look at the target `Total` again.
+    Is it possible the target `Total` is `Calculated Energy Use (Whr)` summed?
+    
+    Let's look at the `miscellaneous_plug_loads`. It is a float.
+    The other columns are int64.
+    
+    Let's reconsider the mapping.
+    Maybe `Total` is `TOTAL BLDG WHS [emon ch1,2]`.
+    And the other columns are subsets.
+    
+    Why is `Total` (23M) smaller than `HVAC` (172M)?
+    This implies `Total` is NOT the sum of the parts.
+    Or `HVAC` is not a subset of `Total`.
+    
+    Let's look at the column names again.
+    `TOTAL BLDG WHS [emon ch1,2]`
+    `AC COMPRESSOR WHS [emon ch3,4]`
+    
+    In many datasets, the "Total" meter is separate from the sub-meters.
+    
+    Let's look at the target `Total` values vs `HVAC` values.
+    Row 1: Total 23M, HVAC 172M.
+    Row 2: Total 39M, HVAC 220M.
+    
+    This is very strange. Usually Total >= Sum of parts.
+    Unless `Total` is something else.
+    
+    Let's look at `Calculated Unmeasured loads (Whr)`.
+    Sample: 175, 59, 429, 197.6, 273, 186.8, 32767, 203, 32767, 32767, 92, 32767.
+    
+    Let's look at `Wattsup Cumulative Ent.Ctr (WHS)`.
+    Sample: 156909, 32767, 32767, 7385.7, 41893, 6116.3, 32767, 32767, 32767, 32767, 32767, 32767.
+    
+    Let's look at `Wattsup Energy Ent.Ctr (WHS)`.
+    Sample: 55, 32767, 32767, 40.4, 215, 61.2, 32767, 32767, 32767, 32767, 32767, 32767.
+    
+    Maybe the target `Total` is `Wattsup Energy Ent.Ctr (WHS)`?
+    Sum of 55, 40.4, 215, 61.2... over 30 sites * 30 days?
+    55 * 900 = 49,500. Too small.
+    
+    Let's look at the target `miscellaneous_plug_loads`.
+    Row 1: 110,685,071.2.
+    
+    Let's look at the source `Calculated Unmeasured loads (Whr)`.
+    If we sum this: 175 * 900 = 157,500. Too small.
+    
+    There is a scale factor missing or I am misinterpreting the units.
+    
+    Let's look at the distinct values of `TOTAL BLDG WHS`. 14899.
+    
+    What if the target `Total` is `TOTAL BLDG WHS [emon ch1,2]`?
+    And `HVAC` is `AC COMPRESSOR` + `AIR HANDLER` + `Minisplit`?
+    
+    Let's check the ratio.
+    In Row 1 of target: HVAC / Total = 172M / 23M ≈ 7.5.
+    In source sample Row 1:
+    AC=0, Air=16, Minisplit=32767 (error).
+    Total=386.
+    
+    In source sample Row 2:
+    AC=1714, Air=201, Minisplit=32767 (error).
+    Total=2069.
+    HVAC sum (ignoring error) = 1915. Total=2069. Ratio ~ 0.9.
+    
+    In source sample Row 4:
+    AC=3335, Air=373, Minisplit=32767 (error).
+    Total=4347.
+    HVAC sum (ignoring error) = 3708. Total=4347. Ratio ~ 0.85.
+    
+    In source sample Row 5:
+    AC=0, Air=12, Minisplit=0.
+    Total=863.
+    HVAC sum = 12. Ratio ~ 0.01.
+    
+    The target ratios are consistently ~7-8.
+    This suggests `HVAC` in the target is NOT just the sum of the AC/Air/Minisplit columns from the source.
+    
+    Wait, look at the target `Total` column name. It is `Total`.
+    Look at the source `TOTAL BLDG WHS [emon ch1,2]`.
+    
+    Is it possible the target `Total` is `Calculated Energy Use (Whr)`?
+    
+    Let's look at the target `miscellaneous_plug_loads`.
+    It is a float.
+    
+    Let's look at the source `SPARE` columns.
+    
+    Alternative theory:
+    The target columns are derived from specific source columns, but maybe the `Total` in the target is actually `TOTAL BLDG WHS [emon ch1,2]` and the `HVAC` is something else?
+    
+    Let's look at the target `Total` values again.
+    23,224,878.
+    
+    Let's look at the source `Wattsup Cumulative Ent.Ctr (WHS)`.
+    Values are large: 156909, 7385.7, 41893, 6116.3.
+    If we sum these: 156909 * 900 ≈ 141,000,000.
+    This is in the ballpark of the target `HVAC` (172M) or `misc` (110M).
+    
+    Let's look at `Wattsup Energy Ent.Ctr (WHS)`.
+    Values: 55, 40.4, 215, 61.2.
+    Sum: 55 * 900 ≈ 49,500. Too small.
+    
+    Let's look at `Wattsup Cumulative Washer (WHS)`.
+    Values: 58651, 32767, 32767, 32767, 32767, 32767, 32767, 32767, 32767, 32767, 32767, 32767.
+    Sum: 58651 * 900 ≈ 52,000,000.
+    
+    Let's look at `Wattsup Energy Washer (WHS)`.
+    Values: 2, 32767...
+    
+    Maybe the target `Total` is `Wattsup Cumulative Ent.Ctr (WHS)`?
+    And `HVAC` is `TOTAL BLDG WHS`?
+    
+    Let's check the ratio for Row 1 of target:
+    HVAC (172M) / Total (23M) = 7.5.
+    
+    If `HVAC` = `TOTAL BLDG WHS` and `Total` = `Wattsup Cumulative Ent.Ctr`.
+    Source Row 1: Total Bldg = 386. Wattsup Cum = 156909.
+    Ratio 386 / 156909 = 0.002.
+    
+    This doesn't match.
+    
+    Let's look at the target `Total` column again.
+    Is it possible `Total` is `Calculated Energy Use (Whr)`?
+    
+    Let's try to find a column that sums to ~23M for Jan Hour 19.
+    
+    What if the aggregation is not sum?
+    
+    Let's look at the target `lighting` column. It is always 0.
+    
+    Let's look at the target `miscellaneous_plug_loads`.
+    It is a float.
+    
+    Let's assume the following mapping based on common sense and column names:
+    1.  **HVAC**: `AC COMPRESSOR WHS [emon ch3,4]` + `AIR HANDLER WHS [emon ch5,6]` + `Minisplit WHS (2-CTs) [xpod chA-7,8]`
+    2.  **domestic_water_heating**: `WATER HEATER WHS [emon ch7,8]`
+    3.  **major_appliances**: `DRYER WHS (1-CT) [emon ch9]` + `RANGE WHS (1-CT) [emon ch10]` + `DISH WASHER WHS [emon ch11]` + `Primary Fridge WHS [emon ch12]` + `2nd Fridge WHS [emon ch13]` + `Dryer WHS (2-CTs) [xpod chA-9,10]`
+    4.  **lighting**: 0
+    5.  **miscellaneous_plug_loads**: `Calculated Unmeasured loads (Whr)`
+    6.  **Total**: `TOTAL BLDG WHS [emon ch1,2]`
+    
+    Why did the ratios not match?
+    Maybe the `32767` values are errors and should be treated as NaN or 0?
+    In the source sample, many rows have `32767`.
+    If we treat `32767` as NaN, the sums will be much lower.
+    
+    Let's re-calculate the ratio for Source Row 2 (no 32767 in HVAC cols):
+    AC=1714, Air=201, Minisplit=32767 (Error).
+    If Minisplit is error, HVAC = 1915.
+    Total = 2069.
+    Ratio = 0.92.
+    
+    Target Ratio = 7.5.
+    
+    This implies `HVAC` in target is MUCH larger than `Total` in target.
+    This is physically impossible if `Total` is the building total and `HVAC` is a subset.
+    
+    Therefore, `Total` in the target is NOT `TOTAL BLDG WHS`.
+    
+    What if `Total` in the target is `Wattsup Energy Ent.Ctr (WHS)`?
+    And `HVAC` is `TOTAL BLDG WHS`?
+    
+    Let's check Source Row 2:
+    Total Bldg = 2069.
+    Wattsup Energy Ent.Ctr = 32767 (Error).
+    
+    Source Row 4:
+    Total Bldg = 4347.
+    Wattsup Energy Ent.Ctr = 40.4.
+    Ratio 4347 / 40.4 = 107.
+    
+    Target Ratio = 7.5.
+    
+    What if `Total` is `Wattsup Cumulative Ent.Ctr (WHS)`?
+    Source Row 4:
+    Total Bldg = 4347.
+    Wattsup Cum = 7385.7.
+    Ratio 4347 / 7385.7 = 0.58.
+    
+    Target Ratio = 7.5.
+    
+    What if `HVAC` is `Wattsup Cumulative Ent.Ctr` and `Total` is `TOTAL BLDG WHS`?
+    Ratio 7385.7 / 4347 = 1.7.
+    
+    Target Ratio = 7.5.
+    
+    Let's look at `miscellaneous_plug_loads` in target.
+    Row 1: 110,685,071.2.
+    
+    Let's look at `Calculated Unmeasured loads (Whr)` in source.
+    Row 4: 197.6.
+    
+    If we sum `Calculated Unmeasured` over 900 rows: 197.6 * 900 = 177,840.
+    Target is 110,000,000.
+    Factor of 600.
+    
+    There is a significant scaling factor or I am missing a column.
+    
+    Let's look at `SPARE4 WHS (2-CTs) [xpod chA-5,6]`.
+    Distinct values: 9150.
+    
+    Let's look at `POOL PUMP WHS (2-CTs) [xpod chA-3,4]`.
+    
+    What if the target `Total` is `Calculated Energy Use (Whr)`?
+    
+    Let's try a different approach.
+    The target has 288 rows.
+    The source has 1.3M rows.
+    
+    The target `Total` column has distinct values 288.
+    
+    Let's assume the transformation is:
+    1. Parse timestamp.
+    2. Group by month, hour.
+    3. Sum specific columns.
+    
+    The values in the target are large integers (except misc).
+    
+    Let's look at the `Total` column in the target again.
+    23,224,878.
+    
+    If I sum `TOTAL BLDG WHS` for all sites in Jan Hour 19:
+    Assume avg 1000W. 30 sites. 31 days.
+    1000 * 30 * 31 = 930,000.
+    
+    The target is 23,000,000.
+    This is ~25x larger.
+    
+    What if the source values are not Watts but something else?
+    
+    Let's look at the `note`: "Source row count describes a training sample only".
+    
+    Maybe the aggregation is `sum` but the source values are already aggregated?
+    
+    Let's look at the `miscellaneous_plug_loads` column.
+    It is a float.
+    
+    Let's assume the mapping is:
+    HVAC: `AC COMPRESSOR` + `AIR HANDLER` + `Minisplit`
+    DHW: `WATER HEATER`
+    Major: `DRYER` + `RANGE` + `DISH WASHER` + `FRIDGE` + `DRYER2`
+    Lighting: 0
+    Misc: `Calculated Unmeasured loads (Whr)`
+    Total: `TOTAL BLDG WHS`
+    
+    And the values are just scaled?
+    
+    No, I must produce the exact values.
+    
+    Let's look at the `Total` column in the target.
+    Is it possible `Total` is `Wattsup Cumulative Ent.Ctr (WHS)`?
+    
+    Let's try to code the transformation with the most logical mapping and see if the structure matches.
+    
+    ```python
+    import pandas as pd
+    import numpy as np
+
+    def transform(source: pd.DataFrame) -> pd.DataFrame:
+        # Parse timestamp
+        source = source.copy()
+        source['timestamp'] = pd.to_datetime(source['timestamp'])
+        source['month'] = source['timestamp'].dt.month
+        source['hour'] = source['timestamp'].dt.hour
+        
+        # Define column mappings
+        # HVAC
+        hvac_cols = [
+            'AC COMPRESSOR WHS [emon ch3,4]',
+            'AIR HANDLER WHS [emon ch5,6]',
+            'Minisplit WHS (2-CTs) [xpod chA-7,8]'
+        ]
+        
+        # Domestic Water Heating
+        dwh_cols =

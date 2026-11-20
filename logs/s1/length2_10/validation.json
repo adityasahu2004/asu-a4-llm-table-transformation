@@ -1,0 +1,81 @@
+{
+  "case": "length2_10",
+  "length": 2,
+  "strategy": "s1",
+  "model": "qwen36-27b",
+  "is_demo": false,
+  "parameters": {
+    "output": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment",
+    "model": "qwen36-27b",
+    "base_url": "https://openai.rc.asu.edu/v1",
+    "max_tokens": 6000,
+    "reasoning_effort": "none",
+    "k": 5,
+    "sample_rows": 12,
+    "timeout": 120,
+    "api_timeout": 3600,
+    "replay_only": true,
+    "strategy": "s1",
+    "python": "3.14.4 (main, Apr  7 2026, 13:13:20) [Clang 21.0.0 (clang-2100.0.123.102)]",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "pandas": "3.1.1",
+    "held_out": [
+      "length1_1",
+      "length1_2",
+      "length1_3",
+      "length2_1",
+      "length3_1"
+    ],
+    "benchmark": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split"
+  },
+  "prompt_path": "logs/s1/length2_10/prompt.json",
+  "completion_path": "logs/s1/length2_10/response.json",
+  "execution": {
+    "status": "execution_error",
+    "returncode": 1,
+    "stdout": "",
+    "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\nTraceback (most recent call last):\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py\", line 21, in <module>\n    output = namespace['transform'](source)\n  File \"transform.py\", line 11, in transform\n    df['dow'] = df['date_dt'].dt.isoweekday() % 7  # Sun=0, Mon=1, ..., Sat=6\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAttributeError: 'DatetimeProperties' object has no attribute 'isoweekday'. Did you mean: 'weekday'?\n",
+    "seconds": 2.235670708003454
+  },
+  "error": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\nTraceback (most recent call last):\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py\", line 21, in <module>\n    output = namespace['transform'](source)\n  File \"transform.py\", line 11, in transform\n    df['dow'] = df['date_dt'].dt.isoweekday() % 7  # Sun=0, Mon=1, ..., Sat=6\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAttributeError: 'DatetimeProperties' object has no attribute 'isoweekday'. Did you mean: 'weekday'?\n",
+  "generation": {
+    "request_hash": "0b68a480ec0df4c76840d4ad62cfdf6377ba131cbe1a572b1b8346ddecbb5288",
+    "usage": {
+      "completion_tokens": 5141,
+      "prompt_tokens": 5504,
+      "total_tokens": 10645,
+      "completion_tokens_details": null,
+      "prompt_tokens_details": {
+        "audio_tokens": null,
+        "cache_write_tokens": null,
+        "cached_tokens": 0,
+        "image_tokens": null,
+        "text_tokens": null,
+        "created_cache_tokens": 5376,
+        "multimodal_tokens": null
+      },
+      "co2_g": 3.349719,
+      "energy_wh": 9.939818
+    },
+    "latency_seconds": 221.66096466699673,
+    "api_attempts": 1,
+    "cached": true,
+    "candidate_count": 1,
+    "api_timeout_seconds": 600,
+    "reasoning_effort_header": "none",
+    "selected_index": 0,
+    "clusters": {}
+  },
+  "autopipeline": {
+    "accuracy": 0.0,
+    "is_correct": false,
+    "similarities": {}
+  },
+  "hard_match": {
+    "accuracy": 0.0,
+    "is_correct": false,
+    "similarities": {}
+  },
+  "wall_seconds": 224.0530618749981,
+  "replay_wall_seconds": 2.24637641699519
+}

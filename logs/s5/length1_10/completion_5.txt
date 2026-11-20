@@ -1,0 +1,192 @@
+**Operator Plan:**
+
+1.  **Parse Dates**: Convert the `date` column (format `M/D/YYYY H:MM`) into a pandas datetime object.
+2.  **Filter/Select**: The target data represents a specific subset of days (likely weekends or specific operational days) from the source. However, looking at the target sample, the dates are distinct and the values are either `876.0` or `0.0`. The source has `zone_016_cooling_sp` values of `73.0` or `84.0`.
+    *   Wait, the target values `876.0` and `0.0` do not directly map to `73.0` or `84.0` via simple arithmetic.
+    *   Let's look closer at the target structure. It has 24 hourly columns. The source has only one value per row.
+    *   The target rows are unique dates (53 rows). The source has 15,117 rows.
+    *   The target `cst` format is `%a %m/%d/%Y`.
+    *   The target values are `876.0` (which is $365 \times 2.4$? No. $24 \times 36.5$? No. $876$ hours in a year? Yes, $365 \times 24 = 8760$. $876$ is $1/10$th of that? Or maybe it's a specific constant).
+    *   Actually, let's look at the "distinct values" in the target. `876.0` and `0.0`.
+    *   Let's look at the source again. `zone_016_cooling_sp` is `73.0` or `84.0`.
+    *   Is there a mapping?
+        *   If `zone_016_cooling_sp` is `73.0`, does it map to `876.0` or `0.0`?
+        *   If `zone_016_cooling_sp` is `84.0`, does it map to `876.0` or `0.0`?
+    *   Let's check the first target row: `Sun 09/30/2018`. All hours are `876.0`.
+    *   Let's check the third target row: `Sat 09/15/2018`. Hours 1-9 are `0.0`, Hours 10-23 are `876.0`, Hour 24 is `0.0`.
+    *   This implies the target is **not** just a simple row-wise transformation of the source. The source has one timestamp per row. The target has 24 hours per row.
+    *   This suggests the source data might be aggregated or the target is generated from a different logic.
+    *   However, the prompt says "Infer the transformation from this schema/sample block".
+    *   Let's look at the source `date` column again. `11/6/2018 21:45`.
+    *   The target `cst` is `Sun 09/30/2018`.
+    *   The source sample dates are in Nov/Dec 2018 and Jan 2019. The target sample dates are in Sep/Oct 2018.
+    *   This implies the source provided in the sample is **not** the direct source of the target rows shown in the sample. The note says "Source row count describes a training sample only, not the evaluation input."
+    *   This is a tricky case. The transformation must be general.
+    *   Hypothesis: The target is a "profile" or "schedule" derived from the source.
+    *   But wait, look at the target values: `876.0`. This is a very specific number.
+    *   Look at the source values: `73.0`, `84.0`.
+    *   Is it possible the target is unrelated to the specific values in the source sample, but rather the source *structure* implies a grouping?
+    *   Let's re-read the prompt constraints: "Compute the result only from the source DataFrame."
+    *   If the source sample dates (Nov 2018) don't match the target sample dates (Sep 2018), then the transformation likely involves **grouping by date** and then **expanding** or **mapping** to a standard 24-hour profile.
+    *   However, without a clear mapping from `73.0`/`84.0` to `876.0`/`0.0`, and without the source containing the Sep 2018 data, how can we generate the target?
+    *   Perhaps the `zone_016_cooling_sp` indicates a "setpoint" or "mode".
+    *   Let's look at the target `cst` column. It contains unique dates.
+    *   Let's look at the source `date` column. It contains timestamps.
+    *   Maybe the transformation is:
+        1.  Parse source `date`.
+        2.  Group by Date (floor to day).
+        3.  For each day, determine a 24-hour profile.
+    *   How is the profile determined?
+        *   In the target, most days are all `876.0`.
+        *   One day (`Sat 09/15/2018`) has `0.0` for hours 1-9 and 24, and `876.0` for 10-23.
+        *   Another day (`Sun 09/30/2018`) is all `876.0`.
+    *   This looks like a "cooling schedule".
+    *   If the source `zone_016_cooling_sp` is `73.0` (cooling on?) or `84.0` (cooling off?).
+    *   Let's assume `73.0` means "Cooling Active" and `84.0` means "Cooling Inactive" (or vice versa).
+    *   If we group the source by Date, we get multiple readings per day.
+    *   We need to map these readings to 24 hourly bins.
+    *   Then, for each bin, we decide if the value is `876.0` or `0.0`.
+    *   What determines `876.0` vs `0.0`?
+        *   Maybe if the setpoint is `73.0`, the value is `876.0`?
+        *   Maybe if the setpoint is `84.0`, the value is `0.0`?
+    *   Let's check the source sample for `11/6/2018`. Value is `73.0`.
+    *   Let's check the source sample for `1/13/2019`. Value is `84.0`.
+    *   If `73.0` -> `876.0` and `84.0` -> `0.0`:
+        *   We need to aggregate the source data into hourly bins for each day.
+        *   Then, for each hour, if the dominant setpoint is `73.0`, output `876.0`, else `0.0`.
+    *   Let's verify this hypothesis with the target sample `Sat 09/15/2018`.
+        *   Hours 1-9: `0.0`. This implies the setpoint was `84.0` (or inactive) during these hours.
+        *   Hours 10-23: `876.0`. This implies the setpoint was `73.0` (or active) during these hours.
+        *   Hour 24: `0.0`.
+    *   This makes sense for a cooling schedule: Cooling is off at night (hours 1-9, 24) and on during the day (10-23).
+    *   So the transformation is:
+        1.  Parse `date` to datetime.
+        2.  Extract `date` (floor to day) and `hour` (1-24, where 24 is 00:00 of next day? Or 23:00-00:00?).
+            *   Standard pandas `dt.hour` is 0-23.
+            *   Target columns are `1:00` to `24:00`.
+            *   Usually `1:00` corresponds to hour 0 (00:00-01:00) or hour 1 (01:00-02:00)?
+            *   Let's assume `1:00` is the first hour of the day (00:00-01:00).
+            *   `24:00` is the last hour (23:00-00:00).
+            *   So, `hour_bin = dt.hour + 1`. If `dt.hour` is 0, bin is 1. If `dt.hour` is 23, bin is 24.
+        3.  Group by `date` (floor) and `hour_bin`.
+        4.  Aggregate the `zone_016_cooling_sp`.
+            *   We need to decide the value for the hour.
+            *   If the setpoint is `73.0`, the output is `876.0`.
+            *   If the setpoint is `84.0`, the output is `0.0`.
+            *   What if there are mixed values in an hour?
+            *   The source sample has sparse data (one reading every few days/hours).
+            *   We likely need to take the **mode** or **mean** or **last** value.
+            *   Given `73.0` and `84.0` are distinct, `mode` is a good candidate. Or `mean` (73 vs 84).
+            *   Let's assume we take the **mean** and threshold it. Or simply map `73.0` -> `876.0` and `84.0` -> `0.0`.
+            *   If we group by date and hour, and take the mean of `zone_016_cooling_sp`:
+                *   If mean is close to 73, output 876.
+                *   If mean is close to 84, output 0.
+            *   Alternatively, just map the values directly if we assume one reading per hour bin in the full dataset.
+            *   Let's try: `value = 876.0 if sp == 73.0 else 0.0`.
+            *   Then group by date and hour, and take the **first** or **mean**?
+            *   If there are multiple readings, and they are consistent, `first` works.
+            *   Let's assume the source has enough data to fill the hours.
+        5.  Pivot the data to have columns `1:00` to `24:00`.
+        6.  Format the date as `%a %m/%d/%Y`.
+
+    *   Refining the hour mapping:
+        *   Target `1:00` usually means the hour starting at 1:00 AM? Or the first hour of the day?
+        *   In energy data, `1:00` often means the interval 00:00-01:00 (Hour 1).
+        *   `24:00` means 23:00-00:00 (Hour 24).
+        *   So, `hour_index = dt.hour + 1`.
+        *   Column name: `f"{hour_index}:00"`.
+
+    *   Refining the value mapping:
+        *   Source `73.0` -> Target `876.0`.
+        *   Source `84.0` -> Target `0.0`.
+        *   We can create a mapping column: `mapped_val = source['zone_016_cooling_sp'].map({73.0: 876.0, 84.0: 0.0})`.
+        *   Then group by `date` (floor) and `hour_index`.
+        *   Aggregate: `first()` or `mean()`. Since the values are binary-like (876 or 0), `mean()` might give 438 if mixed. `first()` is safer if data is consistent. `mode()` is best but harder in pandas groupby. Let's use `first()` after sorting by time, or `mean()` and then round/threshold?
+        *   Given the distinct values in target are exactly `876.0` and `0.0`, it's likely that for each hour bin, the source data is consistent.
+        *   Let's use `first()`.
+
+    *   Steps:
+        1.  `df['dt'] = pd.to_datetime(df['date'])`
+        2.  `df['date_floor'] = df['dt'].dt.floor('D')`
+        3.  `df['hour_bin'] = df['dt'].dt.hour + 1`
+        4.  `df['val'] = df['zone_016_cooling_sp'].map({73.0: 876.0, 84.0: 0.0})`
+        5.  `grouped = df.groupby(['date_floor', 'hour_bin'])['val'].first().reset_index()`
+        6.  `pivot = grouped.pivot(index='date_floor', columns='hour_bin', values='val')`
+        7.  Rename columns to `1:00`, `2:00`, ..., `24:00`.
+        8.  Format `date_floor` to `cst`.
+        9.  Reset index.
+
+    *   Wait, what if `zone_016_cooling_sp` is `NaN`? The source has 1 null.
+    *   The target has 0 nulls.
+    *   If a bin has only NaNs, `first()` will be NaN.
+    *   We might need to fill NaNs. But with 15k rows, most bins should have data.
+    *   Also, the target has 53 rows. The source has 15k rows.
+    *   The target dates are in Sep/Oct 2018. The source sample is Nov/Dec 2018.
+    *   This confirms the source *contains* the Sep/Oct data, just not in the sample.
+    *   The transformation must work on the full source.
+
+    *   One detail: `24:00` column.
+    *   `dt.hour` is 0-23.
+    *   `hour_bin` is 1-24.
+    *   Pivot will create columns 1-24.
+    *   Rename 1 to `1:00`, 24 to `24:00`.
+
+    *   Final check on date format: `Sun 09/30/2018`.
+    *   `dt.strftime('%a %m/%d/%Y')`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    df = source.copy()
+    df['dt'] = pd.to_datetime(df['date'])
+    
+    # Floor to day for grouping
+    df['date_floor'] = df['dt'].dt.floor('D')
+    
+    # Calculate hour bin (1-24)
+    # 00:00-01:00 -> 1
+    # 23:00-00:00 -> 24
+    df['hour_bin'] = df['dt'].dt.hour + 1
+    
+    # Map the cooling setpoint to the target values
+    # 73.0 -> 876.0
+    # 84.0 -> 0.0
+    # Handle potential NaNs by mapping them to NaN first, then we can decide how to aggregate
+    mapping = {73.0: 876.0, 84.0: 0.0}
+    df['val'] = df['zone_016_cooling_sp'].map(mapping)
+    
+    # Group by date and hour bin, and take the first non-null value
+    # If there are multiple values, they should be consistent. 
+    # Using 'first' after sorting by time is a safe bet for sparse data.
+    grouped = df.groupby(['date_floor', 'hour_bin'])['val'].first().reset_index()
+    
+    # Pivot to wide format
+    pivot = grouped.pivot(index='date_floor', columns='hour_bin', values='val')
+    
+    # Rename columns to match target format "1:00", "2:00", ... "24:00"
+    pivot.columns = [f"{col}:00" for col in pivot.columns]
+    
+    # Sort columns to ensure order 1:00 to 24:00
+    pivot = pivot.reindex(sorted(pivot.columns, key=lambda x: int(x.split(':')[0])), axis=1)
+    
+    # Format the date index
+    pivot.index = pivot.index.strftime('%a %m/%d/%Y')
+    pivot.index.name = 'cst'
+    
+    # Reset index to make 'cst' a column
+    result = pivot.reset_index()
+    
+    # Ensure all expected columns are present, filling missing with 0.0 if necessary
+    # The target has 0 nulls.
+    expected_cols = ['cst'] + [f"{h}:00" for h in range(1, 25)]
+    for col in expected_cols:
+        if col not in result.columns:
+            result[col] = 0.0
+            
+    result = result[expected_cols]
+    
+    return result
+```

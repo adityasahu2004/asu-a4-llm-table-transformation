@@ -1,0 +1,101 @@
+Operator plan:
+1. Parse `DT_STRATA` into a datetime object and format it as `MM/DD/YYYY` for the `date` column.
+2. Construct the 24 hourly columns by mapping the source `PCT_HOURLY_HHMM` columns to the target 12-hour clock format names (e.g., `PCT_HOURLY_0100` -> `1:00 AM`, `PCT_HOURLY_1200` -> `12:00 PM`, `PCT_HOURLY_1300` -> `1:00 PM`, etc.).
+3. The mapping logic is:
+   - Hour 1 (0100) -> 1:00 AM
+   - Hour 2 (0200) -> 2:00 AM
+   - ...
+   - Hour 11 (1100) -> 11:00 AM
+   - Hour 12 (1200) -> 12:00 PM (Note: Source 1200 is noon, Target 12:00 PM is noon. Wait, let's check the sample.
+     - Source `PCT_HOURLY_1200` value for first row is `0.0019548904`.
+     - Target `12:00 AM` value for first row is `0.0012350173`.
+     - Target `12:00 PM` value for first row is `0.0011700164`.
+     - Let's look at the first row source data again:
+       - `PCT_HOURLY_0100`: 0.0007010524
+       - `PCT_HOURLY_0200`: 0.0006850448
+       - ...
+       - `PCT_HOURLY_1200`: 0.0019548904
+       - `PCT_HOURLY_1300`: 0.0019824444
+     - Let's look at the target first row data:
+       - `1:00 AM`: 0.0012220171. This does NOT match `PCT_HOURLY_0100` (0.0007010524).
+       - Wait, the sample data in the prompt for "target" does not correspond to the same rows as "source". The note says "Source row count describes a training sample only". The target sample has different dates (e.g., "01/01/2016" vs source "7/2/2016").
+       - However, I can infer the column mapping by name convention and standard time formats.
+       - Source: `PCT_HOURLY_0100` to `PCT_HOURLY_2400`.
+       - Target: `1:00 AM` to `11:00 PM`, `12:00 AM`, `12:00 PM`.
+       - Standard mapping:
+         - 0100 -> 1:00 AM
+         - 0200 -> 2:00 AM
+         - ...
+         - 1100 -> 11:00 AM
+         - 1200 -> 12:00 PM
+         - 1300 -> 1:00 PM
+         - ...
+         - 2300 -> 11:00 PM
+         - 2400 -> 12:00 AM (Next day midnight, often labeled as 12:00 AM in some contexts, or the previous day's end. Let's check the target column order).
+         - Target columns order: `1:00 AM` ... `11:00 AM`, `12:00 AM`, `1:00 PM` ... `11:00 PM`, `12:00 PM`.
+         - This is a non-chronological order in the target schema list, but let's map values correctly.
+         - `PCT_HOURLY_0100` -> `1:00 AM`
+         - `PCT_HOURLY_0200` -> `2:00 AM`
+         - `PCT_HOURLY_0300` -> `3:00 AM`
+         - `PCT_HOURLY_0400` -> `4:00 AM`
+         - `PCT_HOURLY_0500` -> `5:00 AM`
+         - `PCT_HOURLY_0600` -> `6:00 AM`
+         - `PCT_HOURLY_0700` -> `7:00 AM`
+         - `PCT_HOURLY_0800` -> `8:00 AM`
+         - `PCT_HOURLY_0900` -> `9:00 AM`
+         - `PCT_HOURLY_1000` -> `10:00 AM`
+         - `PCT_HOURLY_1100` -> `11:00 AM`
+         - `PCT_HOURLY_1200` -> `12:00 PM`
+         - `PCT_HOURLY_1300` -> `1:00 PM`
+         - `PCT_HOURLY_1400` -> `2:00 PM`
+         - `PCT_HOURLY_1500` -> `3:00 PM`
+         - `PCT_HOURLY_1600` -> `4:00 PM`
+         - `PCT_HOURLY_1700` -> `5:00 PM`
+         - `PCT_HOURLY_1800` -> `6:00 PM`
+         - `PCT_HOURLY_1900` -> `7:00 PM`
+         - `PCT_HOURLY_2000` -> `8:00 PM`
+         - `PCT_HOURLY_2100` -> `9:00 PM`
+         - `PCT_HOURLY_2200` -> `10:00 PM`
+         - `PCT_HOURLY_2300` -> `11:00 PM`
+         - `PCT_HOURLY_2400` -> `12:00 AM`
+
+```python
+import pandas as pd
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    out = pd.DataFrame(index=source.index)
+    out['date'] = pd.to_datetime(source['DT_STRATA'], format='%m/%d/%Y').dt.strftime('%m/%d/%Y')
+    
+    mapping = {
+        'PCT_HOURLY_0100': '1:00 AM',
+        'PCT_HOURLY_0200': '2:00 AM',
+        'PCT_HOURLY_0300': '3:00 AM',
+        'PCT_HOURLY_0400': '4:00 AM',
+        'PCT_HOURLY_0500': '5:00 AM',
+        'PCT_HOURLY_0600': '6:00 AM',
+        'PCT_HOURLY_0700': '7:00 AM',
+        'PCT_HOURLY_0800': '8:00 AM',
+        'PCT_HOURLY_0900': '9:00 AM',
+        'PCT_HOURLY_1000': '10:00 AM',
+        'PCT_HOURLY_1100': '11:00 AM',
+        'PCT_HOURLY_1200': '12:00 PM',
+        'PCT_HOURLY_1300': '1:00 PM',
+        'PCT_HOURLY_1400': '2:00 PM',
+        'PCT_HOURLY_1500': '3:00 PM',
+        'PCT_HOURLY_1600': '4:00 PM',
+        'PCT_HOURLY_1700': '5:00 PM',
+        'PCT_HOURLY_1800': '6:00 PM',
+        'PCT_HOURLY_1900': '7:00 PM',
+        'PCT_HOURLY_2000': '8:00 PM',
+        'PCT_HOURLY_2100': '9:00 PM',
+        'PCT_HOURLY_2200': '10:00 PM',
+        'PCT_HOURLY_2300': '11:00 PM',
+        'PCT_HOURLY_2400': '12:00 AM',
+    }
+    
+    for src_col, tgt_col in mapping.items():
+        out[tgt_col] = source[src_col]
+        
+    # Ensure column order matches target schema
+    target_cols = ['date', '1:00 AM', '2:00 AM', '3:00 AM', '4:00 AM', '5:00 AM', '6:00 AM', '7:00 AM', '8:00 AM', '9:00 AM', '10:00 AM', '11:00 AM', '12:00 AM', '1:00 PM', '2:00 PM', '3:00 PM', '4:00 PM', '5:00 PM', '6:00 PM', '7:00 PM', '8:00 PM', '9:00 PM', '10:00 PM', '11:00 PM', '12:00 PM']
+    return out[target_cols].reset_index(drop=True)
+```

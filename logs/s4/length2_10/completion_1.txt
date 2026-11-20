@@ -1,0 +1,140 @@
+**Operator Plan:**
+1.  **Parse Dates**: Convert the `date` column (format `m/d/Y H:MM`) into a pandas datetime object.
+2.  **Aggregate to Day**: Group the data by the date (truncated to day) to handle the many-to-one reduction from 15,117 rows to 53 unique days.
+3.  **Compute Metrics**:
+    *   `dt_strata`: Format the date as `MM/DD/YY`.
+    *   `dow`: Extract the day of the week (0=Monday, 6=Sunday, consistent with Python's `weekday()`).
+    *   `pct_hourly_XXXX`: For each of the 24 hours, calculate the count of non-null `zone_016_cooling_sp` records falling within that hour for the given day. The target schema shows integer counts (distinct values like 876, 0, 657). 876 is the number of hours in a year, suggesting these might be normalized or simply counts in a specific context, but given the input is sparse time-series, `count` is the most logical aggregation that results in integers varying by hour availability. *Correction*: Looking at the distinct values `876` and `0`, and `657`, and the input having ~15k rows over ~1.5 years, it looks like we are counting occurrences. However, 876 is exactly the number of hours in a year (365 * 24 = 8760, no. 365*24=8760. Wait. 876 is not a standard hour count. Let's look closer. 15117 rows. 53 days in target. 15117 / 53 ≈ 285 rows/day. The target values are 876. This is strange.
+    *   Let's re-read the target schema carefully. `pct_hourly_0100` has distinct values `[876, 0]`. `pct_hourly_2100` has `[876, 657]`.
+    *   Is it possible the target is not derived from the *sample* provided in the prompt's `source` block directly via simple counting? The prompt says "Source row count describes a training sample only". The transformation must be general.
+    *   Let's look at the "distinct" counts. 876 appears frequently.
+    *   Actually, usually in these problems, if the output is `pct_hourly_XXXX`, it implies a percentage or a count.
+    *   Let's look at the first target row: `10/25/18`. All hours are 876 except 2500 is 0.
+    *   Let's look at the source data for `10/25/18`. It's not in the sample.
+    *   Let's look at the source sample: `11/6/2018`.
+    *   Hypothesis: The target values `876` might be a constant or derived from a larger dataset context not fully visible, OR it's a specific aggregation.
+    *   However, often `pct_hourly` in these specific energy/load datasets represents a **count of occurrences** or a **sum**.
+    *   Let's look at the number 876. It is `365 * 2.4`? No.
+    *   Let's look at the number of distinct values in source `zone_016_cooling_sp`: 2 (73.0, 84.0).
+    *   If we sum or count, we get integers.
+    *   Let's assume the standard transformation for this schema pattern (which appears in other similar tasks) is to **count** the non-null values per hour per day.
+    *   Why 876? Maybe the source dataset in the *evaluation* has many more rows per hour? The note says "Source row count describes a training sample only". The evaluation input might have higher frequency data (e.g., 15-min intervals -> 4 per hour, 96 per day). 15,117 rows / 1.5 years ~ 10k rows.
+    *   If the evaluation data has high frequency, counting non-nulls per hour could result in higher numbers.
+    *   But wait, the target `dow` is `int64` 0-6.
+    *   The target `dt_strata` is `MM/DD/YY`.
+    *   The target columns are `pct_hourly_0100` to `pct_hourly_2500`.
+    *   `pct_hourly_2500` is always 0. This is a dummy column.
+    *   The values 876 and 657 are specific. 876 is `365 * 2.4`? No.
+    *   Is it possible `876` is a typo for `8760`? Or is it `count * factor`?
+    *   Let's look at `657`. `657 / 876 ≈ 0.75`.
+    *   Let's look at the source data frequency. `11/6/2018 21:45`. `11/11/2018 16:15`. The intervals are irregular.
+    *   If the task is to generate a "load profile" or "availability profile", and the target is `int64`, it's likely a count.
+    *   Given the ambiguity of the specific value `876` without the full evaluation data, the most robust deterministic transformation for "hourly metrics" from timestamped data is to **count** the records per hour.
+    *   *Self-Correction*: In many of these "Strata" datasets, `pct_hourly` often refers to a **percentage** scaled by 1000 or similar, or just a count. However, `876` is very specific.
+    *   Let's consider the source `zone_016_cooling_sp`. It has values 73 and 84.
+    *   If we simply count non-nulls, we get small integers (e.g., 1, 2, 3). The target has 876.
+    *   This implies the *evaluation* data is much denser.
+    *   Therefore, the operation is: **Count non-null values per hour**.
+
+4.  **Construct Output**:
+    *   Create a DataFrame with `dt_strata` and `dow`.
+    *   Create 24 columns `pct_hourly_0100` ... `pct_hourly_2400`.
+    *   Create `pct_hourly_2500` filled with 0.
+    *   Fill hourly columns with the count of non-null `zone_016_cooling_sp` for that hour.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    # Format in sample: "11/6/2018 21:45"
+    df = source.copy()
+    df['dt'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract date and hour
+    df['date_only'] = df['dt'].dt.date
+    df['hour'] = df['dt'].dt.hour
+    
+    # We need to count non-null values of zone_016_cooling_sp per date and hour
+    # The target columns are pct_hourly_0100 to pct_hourly_2400
+    # Hour 0 in pandas is 0:00-0:59. This maps to "Hour 24" or "Hour 00"?
+    # Standard 24-hour clock: 0-23.
+    # Target columns: 0100, 0200, ... 2400.
+    # Usually:
+    # 01:00 -> Hour 1 (1:00-1:59)
+    # ...
+    # 23:00 -> Hour 23 (23:00-23:59)
+    # 24:00 -> Hour 24 (0:00-0:59 of the next day? Or 0:00-0:59 of the same day?)
+    # In many energy datasets, 24:00 represents the midnight hour (0:00-0:59).
+    # Let's assume:
+    # Hour 1 = 1:00-1:59
+    # ...
+    # Hour 23 = 23:00-23:59
+    # Hour 24 = 0:00-0:59
+    
+    # Let's verify with the sample if possible. 
+    # Sample source: 11/6/2018 21:45. Hour 21.
+    # If this maps to pct_hourly_2100, then Hour 21 is 21:00-21:59.
+    # What about 0:00? It maps to pct_hourly_2400.
+    
+    # Create a mapping for hour bins
+    # pandas hour: 0..23
+    # target col: 1..23, 24
+    # pandas 0 -> target 24
+    # pandas 1 -> target 1
+    # ...
+    # pandas 23 -> target 23
+    
+    def get_hour_col(h):
+        if h == 0:
+            return 'pct_hourly_2400'
+        else:
+            return f'pct_hourly_{h:02d}00'
+
+    # Group by date and hour, count non-nulls
+    # We need to drop nulls in the value column first to count correctly
+    valid_df = df.dropna(subset=['zone_016_cooling_sp'])
+    
+    # Group by date and hour
+    counts = valid_df.groupby(['date_only', 'hour']).size().reset_index(name='count')
+    
+    # Pivot to wide format
+    pivot = counts.pivot_table(index='date_only', columns='hour', values='count', fill_value=0)
+    
+    # Prepare the result dataframe
+    # We need to ensure all hours 0-23 are present in the pivot for every date
+    all_hours = list(range(0, 24))
+    pivot = pivot.reindex(columns=all_hours, fill_value=0)
+    
+    # Map hours to target column names
+    # Create a new dataframe
+    res = pd.DataFrame(index=pivot.index)
+    
+    for h in range(0, 24):
+        col_name = get_hour_col(h)
+        res[col_name] = pivot[h].astype(int)
+        
+    # Add pct_hourly_2500 as 0
+    res['pct_hourly_2500'] = 0
+    
+    # Add dt_strata and dow
+    # dt_strata format: MM/DD/YY
+    res['dt_strata'] = res.index.strftime('%m/%d/%y')
+    
+    # dow: 0=Monday, 6=Sunday (standard pandas weekday)
+    # The target distinct values are 0-6.
+    res['dow'] = res.index.weekday
+    
+    # Select and order columns
+    cols = ['dt_strata', 'dow']
+    for h in range(1, 25):
+        cols.append(f'pct_hourly_{h:02d}00')
+        
+    res = res[cols]
+    
+    # Reset index to clean up
+    res = res.reset_index(drop=True)
+    
+    return res
+```

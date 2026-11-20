@@ -1,0 +1,70 @@
+Operator plan:
+1. Parse the `timestamp` column to extract `month` and `hour`.
+2. Map specific source columns to the target load columns (`hvac`, `water_heating`, `refrigerator`, `clothes_dryer`, `dishwasher`, `cooking_range`, `pool_spa_pumps`).
+   - `AC COMPRESSOR WHS` + `AIR HANDLER WHS` -> `hvac`
+   - `WATER HEATER WHS` -> `water_heating`
+   - `Primary Fridge WHS` + `2nd Fridge WHS` -> `refrigerator`
+   - `DRYER WHS (1-CT)` + `Dryer WHS (2-CTs)` -> `clothes_dryer`
+   - `DISH WASHER WHS` -> `dishwasher`
+   - `RANGE WHS (1-CT)` -> `cooking_range`
+   - `POOL PUMP WHS` -> `pool_spa_pumps`
+3. Create constant zero columns for `clothes_washer`, `interior_lighting`, `exterior_lighting`, `lighting`, `plug`, and `pool_spa_heater` as indicated by the target schema (distinct value 0).
+4. Return the DataFrame with the specified column order.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse timestamp
+    ts = pd.to_datetime(source['timestamp'])
+    out = pd.DataFrame(index=source.index)
+    
+    # Extract time components
+    out['month'] = ts.dt.month
+    out['hour'] = ts.dt.hour
+    
+    # Map HVAC: AC Compressor + Air Handler
+    hvac_ac = source['AC COMPRESSOR WHS [emon ch3,4]']
+    hvac_ah = source['AIR HANDLER WHS [emon ch5,6]']
+    out['hvac'] = hvac_ac + hvac_ah
+    
+    # Map Water Heating
+    out['water_heating'] = source['WATER HEATER WHS [emon ch7,8]']
+    
+    # Map Refrigerator: Primary + 2nd
+    fridge1 = source['Primary Fridge WHS [emon ch12]']
+    fridge2 = source['2nd Fridge WHS [emon ch13]']
+    out['refrigerator'] = fridge1 + fridge2
+    
+    # Map Clothes Dryer: 1-CT + 2-CTs
+    dryer1 = source['DRYER WHS (1-CT) [emon ch9]']
+    dryer2 = source['Dryer WHS (2-CTs) [xpod chA-9,10]']
+    out['clothes_dryer'] = dryer1 + dryer2
+    
+    # Map Dishwasher
+    out['dishwasher'] = source['DISH WASHER WHS [emon ch11]']
+    
+    # Map Cooking Range
+    out['cooking_range'] = source['RANGE WHS (1-CT) [emon ch10]']
+    
+    # Map Pool Spa Pumps
+    out['pool_spa_pumps'] = source['POOL PUMP WHS (2-CTs) [xpod chA-3,4]']
+    
+    # Constant zero columns as per target schema
+    out['clothes_washer'] = 0
+    out['interior_lighting'] = 0
+    out['exterior_lighting'] = 0
+    out['lighting'] = 0
+    out['plug'] = 0
+    out['pool_spa_heater'] = 0
+    
+    # Select and order columns
+    cols = [
+        'month', 'hour', 'hvac', 'water_heating', 'refrigerator', 
+        'clothes_washer', 'clothes_dryer', 'dishwasher', 'cooking_range', 
+        'pool_spa_pumps', 'interior_lighting', 'exterior_lighting', 
+        'lighting', 'plug', 'pool_spa_heater'
+    ]
+    
+    return out[cols].reset_index(drop=True)
+```

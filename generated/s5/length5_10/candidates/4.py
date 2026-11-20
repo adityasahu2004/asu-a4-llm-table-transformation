@@ -1,0 +1,8 @@
+import pandas as pd
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    out = pd.DataFrame(index=source.index)
+    out['date'] = source['Date']
+    for h in range(1, 25):
+        src_name = f'{h}:00' if h < 24 else '24:00:00'
+        out[f'value{h}'] = pd.to_numeric(source[src_name], errors='coerce')
+    return out.reset_index(drop=True)

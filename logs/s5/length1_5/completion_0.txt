@@ -1,0 +1,37 @@
+Operator plan:
+1. Parse the `date` column from the source DataFrame into datetime objects.
+2. Shift the dates back by 6 months to align with the target's time range (Source starts July 2015, Target starts Jan 2015).
+3. Format the shifted dates into the `cst` column with the format `%a %m/%d/%Y` (e.g., "Thu 01/01/2015").
+4. Rename the hourly columns from "Hour N" to "N:00" for hours 1 through 24.
+5. Ensure integer types for columns 9:00 through 16:00 as observed in the target schema.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date and shift by -6 months
+    dates = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    shifted_dates = dates - pd.DateOffset(months=6)
+    
+    # Create output dataframe
+    out = pd.DataFrame(index=source.index)
+    
+    # Format cst column
+    out['cst'] = shifted_dates.dt.strftime('%a %m/%d/%Y')
+    
+    # Rename and copy hourly columns
+    for h in range(1, 25):
+        src_col = f'Hour {h}'
+        tgt_col = f'{h}:00'
+        
+        # Check if source column exists to avoid errors if schema varies slightly
+        if src_col in source.columns:
+            out[tgt_col] = source[src_col].astype(float)
+            
+            # Enforce int64 for columns 9:00 through 16:00 as per target schema
+            if 9 <= h <= 16:
+                out[tgt_col] = out[tgt_col].astype('Int64') # Use nullable int or standard int if no nulls
+                
+    return out.reset_index(drop=True)
+```

@@ -1,0 +1,56 @@
+{
+  "execution_user": "65534:65534 (unprivileged)",
+  "network": "none",
+  "cases": {
+    "s1": [
+      {
+        "case": "length1_4",
+        "execution": "ok",
+        "auto": true,
+        "hard": true
+      },
+      {
+        "case": "length3_4",
+        "execution": "generation_error",
+        "auto": false,
+        "hard": false
+      }
+    ],
+    "s2": [
+      {
+        "case": "length1_9",
+        "execution": "generation_error",
+        "auto": false,
+        "hard": false
+      },
+      {
+        "case": "length3_5",
+        "execution": "ok",
+        "auto": true,
+        "hard": true
+      }
+    ],
+    "s4": [
+      {
+        "case": "length2_2",
+        "execution": "ok",
+        "auto": true,
+        "hard": true
+      },
+      {
+        "case": "length2_6",
+        "execution": "ok",
+        "auto": false,
+        "hard": false
+      }
+    ],
+    "s5": [
+      {
+        "case": "length2_6",
+        "execution": "ok",
+        "auto": true,
+        "hard": true
+      }
+    ]
+  }
+}

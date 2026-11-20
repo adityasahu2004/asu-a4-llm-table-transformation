@@ -1,0 +1,1 @@
+Discarded pilot: author-written length2_1 demonstration used Sunday-zero rather than ISO day of week. Not used in final scored results. Contains only early demo-case completions and possibly an interrupted request. Excluded from submission.

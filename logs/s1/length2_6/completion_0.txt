@@ -1,0 +1,361 @@
+### Operator Plan
+
+1.  **Parse Date**: Convert the `Date` column from string format (`%m/%d/%Y`) to a pandas datetime object to enable date-based calculations.
+2.  **Create `dt_strata`**: Format the parsed date back to the string format `MM/DD/YYYY` (matching the target sample `1/1/2014`, `7/19/2014`, etc., which implies no zero-padding for month/day, or standard `strftime` behavior depending on exact target representation. Looking at `1/1/2014` vs `12/31/2014`, it seems to be standard `m/d/Y` or `mm/dd/yyyy`. Let's look closely at the target sample: `1/1/2014`, `7/19/2014`, `2/3/2014`. This is `m/d/Y` (no leading zeros). We will use `.dt.strftime('%m/%d/%Y')` and then strip leading zeros if necessary, or simply use `pd.to_datetime` and format. Actually, `pd.to_datetime` default string representation might differ. Let's use `dt.strftime('%m/%d/%Y')` and then replace `01` with `1`, `02` with `2`, etc., or just use a custom formatter. A simpler way is `dt.strftime('%-m/%-d/%Y')` on Linux, but for cross-platform compatibility, we can parse and format manually or use `dt.strftime('%m/%d/%Y').str.lstrip('0')` carefully. However, looking at the target `1/1/2014`, it's likely just the string representation of the date without leading zeros. Let's try `dt.strftime('%m/%d/%Y')` and then remove leading zeros from month and day parts.
+    *   Correction: The target sample shows `1/1/2014`. `pd.to_datetime('1/1/2014').strftime('%m/%d/%Y')` gives `'01/01/2014'`. We need to strip leading zeros.
+3.  **Create `dow`**: Extract the day of the week from the parsed date. The target values are `0-6`. In Python/pandas, `dt.dayofweek` returns 0 for Monday, 6 for Sunday. Let's verify with the sample.
+    *   Sample Row 1: `1/1/2014`. Jan 1, 2014 was a Wednesday. `dt.dayofweek` for Wednesday is 2. But the target `dow` is `3`.
+    *   Sample Row 2: `7/19/2014`. July 19, 2014 was a Saturday. `dt.dayofweek` for Saturday is 5. Target `dow` is `6`.
+    *   Sample Row 3: `2/3/2014`. Feb 3, 2014 was a Monday. `dt.dayofweek` for Monday is 0. Target `dow` is `1`.
+    *   It appears the target `dow` is `dt.dayofweek + 1`? Or perhaps it's 1-based Monday=1?
+    *   Let's check `12/31/2014` (Sample last row). Dec 31, 2014 was a Wednesday. `dt.dayofweek` is 2. Target `dow` is `3`.
+    *   So, `dow = dt.dayofweek + 1`. Wait, let's check `10/26/2014` (Sample row 8). Oct 26, 2014 was a Monday. `dt.dayofweek` is 0. Target `dow` is `0`.
+    *   Contradiction!
+        *   `1/1/2014` (Wed) -> 3
+        *   `7/19/2014` (Sat) -> 6
+        *   `2/3/2014` (Mon) -> 1
+        *   `8/21/2014` (Thu) -> 4
+        *   `3/8/2014` (Sat) -> 6
+        *   `9/23/2014` (Tue) -> 2
+        *   `4/10/2014` (Thu) -> 4
+        *   `10/26/2014` (Mon) -> 0  <-- This breaks the +1 pattern.
+        *   `5/13/2014` (Tue) -> 2
+        *   `11/28/2014` (Fri) -> 5
+        *   `6/15/2014` (Sun) -> 0
+        *   `12/31/2014` (Wed) -> 3
+
+    Let's re-evaluate `10/26/2014`. Oct 26, 2014.
+    Jan 1, 2014 = Wed.
+    Oct 26, 2014.
+    Let's check `6/15/2014`. June 15, 2014 was a Sunday. Target `dow` is `0`.
+    Let's check `1/1/2014`. Wednesday. Target `dow` is `3`.
+    Let's check `7/19/2014`. Saturday. Target `dow` is `6`.
+    
+    If Sunday=0, Monday=1, ..., Saturday=6:
+    *   Sun (6/15) -> 0. Correct.
+    *   Mon (10/26) -> 0? No, Monday should be 1. But target is 0.
+    *   Wait, is `10/26/2014` a Monday? Yes.
+    *   Is `6/15/2014` a Sunday? Yes.
+    
+    Let's look at `1/1/2014` (Wed) -> 3.
+    If Sun=0, Mon=1, Tue=2, Wed=3. This fits.
+    If Sun=0, Mon=1, Tue=2, Wed=3, Thu=4, Fri=5, Sat=6.
+    
+    Let's re-check `10/26/2014`.
+    Date: 10/26/2014.
+    Day of week: Monday.
+    Expected dow (Sun=0): 1.
+    Target dow: 0.
+    
+    Let's re-check `6/15/2014`.
+    Date: 6/15/2014.
+    Day of week: Sunday.
+    Expected dow (Sun=0): 0.
+    Target dow: 0.
+    
+    There is an inconsistency in my manual calculation or the data.
+    Let's check `11/28/2014`.
+    Date: 11/28/2014.
+    Day of week: Friday.
+    Expected dow (Sun=0): 5.
+    Target dow: 5.
+    
+    Let's check `5/13/2014`.
+    Date: 5/13/2014.
+    Day of week: Tuesday.
+    Expected dow (Sun=0): 2.
+    Target dow: 2.
+    
+    Let's check `9/23/2014`.
+    Date: 9/23/2014.
+    Day of week: Tuesday.
+    Expected dow (Sun=0): 2.
+    Target dow: 2.
+    
+    Let's check `3/8/2014`.
+    Date: 3/8/2014.
+    Day of week: Saturday.
+    Expected dow (Sun=0): 6.
+    Target dow: 6.
+    
+    Let's check `8/21/2014`.
+    Date: 8/21/2014.
+    Day of week: Thursday.
+    Expected dow (Sun=0): 4.
+    Target dow: 4.
+    
+    Let's check `4/10/2014`.
+    Date: 4/10/2014.
+    Day of week: Thursday.
+    Expected dow (Sun=0): 4.
+    Target dow: 4.
+    
+    Let's check `2/3/2014`.
+    Date: 2/3/2014.
+    Day of week: Monday.
+    Expected dow (Sun=0): 1.
+    Target dow: 1.
+    
+    So, `1/1/2014` (Wed) -> 3. Correct.
+    `7/19/2014` (Sat) -> 6. Correct.
+    `12/31/2014` (Wed) -> 3. Correct.
+    
+    The only outlier was `10/26/2014`.
+    Date: 10/26/2014.
+    Is it a Monday?
+    Jan 1, 2014 = Wed.
+    Oct 26, 2014.
+    Days from Jan 1 to Oct 26:
+    Jan: 31, Feb: 28, Mar: 31, Apr: 30, May: 31, Jun: 30, Jul: 31, Aug: 31, Sep: 30, Oct: 26.
+    Sum = 31+28+31+30+31+30+31+31+30+26 = 299 days.
+    299 % 7 = 5.
+    Wed (2) + 5 = 7 -> 0 (Sunday)?
+    Wait. `dt.dayofweek` for Wed is 2.
+    If Jan 1 is Wed (2), then Jan 1 + 299 days.
+    299 / 7 = 42 weeks + 5 days.
+    Wed + 5 days = Monday.
+    So Oct 26, 2014 is a Monday.
+    Target `dow` is 0.
+    
+    Why is Monday 0?
+    If Sunday=0, Monday=1.
+    If Monday=0, Sunday=6.
+    
+    Let's check `6/15/2014` (Sunday) with Monday=0 scheme.
+    Sunday would be 6.
+    Target is 0.
+    
+    This implies `dow` is NOT standard `dayofweek`.
+    
+    Let's look at the distinct values: `[3, 4, 5, 6, 0, 1, 2]`.
+    
+    Let's re-read the `10/26/2014` row in the source sample.
+    Source: `["Boston Edison", "S3", "C3", "10/26/2014", ...]`
+    Target: `["10/26/2014", 0, ...]`
+    
+    Let's re-read the `6/15/2014` row.
+    Source: `["Boston Edison", "T2", "B7/G8", "6/15/2014", ...]`
+    Target: `["6/15/2014", 0, ...]`
+    
+    Both `10/26/2014` (Mon) and `6/15/2014` (Sun) have `dow=0`?
+    That's impossible if `dow` is a function of date only, unless I have the days wrong.
+    
+    Let's check `6/15/2014` again.
+    Jan 1, 2014 = Wed.
+    Days to June 15:
+    Jan: 31, Feb: 28, Mar: 31, Apr: 30, May: 31, Jun: 15.
+    Sum = 31+28+31+30+31+15 = 166.
+    166 % 7 = 5.
+    Wed (2) + 5 = 7 -> 0 (Sunday).
+    So June 15, 2014 is a Sunday.
+    
+    Let's check `10/26/2014` again.
+    Days to Oct 26: 299.
+    299 % 7 = 5.
+    Wed (2) + 5 = 7 -> 0 (Sunday)?
+    Wait.
+    If Jan 1 is Day 0.
+    Jan 1 (Wed) is index 0.
+    Oct 26 is index 299.
+    299 % 7 = 5.
+    Wed + 5 days = Monday.
+    
+    Is it possible `10/26/2014` is a Sunday?
+    Let's use a known anchor.
+    Jan 1, 2014 = Wednesday.
+    Jan 5, 2014 = Sunday.
+    ...
+    Oct 26, 2014.
+    
+    Let's check `11/28/2014` (Fri) -> 5.
+    Days to Nov 28:
+    Jan-Oct: 304 days (31+28+31+30+31+30+31+31+30+31).
+    Nov 28: 28.
+    Total: 332.
+    332 % 7 = 5.
+    Wed (2) + 5 = 7 -> 0 (Sunday)?
+    No, Nov 28, 2014 is a Friday.
+    Wed (2) + 3 = 5 (Fri).
+    332 % 7 = 5?
+    332 / 7 = 47.42.
+    47 * 7 = 329.
+    332 - 329 = 3.
+    Wed (2) + 3 = 5 (Friday).
+    So `dt.dayofweek` for Friday is 4 (Mon=0).
+    Target is 5.
+    
+    So:
+    Mon (0) -> ?
+    Tue (1) -> 2 (from 5/13/2014)
+    Wed (2) -> 3 (from 1/1/2014)
+    Thu (3) -> 4 (from 8/21/2014)
+    Fri (4) -> 5 (from 11/28/2014)
+    Sat (5) -> 6 (from 7/19/2014)
+    Sun (6) -> 0 (from 6/15/2014)
+    
+    This maps `dt.dayofweek` (Mon=0) to:
+    0 -> ?
+    1 -> 2
+    2 -> 3
+    3 -> 4
+    4 -> 5
+    5 -> 6
+    6 -> 0
+    
+    This looks like `dow = (dt.dayofweek + 1) % 7`?
+    If Mon=0: (0+1)%7 = 1.
+    If Tue=1: (1+1)%7 = 2.
+    If Wed=2: (2+1)%7 = 3.
+    If Thu=3: (3+1)%7 = 4.
+    If Fri=4: (4+1)%7 = 5.
+    If Sat=5: (5+1)%7 = 6.
+    If Sun=6: (6+1)%7 = 0.
+    
+    This fits all samples EXCEPT `10/26/2014`.
+    `10/26/2014` is a Monday. `dt.dayofweek` = 0.
+    Formula gives 1.
+    Target is 0.
+    
+    Did I miscalculate the day for `10/26/2014`?
+    Let's check `10/26/2014` on a calendar.
+    Oct 1, 2014 was a Wednesday.
+    Oct 8, 15, 22, 29 are Wednesdays.
+    Oct 26 is a Sunday.
+    
+    Ah! My manual calculation of days was wrong.
+    Jan 1 = Wed.
+    Oct 1 = Wed.
+    Oct 26 = Sun.
+    
+    So `10/26/2014` is a Sunday.
+    `dt.dayofweek` for Sunday is 6.
+    Formula `(6+1)%7 = 0`.
+    Target is 0.
+    
+    It fits!
+    
+    So `dow = (dt.dayofweek + 1) % 7`.
+    This effectively maps:
+    Mon -> 1
+    Tue -> 2
+    Wed -> 3
+    Thu -> 4
+    Fri -> 5
+    Sat -> 6
+    Sun -> 0
+    
+4.  **Calculate Hourly Percentages**:
+    The target columns are `pct_hourly_0100` to `pct_hourly_2400`.
+    The source columns are `Hr 1` to `Hr 24`.
+    
+    Let's analyze the values.
+    Source Row 1 (`1/1/2014`, `R4`, `A5/A6`):
+    `Hr 1` = 2.43675.
+    Target `pct_hourly_0100` = 0.9188.
+    
+    Source Row 3 (`2/3/2014`, `S1`, `C1`):
+    `Hr 1` = 16.6457.
+    Target `pct_hourly_0100` = 7.96519.
+    
+    Source Row 5 (`3/8/2014`, `S2`, `C2/C4`):
+    `Hr 1` = 4.64371.
+    Target `pct_hourly_0100` = 692.34719.
+    
+    The values vary wildly. It's not a simple percentage of a daily total (which would sum to 100 or 1).
+    
+    Let's look at the column names `pct_hourly_XXXX`.
+    Maybe it's a percentage relative to a baseline or average?
+    
+    Let's look at `Hr 1` vs `pct_hourly_0100` for Row 1.
+    2.43675 -> 0.9188.
+    Ratio: 0.9188 / 2.43675 = 0.377.
+    
+    Row 3:
+    16.6457 -> 7.96519.
+    Ratio: 7.96519 / 16.6457 = 0.478.
+    
+    Row 5:
+    4.64371 -> 692.34719.
+    Ratio: 692.34719 / 4.64371 = 149.09.
+    
+    This doesn't look like a simple scalar multiplication per row.
+    
+    Let's look at the distinct values.
+    Source `Hr 1` has 1127 distinct values.
+    Target `pct_hourly_0100` has 2166 distinct values.
+    
+    Wait, the target has 2190 rows.
+    
+    Let's look at the structure of the data.
+    The source has `Company`, `Rate`, `Rate Code`, `Date`, and 24 hourly columns.
+    The target has `dt_strata`, `dow`, and 24 hourly columns + `pct_hourly_2500`.
+    
+    The `pct_hourly_2500` is always 0.
+    
+    Let's look at the values in `pct_hourly_0100` again.
+    Row 1: 0.9188
+    Row 2: 0.63071
+    Row 3: 7.96519
+    Row 4: 7.79271
+    Row 5: 692.34719
+    Row 6: 659.39735
+    Row 7: 0.50435
+    Row 8: 0.53196
+    Row 9: 0.55524
+    Row 10: 0.48242
+    Row 11: 0.65257
+    Row 12: 1.74263
+    
+    Let's look at the source `Hr 1` values again.
+    Row 1: 2.43675
+    Row 2: 1.15144
+    Row 3: 16.6457
+    Row 4: 15.3275
+    Row 5: 4.64371
+    Row 6: 4.85318
+    Row 7: 0.80181
+    Row 8: 0.86164
+    Row 9: 1.27021
+    Row 10: 1.27097
+    Row 11: 110.91961
+    Row 12: 120.64422
+    
+    Is there a relationship between `Rate`/`Rate Code` and the transformation?
+    
+    Let's check Row 11 (`T2`, `B7/G8`).
+    `Hr 1` = 110.91961.
+    `pct_hourly_0100` = 0.65257.
+    Ratio: 0.65257 / 110.91961 = 0.00588.
+    
+    Let's check Row 12 (`T2`, `B7/G8`).
+    `Hr 1` = 120.64422.
+    `pct_hourly_0100` = 1.74263.
+    Ratio: 1.74263 / 120.64422 = 0.0144.
+    
+    This is not consistent.
+    
+    Let's look at the target column names again: `pct_hourly_0100`.
+    Maybe it's not `Hr 1` -> `pct_hourly_0100`.
+    Maybe it's a percentage of the *daily average*? Or *peak*?
+    
+    Let's calculate the daily average for Row 1.
+    Sum of Hr 1-24 for Row 1:
+    2.43675 + 2.33199 + ... + 2.60843.
+    Let's approximate. Values are around 2-3.
+    Sum ~ 24 * 2.5 = 60.
+    Avg ~ 2.5.
+    `Hr 1` = 2.43675.
+    `pct_hourly_0100` = 0.9188.
+    0.9188 / 2.43675 = 0.377.
+    
+    Let's look at Row 3 (`S1`, `C1`).
+    Values: 16.6457 (Hr 1-6), 15.53599 (Hr 7), 0 (Hr 8-19), 0.27743 (Hr 20), 16.6457 (Hr 21-24).
+    Sum = 6*16.6457 + 15.53599 + 0.27743 + 4*16.6457 = 10*16.6457 + 15.53599 + 0.27743 = 166.457 + 15.81342 = 182.27.
+    Avg = 182.27 / 24 = 7.59.
+    `Hr 1` = 16.6457.
+    `pct_hourly_0100` = 7.96519.
+    Ratio: 7.96519 / 16.6457 = 0.478.
+    
+    Let's look at Row 5 (`S2`, `C2/C4`).
+    Values: 4.64371 (Hr 1-6), 0.77395 (Hr 7), 0 (Hr 8-19), 1.47051 (Hr 20), 4.64371 (Hr 21-24).
+    Sum = 10*4.64371 + 0.77395 + 1.47

@@ -1,0 +1,41 @@
+**Operator plan:**
+1.  **Map Month**: Convert the source `Month` abbreviations (e.g., "Mar") to full month names. The target months ("September", "October", etc.) correspond to the source months shifted by +6 (wrapping around the year). Specifically: Mar->Sep, Apr->Oct, May->Nov, Jun->Dec, Jul->Jan, Aug->Feb.
+2.  **Map Daytype**: Convert `WD` to "weekday" and `WE` to "weekend".
+3.  **Transform Hourly Columns**:
+    *   Select columns `1:00` through `24:00`.
+    *   Rename them to `hr1` through `hr24`.
+    *   Apply a linear transformation to the values. By comparing source and target samples (e.g., Source `0.6` -> Target `0.5`, Source `0.9` -> Target `0.8`, Source `1.0` -> Target `0.9`), the transformation is `value - 0.1`.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Map Month abbreviations to full names shifted by 6 months
+    month_map = {
+        'Mar': 'September',
+        'Apr': 'October',
+        'May': 'November',
+        'Jun': 'December',
+        'Jul': 'January',
+        'Aug': 'February'
+    }
+    
+    # Map Daytype
+    day_map = {
+        'WD': 'weekday',
+        'WE': 'weekend'
+    }
+    
+    out = pd.DataFrame()
+    out['month'] = source['Month'].map(month_map)
+    out['day'] = source['Daytype'].map(day_map)
+    
+    # Process hourly columns
+    for h in range(1, 25):
+        src_col = f'{h}:00'
+        tgt_col = f'hr{h}'
+        # Transformation observed: target = source - 0.1
+        out[tgt_col] = source[src_col] - 0.1
+        
+    return out
+```

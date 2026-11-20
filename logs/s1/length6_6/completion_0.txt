@@ -1,0 +1,215 @@
+### Operator Plan
+
+1.  **Rename Columns**: Map source column names to target column names.
+    *   `date` -> `Date`
+    *   `Hour N` -> `Hr N` for N in 1..24.
+2.  **Parse and Shift Dates**:
+    *   The source `date` column contains strings like "7/3/2015".
+    *   The target `Date` column contains strings like "2015-01-01 00:00:00".
+    *   Comparing the source sample and target sample:
+        *   Source first row: "7/3/2015" (July 3, 2015).
+        *   Target first row: "2015-01-01 00:00:00" (January 1, 2015).
+        *   Source last row: "12/31/2015" (December 31, 2015).
+        *   Target last row: "2015-07-02 00:00:00" (July 2, 2015).
+    *   This indicates a cyclic shift or a specific date offset. Let's look closer.
+    *   Source has 182 rows. Target has 183 rows.
+    *   The target dates seem to be a continuous range starting from Jan 1, 2015.
+    *   Let's check the difference between source dates and target dates if we assume the source data corresponds to a specific period.
+    *   Actually, looking at the data values:
+        *   Source Row 0 ("7/3/2015"): Hour 1-5 are `0.0002398657`, Hour 6 is `0.0001199328`, Hour 7-8 are `0.0`, Hour 9-16 are `0`, Hour 17-21 are `0.0`, Hour 22-24 are `0.0002398657`.
+        *   Target Row 0 ("2015-01-01"): Hour 1-7 are `0.0002398657` (except Hr 8 is `0.0001199328`? No, let's look at target row 0 carefully).
+        *   Target Row 0: `Hr 1`=0.0002398657, `Hr 2`=0.0002398657, `Hr 3`=0.0002398657, `Hr 4`=0.0002398657, `Hr 5`=0.0002398657, `Hr 6`=0.0002398657, `Hr 7`=0.0002398657, `Hr 8`=0.0001199328, `Hr 9`=0...
+        *   This doesn't match Source Row 0 directly.
+    *   Let's look at the date progression.
+        *   Source dates: 7/3, 7/19, 8/4, 8/21... These are roughly bi-weekly.
+        *   Target dates: 2015-01-01, 2015-01-17, 2015-02-03... These are also roughly bi-weekly (16 days apart).
+    *   Let's check the offset.
+        *   Source "7/3/2015" is July 3.
+        *   Target "2015-01-01" is Jan 1.
+        *   Difference: ~183 days.
+        *   Source "12/31/2015" is Dec 31.
+        *   Target "2015-07-02" is July 2.
+        *   Difference: ~183 days.
+    *   It appears the target dates are the source dates minus 183 days (or 6 months roughly).
+    *   Let's verify: July 3, 2015 minus 183 days.
+        *   July has 31 days. June 30. May 31. April 30. March 31. Feb 28. Jan 31.
+        *   Days from Jan 1 to July 3: 31+28+31+30+31+30+3 = 184 days. So July 3 is the 184th day.
+        *   184 - 183 = 1. So Jan 1. This matches.
+        *   Dec 31 is the 365th day. 365 - 183 = 182. The 182nd day of 2015 is July 1 (31+28+31+30+31+30+1 = 182). Wait, target last is July 2.
+        *   Let's re-calculate.
+        *   Jan 1 is day 1.
+        *   July 3 is day 184.
+        *   Target starts at Jan 1 (Day 1).
+        *   Source starts at July 3 (Day 184).
+        *   Offset = 183 days.
+        *   Source ends at Dec 31 (Day 365).
+        *   Target ends at Day 365 - 183 = 182.
+        *   Day 182 in 2015: Jan(31)+Feb(28)+Mar(31)+Apr(30)+May(31)+Jun(30) = 181. So Day 182 is July 1.
+        *   But target last is "2015-07-02".
+        *   Let's check the row counts. Source 182 rows. Target 183 rows.
+        *   The target has one more row.
+        *   Maybe the transformation involves generating a full date range?
+        *   Or maybe the source dates are just labels and the target dates are a fixed sequence?
+        *   Let's look at the data values again.
+        *   Source Row 0 (7/3/2015) values: `[0.0002398657, 0.0002398657, 0.0002398657, 0.0002398657, 0.0002398657, 0.0001199328, 0.0, 0.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0002398657, 0.0002398657, 0.0002398657]`
+        *   Target Row 0 (2015-01-01) values: `[0.0002398657, 0.0002398657, 0.0002398657, 0.0002398657, 0.0002398657, 0.0002398657, 0.0002398657, 0.0001199328, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.0001199328, 0.0002398657, 0.0002398657, 0.0002398657, 0.0002398657, 0.0002398657, 0.0002398657]`
+        *   These are different.
+        *   Let's find which source row matches Target Row 0.
+        *   Target Row 0 has `Hr 6` = 0.0002398657. Source Row 0 has `Hour 6` = 0.0001199328.
+        *   Source Row 3 (8/21/2015) has `Hour 6` = 0.0002398657.
+        *   Let's check Source Row 3 values: `[0.0002398657, 0.0002398657, 0.0002398657, 0.0002398657, 0.0002398657, 0.0002398657, 0.0, 0.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0002398657, 0.0002398657, 0.0002398657]`
+        *   Target Row 0: `Hr 7` is 0.0002398657. Source Row 3 `Hour 7` is 0.0.
+        *   This direct mapping isn't obvious.
+
+    *   Alternative Hypothesis: The target is a **rolling window** or **shifted** version of the source?
+    *   Or perhaps the source data is "Hourly" data for specific days, and the target is a re-indexed version?
+    *   Let's look at the date difference again.
+        *   Source: 7/3/2015. Target: 2015-01-01.
+        *   Source: 7/19/2015. Target: 2015-01-17.
+        *   Difference is exactly 16 days for the first two rows.
+        *   Source: 8/4/2015. Target: 2015-02-03.
+        *   July has 31 days. 7/19 + 16 days = 8/4.
+        *   Jan 17 + 16 days = Feb 2. Target is Feb 3.
+        *   Let's check days in month. Jan has 31. 17+16=33. 33-31=2. So Feb 2.
+        *   Why is target Feb 3?
+        *   Maybe the offset is not constant days, but constant "bi-weekly" periods?
+        *   Let's check the next one.
+        *   Source: 8/21/2015. Target: 2015-02-19.
+        *   8/4 + 17 days = 8/21.
+        *   Feb 3 + 16 days = Feb 19.
+        *   So the interval is 16 days.
+        *   The start date of the target is Jan 1, 2015.
+        *   The start date of the source is July 3, 2015.
+        *   July 3, 2015 is the 184th day of the year.
+        *   Jan 1, 2015 is the 1st day of the year.
+        *   184 - 1 = 183 days difference.
+        *   183 / 16 = 11.4375. Not an integer number of periods.
+
+    *   Let's look at the data values again. Is it possible the columns are shifted?
+    *   Source Row 0: `Hour 1`=0.0002398657.
+    *   Target Row 0: `Hr 1`=0.0002398657.
+    *   Source Row 0: `Hour 6`=0.0001199328.
+    *   Target Row 0: `Hr 8`=0.0001199328.
+    *   Source Row 0: `Hour 22`=0.0002398657.
+    *   Target Row 0: `Hr 22`=0.0002398657.
+
+    *   Let's look at Source Row 1 (7/19/2015).
+    *   Values: Same as Row 0.
+    *   Target Row 1 (2015-01-17).
+    *   Values: `Hr 1`=0.0002398657, `Hr 8`=0.0, `Hr 18`=0.0002398657.
+    *   This is different from Target Row 0.
+
+    *   Let's look at Source Row 2 (8/4/2015).
+    *   Values: `Hour 6`=0.0001199328, `Hour 21`=0.0001199328.
+    *   Target Row 2 (2015-02-03).
+    *   Values: `Hr 8`=0.0, `Hr 18`=0.0002398657.
+
+    *   There seems to be no direct row-to-row value mapping. The values change.
+    *   However, the problem states "Infer a general transformation... Compute the result only from the source DataFrame."
+    *   If the values change, there must be a calculation.
+    *   But the values are very specific floats. `0.0002398657` and `0.0001199328`.
+    *   Note that `0.0001199328 * 2 = 0.0002398656`. Close to `0.0002398657`.
+    *   It looks like `0.0001199328` is half of `0.0002398657` (approx).
+    *   The integers are 0.
+
+    *   Let's reconsider the date shift.
+    *   Source dates: 7/3, 7/19, 8/4, 8/21, 9/6, 9/23, 10/9, 10/26, 11/11, 11/28, 12/14, 12/31.
+    *   Target dates: 1/1, 1/17, 2/3, 2/19, 3/8, 3/24, 4/10, 4/26, 5/13, 5/29, 6/15, 7/2.
+    *   Let's check the day-of-year for each.
+    *   Source:
+        *   7/3: 184
+        *   7/19: 200
+        *   8/4: 216
+        *   8/21: 233
+        *   9/6: 249
+        *   9/23: 266
+        *   10/9: 282
+        *   10/26: 299
+        *   11/11: 315
+        *   11/28: 332
+        *   12/14: 348
+        *   12/31: 365
+    *   Target:
+        *   1/1: 1
+        *   1/17: 17
+        *   2/3: 34
+        *   2/19: 50
+        *   3/8: 67
+        *   3/24: 83
+        *   4/10: 100
+        *   4/26: 116
+        *   5/13: 133
+        *   5/29: 149
+        *   6/15: 166
+        *   7/2: 183
+    *   Differences (Source - Target):
+        *   184 - 1 = 183
+        *   200 - 17 = 183
+        *   216 - 34 = 182  <-- Off by 1
+        *   233 - 50 = 183
+        *   249 - 67 = 182  <-- Off by 1
+        *   266 - 83 = 183
+        *   282 - 100 = 182 <-- Off by 1
+        *   299 - 116 = 183
+        *   315 - 133 = 182 <-- Off by 1
+        *   332 - 149 = 183
+        *   348 - 166 = 182 <-- Off by 1
+        *   365 - 183 = 182 <-- Off by 1
+
+    *   The offset is mostly 183 days, but sometimes 182.
+    *   This suggests the target dates are simply `Source Date - 183 days`?
+    *   Let's check 8/4 (216) - 183 = 33. Day 33 is Feb 2. Target is Feb 3 (34).
+    *   Let's check 9/6 (249) - 183 = 66. Day 66 is Mar 7. Target is Mar 8 (67).
+    *   It seems the target date is `Source Date - 183 days` + 1 day? Or `Source Date - 182 days`?
+    *   184 - 182 = 2. Target is 1.
+    *   200 - 182 = 18. Target is 17.
+    *   216 - 182 = 34. Target is 34. (Match)
+    *   233 - 182 = 51. Target is 50.
+    *   So it's not a constant subtraction.
+
+    *   Let's look at the intervals.
+    *   Source intervals: 16, 16, 17, 16, 17, 16, 17, 16, 17, 16, 17.
+    *   Target intervals: 16, 17, 16, 17, 16, 17, 16, 17, 16, 17, 17.
+    *   The intervals are the same sequence, just shifted?
+    *   Source: 16, 16, 17, 16, 17, 16, 17, 16, 17, 16, 17
+    *   Target: 16, 17, 16, 17, 16, 17, 16, 17, 16, 17, 17
+    *   They are not identical.
+
+    *   Wait, look at the target row count: 183. Source: 182.
+    *   The target has one extra row.
+    *   The target dates start at Jan 1, 2015.
+    *   The source dates start at July 3, 2015.
+    *   Is it possible the target is a **full date range** generated from the source?
+    *   No, the target has 183 rows, which is roughly half a year.
+    *   The source has 182 rows.
+    *   The values in the target are different from the source.
+    *   This implies the values are **calculated** or **looked up** based on the date.
+    *   But we only have the source DataFrame.
+    *   If the values are calculated, how?
+    *   The values are `0.0002398657`, `0.0001199328`, `0.0`, `0`.
+    *   These look like constants.
+    *   Maybe the transformation is:
+        1.  Generate a new date column by subtracting 183 days from the source date?
+        2.  But the values don't match.
+
+    *   Let's look at the "distinct_values" in the target.
+    *   `Hr 3` has `0.0` and `0.0002398657`.
+    *   `Hr 6` has `0.0`, `0.0001199328`, `0.0002398657`.
+    *   In the source, `Hour 3` is always `0.0002398657`.
+    *   In the source, `Hour 6` is `0.0001199328` or `0.0002398657`.
+    *   So the target has more variety (including 0.0) in some columns.
+
+    *   Is it possible the target is a **shifted** version of the source rows?
+    *   Let's check if Target Row 0 matches any Source Row.
+    *   Target Row 0: `Hr 1`=0.0002398657, `Hr 6`=0.0002398657, `Hr 7`=0.0002398657, `Hr 8`=0.0001199328.
+    *   Source Row 3 (8/21): `Hour 6`=0.0002398657, `Hour 7`=0.0. No.
+    *   Source Row 4 (9/6): `Hour 6`=0.0002398657, `Hour 7`=0.0. No.
+    *   Source Row 5 (9/23): `Hour 6`=0.0002398657, `Hour 7`=0.0001199328. No.
+    *   Source Row 6 (10/9): `Hour 6`=0.0002398657, `Hour 7`=0.0002398657, `Hour 8`=0.0. No.
+    *   Source Row 7 (10/26): `Hour 6`=0.0002398657, `Hour 7`=0.0002398657, `Hour 8`=0.0. No.
+    *   Source Row 8 (11/11): `Hour 6`=0.0002398657, `Hour 7`=0.0001199328. No.
+    *   Source Row 9 (11/28): `Hour 6`=0.0002398657, `Hour 7`=0.0001199328. No.
+    *   Source Row 10 (12/14): `Hour 6`=0.0002398657, `Hour 7`=0.0002398657, `Hour 8`=0.0. No.
+    *   Source Row 11 (12/31): `Hour 6`=0.0002398657, `Hour 7`=0.0002398657, `Hour 8`=0.0001199328. **Match!**
+    *   Let's check the rest of Source Row 11 vs Target Row 0.
+    *   Source Row 11: `Hour 1`=0.0002398657, `Hour 2`=0.0002398657, `Hour 3`=0.0002398657, `Hour 4`=0.000239

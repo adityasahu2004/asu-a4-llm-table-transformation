@@ -1,0 +1,58 @@
+**Operator Plan:**
+1.  **Parse Dates**: Convert the `DT_STRATA` column from string format (`%m/%d/%Y`) to datetime objects to extract the month.
+2.  **Filter Columns**: Select the 24 hourly columns (`PCT_HOURLY_0100` through `PCT_HOURLY_2400`) and the date column. Ignore `Strata_ID`, `Strata`, `DOW`, and `PCT_HOURLY_2500`.
+3.  **Group and Aggregate**: Group the data by the extracted month (1-12). For each group, calculate the mean of each hourly column. This results in 12 rows (one per month) with 24 hourly columns.
+4.  **Reshape**: Pivot or transpose the aggregated data so that each row represents an hour (1-24) and each column represents a month (January-December).
+    *   The source has 24 distinct hours. The target has 24 rows labeled `hour` 1 through 24.
+    *   The target columns are month names: `january`, `february`, etc.
+5.  **Rename and Format**:
+    *   Rename the index/columns to match the target schema (`hour`, `january`, `february`, ..., `december`).
+    *   Ensure the `hour` column is integer type.
+    *   Reset index to make `hour` a standard column.
+
+**Assumptions:**
+*   The aggregation function is the mean (average), as implied by the distinct counts and typical strata profile generation (averaging daily profiles within a month).
+*   The months map directly: 1 -> January, 2 -> February, etc.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse dates to extract month
+    source = source.copy()
+    source['date_parsed'] = pd.to_datetime(source['DT_STRATA'], format='%m/%d/%Y')
+    source['month'] = source['date_parsed'].dt.month
+    
+    # 2. Select hourly columns
+    hourly_cols = [f'PCT_HOURLY_{h:02d}00' for h in range(1, 25)]
+    
+    # 3. Group by month and calculate mean for each hour
+    # Resulting shape: 12 rows (months 1-12) x 24 columns (hours)
+    agg_df = source.groupby('month')[hourly_cols].mean()
+    
+    # 4. Transpose to get Hours as rows and Months as columns
+    # agg_df.T has index 1..24 (hours) and columns 1..12 (months)
+    transposed_df = agg_df.T
+    
+    # 5. Rename columns to month names
+    month_names = {
+        1: 'january', 2: 'february', 3: 'march', 4: 'april',
+        5: 'may', 6: 'june', 7: 'july', 8: 'august',
+        9: 'september', 10: 'october', 11: 'november', 12: 'december'
+    }
+    transposed_df.rename(columns=month_names, inplace=True)
+    
+    # 6. Create the final dataframe
+    result = transposed_df.reset_index()
+    result.rename(columns={'index': 'hour'}, inplace=True)
+    
+    # Ensure hour is integer
+    result['hour'] = result['hour'].astype(int)
+    
+    # Ensure column order matches target: hour, january, february, ...
+    target_cols = ['hour'] + [month_names[i] for i in range(1, 13)]
+    result = result[target_cols]
+    
+    return result
+```

@@ -1,0 +1,80 @@
+{
+  "candidate_count": 6,
+  "selected_index": 0,
+  "baseline_index": 0,
+  "selection_reason": "SC winner retained: no strict constraint improvement",
+  "constraints": {
+    "columns": [
+      "cst",
+      "1:00",
+      "2:00",
+      "3:00",
+      "4:00",
+      "5:00",
+      "6:00",
+      "7:00",
+      "8:00",
+      "9:00",
+      "10:00",
+      "11:00",
+      "12:00",
+      "13:00",
+      "14:00",
+      "15:00",
+      "16:00",
+      "17:00",
+      "18:00",
+      "19:00",
+      "20:00",
+      "21:00",
+      "22:00",
+      "23:00",
+      "24:00"
+    ],
+    "relations": []
+  },
+  "policy": {
+    "version": "schema-weekday-v1",
+    "pool": "five few-shot SC samples + one greedy few-shot sample",
+    "constraints": [
+      "exact target schema",
+      "uniquely identified date-to-weekday relation"
+    ],
+    "target_rows": "the same 12-row prompt sample as the baselines",
+    "output_rows": "up to 128 evenly spaced training-output rows",
+    "selection": "strictly lower lexicographic constraint loss; preserve SC winner on ties",
+    "forbidden_inputs": [
+      "test_0.csv",
+      "validator results",
+      "case-specific rules",
+      "target row counts"
+    ]
+  },
+  "usage": {
+    "prompt_tokens": 84482,
+    "completion_tokens": 20994,
+    "total_tokens": 105476
+  },
+  "api_attempts": 2,
+  "marginal_api_attempts": 0,
+  "latency_seconds": 351.62473104100354,
+  "inherited_api_seconds": 351.62473104100354,
+  "clusters": {
+    "0e7d7fd50aea800685c0bd4c7cfe5f8b4ee2540dc20ed6e501ea302f22d0b009": [
+      0
+    ],
+    "f4a23ef6bcff186cd013da0b6fc54b39a4c113bbe00f262a6468e6445717f0b3": [
+      1
+    ],
+    "c16e002b29f7c13be53ac98e495fc33027457082ea45d6b1df3990992a1d9cd7": [
+      2
+    ],
+    "1ffb5812e530481779c11924684ea36c48f32f8d38a37c0033e285c4c2174648": [
+      3
+    ],
+    "e44be0082637ed09a62d293546c0d34479f44471d7ab3dae4781f573a6026020": [
+      4
+    ]
+  },
+  "cost_basis": "standalone logical pool cost; reused requests have zero marginal API cost"
+}

@@ -1,0 +1,305 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `date` column from string format (`M/D/YYYY`) to datetime objects.
+2.  **Shift Dates**: The target dates appear to be shifted by 6 months relative to the source dates (e.g., Source `7/3/2014` -> Target `2014-01-01` is not a direct match, but looking at the sequence: Source starts `7/3/2014`, Target starts `2014-01-01`. Let's look closer.
+    *   Source `7/3/2014` is July 3rd. Target `2014-01-01` is Jan 1st.
+    *   Source `7/19/2014` is July 19th. Target `2014-01-17` is Jan 17th.
+    *   Source `8/4/2014` is Aug 4th. Target `2014-02-03` is Feb 3rd.
+    *   Source `8/21/2014` is Aug 21st. Target `2014-02-19` is Feb 19th.
+    *   It seems the target date is exactly 6 months *before* the source date.
+    *   Let's verify: `2014-07-03` minus 6 months is `2014-01-03`. The target is `2014-01-01`. This is a 2-day difference.
+    *   Let's check `2014-07-19` minus 6 months is `2014-01-19`. Target is `2014-01-17`. 2-day difference.
+    *   Let's check `2014-08-04` minus 6 months is `2014-02-04`. Target is `2014-02-03`. 1-day difference? No, `2014-02-03` is 1 day before `2014-02-04`.
+    *   Let's re-examine the mapping.
+        *   Source: `7/3/2014` -> Target: `2014-01-01`
+        *   Source: `7/19/2014` -> Target: `2014-01-17`
+        *   Source: `8/4/2014` -> Target: `2014-02-03`
+        *   Source: `8/21/2014` -> Target: `2014-02-19`
+        *   Source: `9/6/2014` -> Target: `2014-03-08` (Wait, sample target row 4 is `2014-03-08`. Source row 4 is `9/6/2014`. `2014-09-06` minus 6 months is `2014-03-06`. Target is `2014-03-08`. This is +2 days.)
+        *   Source: `9/23/2014` -> Target: `2014-03-24`. `2014-09-23` minus 6 months is `2014-03-23`. Target is `2014-03-24`. +1 day.
+        *   Source: `10/9/2014` -> Target: `2014-04-10`. `2014-10-09` minus 6 months is `2014-04-09`. Target is `2014-04-10`. +1 day.
+        *   Source: `10/26/2014` -> Target: `2014-04-26`. `2014-10-26` minus 6 months is `2014-04-26`. Target is `2014-04-26`. 0 days.
+        *   Source: `11/11/2014` -> Target: `2014-05-13`. `2014-11-11` minus 6 months is `2014-05-11`. Target is `2014-05-13`. +2 days.
+        *   Source: `11/28/2014` -> Target: `2014-05-29`. `2014-11-28` minus 6 months is `2014-05-28`. Target is `2014-05-29`. +1 day.
+        *   Source: `12/14/2014` -> Target: `2014-06-15`. `2014-12-14` minus 6 months is `2014-06-14`. Target is `2014-06-15`. +1 day.
+        *   Source: `12/31/2014` -> Target: `2014-07-02`. `2014-12-31` minus 6 months is `2014-06-31` (invalid, becomes July 1). Target is `2014-07-02`. +1 day from July 1? Or +2 from June 30?
+
+    This date shifting logic is inconsistent and complex. Let's look at the row counts.
+    Source: 182 rows. Target: 183 rows.
+    The target has one more row.
+    The target dates are sorted chronologically: `2014-01-01` to `2014-07-02`.
+    The source dates are sorted chronologically: `7/3/2014` to `12/31/2014`.
+
+    Let's look at the values.
+    Source Row 0 (`7/3/2014`): `1:00 AM` = 1.035932.
+    Target Row 0 (`2014-01-01`): `Hr 1` = 0.401886.
+    These values do not match directly.
+
+    Let's look at the column mapping.
+    Source columns: `1:00 AM`, `2:00 AM`, ..., `12:00 AM`, `1:00 PM`, ..., `12:00 PM`.
+    Target columns: `Hr 1`, `Hr 2`, ..., `Hr 24`.
+
+    Standard 24-hour clock mapping:
+    `1:00 AM` -> Hour 1
+    `2:00 AM` -> Hour 2
+    ...
+    `11:00 AM` -> Hour 11
+    `12:00 PM` -> Hour 12 (Noon)
+    `1:00 PM` -> Hour 13
+    ...
+    `11:00 PM` -> Hour 23
+    `12:00 AM` -> Hour 24 (Midnight end of day)
+
+    Let's check if the values match this mapping for a specific row.
+    Source Row 0 (`7/3/2014`):
+    `1:00 AM` = 1.035932
+    `2:00 AM` = 0.432909
+    ...
+    `12:00 PM` = 0.306257
+    `1:00 PM` = 0.174087
+    ...
+    `12:00 AM` = 0.153621
+
+    Target Row 0 (`2014-01-01`):
+    `Hr 1` = 0.401886
+    `Hr 2` = 0.047515
+    ...
+    These values are completely different. This implies the rows are not just renamed, but the data itself is different or the rows are permuted/shifted significantly.
+
+    However, the problem statement says "Infer a general transformation... Compute the result only from the source DataFrame." and "Never copy target rows". This usually implies a structural transformation (melt/pivot/rename) rather than data generation. If the values are different, there might be a calculation involved, or the sample data provided in the prompt is illustrative of the *schema* but the values in the "sample" block for target are from a different dataset or time period?
+    
+    Wait, look at the note: "Source row count describes a training sample only, not the evaluation input."
+    And the target sample has 12 rows, source sample has 12 rows.
+    Source rows: 182. Target rows: 183.
+    
+    Let's look at the `DSL` column in source. It has values 0.0 and 0.119509.
+    The target does not have a `DSL` column.
+    
+    Let's re-read the date mapping.
+    Source `7/3/2014` -> Target `2014-01-01`?
+    Maybe the target dates are not derived from source dates by a simple shift.
+    
+    Let's look at the distinct values.
+    Source `date` has 182 distinct values.
+    Target `Date` has 183 distinct values.
+    
+    Is it possible the target is a *different* dataset entirely? No, the task is to transform source to target.
+    
+    Let's look at the values again.
+    Source `7/3/2014` `1:00 AM` = 1.035932.
+    Is there any row in the target with `Hr 1` = 1.035932?
+    Target `Hr 1` values in sample: 0.401886, 0.646067, 0.916091, 0.138349, 0.600338, 0.803433, 0.875315, 1.171749, 1.128576, 0.494112, 1.172904, 0.816822.
+    No match.
+    
+    This suggests that the "sample" data provided in the JSON for the target might be from a different time period or the transformation involves a complex calculation that changes the values significantly, OR the rows are matched by some other key.
+    
+    However, usually in these "infer transformation" tasks, if the values don't match, it's either:
+    1. A calculation (e.g., sum, average, difference).
+    2. A join with external data (forbidden).
+    3. The sample data in the prompt is misleading or I am misinterpreting the row correspondence.
+    
+    Let's look at the row counts again.
+    Source: 182 rows.
+    Target: 183 rows.
+    
+    The target dates range from `2014-01-01` to `2014-07-02`.
+    The source dates range from `2014-07-03` to `2014-12-31`.
+    
+    These two date ranges are disjoint.
+    Source: July 3, 2014 to Dec 31, 2014.
+    Target: Jan 1, 2014 to July 2, 2014.
+    
+    This implies the target data *cannot* be derived from the source data values directly if the source only contains data for the second half of 2014.
+    
+    **Hypothesis**: The provided "source" and "target" samples in the prompt are from two different halves of a year, and the task is to demonstrate the *structural* transformation (melting the wide hourly columns into a long format or renaming them) assuming the data *would* be there. But the instruction says "Compute the result only from the source DataFrame".
+    
+    If I compute the result from the source DataFrame, I will have 182 rows. The target has 183.
+    If I transform the source structure, I will get 182 rows with dates in the second half of 2014.
+    
+    Let's look at the `DSL` column.
+    Source `DSL` has 2 distinct values: 0.0 and 0.119509.
+    Target has no `DSL`.
+    
+    Is it possible the target is the *previous* 6 months?
+    If the source is H2 2014, the target is H1 2014.
+    But I cannot generate H1 2014 data from H2 2014 data without external info or complex forecasting (which is not a standard pandas transformation).
+    
+    **Alternative Interpretation**:
+    Maybe the "source" provided in the prompt is just a *schema* example, and the "target" is the *expected output* for a *different* input that follows the same schema?
+    "The evaluation source contains different rows; never copy target rows... Compute the result only from the source DataFrame."
+    
+    If the evaluation source has different rows, I must write code that works for *any* source with this schema.
+    
+    Let's assume the transformation is purely structural:
+    1.  Rename the hourly columns to `Hr 1` through `Hr 24`.
+    2.  Format the date column to `YYYY-MM-DD 00:00:00`.
+    3.  Drop the `DSL` column.
+    4.  Handle the row count discrepancy?
+    
+    If the source has 182 rows and the target has 183, and the dates are disjoint, there is a fundamental mismatch in the provided sample data vs the task description "Compute the result only from the source".
+    
+    However, looking at the date ranges:
+    Source: `7/3/2014` to `12/31/2014`.
+    Target: `2014-01-01` to `2014-07-02`.
+    
+    It is highly likely that the "Source" and "Target" samples in the prompt are from two different datasets that are *complementary* (H2 and H1), but the *task* is to transform the *structure* of the source. The fact that the target sample has different dates and values is likely because the sample target is from a different time period (H1) while the sample source is from H2.
+    
+    But wait, if I apply the structural transformation to the Source (H2), I will get H2 dates. The Target sample shows H1 dates.
+    
+    Let's look at the `DSL` column again.
+    Source `DSL` values: 0.0, 0.119509.
+    
+    Is it possible the target `Hr 24` or some other column is derived from `DSL`?
+    Target `Hr 24` values in sample: 1.149117, 1.193727, etc.
+    Source `DSL` is 0.0 for most rows in the sample.
+    
+    Let's look at the last row of Source sample: `12/31/2014`. `DSL` = 0.0.
+    Last row of Target sample: `2014-07-02`. `Hr 24` = 0.24708.
+    
+    There is no obvious value mapping.
+    
+    **Conclusion on Data Mismatch**: The prompt provides a Source schema and a Target schema. The sample data for Source and Target are likely from different time periods (H2 vs H1) to illustrate the *format* but not the *values*. The instruction "Compute the result only from the source DataFrame" implies I should transform the *structure* of the source. The row count difference (182 vs 183) in the sample metadata might be due to the specific days included (e.g., one includes Jan 1, the other starts July 3).
+    
+    If I simply transform the source structure:
+    1.  Parse `date` to datetime.
+    2.  Rename columns:
+        *   `1:00 AM` -> `Hr 1`
+        *   `2:00 AM` -> `Hr 2`
+        *   ...
+        *   `12:00 PM` -> `Hr 12`
+        *   `1:00 PM` -> `Hr 13`
+        *   ...
+        *   `11:00 PM` -> `Hr 23`
+        *   `12:00 AM` -> `Hr 24`
+    3.  Format `date` to `YYYY-MM-DD 00:00:00`.
+    4.  Drop `DSL`.
+    5.  Sort by Date? The target sample is sorted by Date. The source sample is sorted by Date.
+    
+    Let's verify the column mapping order.
+    Source: `1:00 AM`, `2:00 AM`, ..., `11:00 AM`, `12:00 AM`, `1:00 PM`, ..., `11:00 PM`, `12:00 PM`.
+    Note the position of `12:00 AM` in the source list: It is after `11:00 AM` and before `1:00 PM`.
+    Source Columns:
+    0: `1:00 AM`
+    1: `2:00 AM`
+    ...
+    10: `11:00 AM`
+    11: `12:00 AM`  <-- This is Midnight (start of next day or end of previous?)
+    12: `1:00 PM`
+    ...
+    23: `11:00 PM`
+    24: `12:00 PM`  <-- This is Noon
+    
+    Wait, the source column list in the JSON is:
+    `1:00 AM`, `2:00 AM`, `3:00 AM`, `4:00 AM`, `5:00 AM`, `6:00 AM`, `7:00 AM`, `8:00 AM`, `9:00 AM`, `10:00 AM`, `11:00 AM`, `12:00 AM`, `1:00 PM`, `2:00 PM`, `3:00 PM`, `4:00 PM`, `5:00 PM`, `6:00 PM`, `7:00 PM`, `8:00 PM`, `9:00 PM`, `10:00 PM`, `11:00 PM`, `12:00 PM`.
+    
+    This order is weird. `12:00 AM` (Midnight) is between `11:00 AM` and `1:00 PM`. `12:00 PM` (Noon) is at the end.
+    
+    Target Columns: `Hr 1` to `Hr 24`.
+    Standard mapping:
+    Hr 1: 1:00 AM
+    Hr 2: 2:00 AM
+    ...
+    Hr 11: 11:00 AM
+    Hr 12: 12:00 PM (Noon)
+    Hr 13: 1:00 PM
+    ...
+    Hr 23: 11:00 PM
+    Hr 24: 12:00 AM (Midnight)
+    
+    So I need to map:
+    `1:00 AM` -> `Hr 1`
+    `2:00 AM` -> `Hr 2`
+    ...
+    `11:00 AM` -> `Hr 11`
+    `12:00 PM` -> `Hr 12`  (Source col `12:00 PM` is last)
+    `1:00 PM` -> `Hr 13`
+    ...
+    `11:00 PM` -> `Hr 23`
+    `12:00 AM` -> `Hr 24`  (Source col `12:00 AM` is 12th in list)
+    
+    Let's create a mapping dictionary.
+    
+    Also, the date format in target is `YYYY-MM-DD 00:00:00`.
+    
+    What about the row count?
+    If the source has 182 rows, the output will have 182 rows. The target sample has 183. This discrepancy is likely due to the sample data being from different periods (H1 vs H2) as noted. The transformation logic should just process the source rows.
+    
+    One detail: `DSL` column is dropped.
+    
+    Steps:
+    1.  Create a mapping from source hour columns to target `Hr N` columns.
+    2.  Rename the columns.
+    3.  Parse the `date` column.
+    4.  Format the `date` column to string `YYYY-MM-DD 00:00:00`.
+    5.  Drop the `DSL` column.
+    6.  Ensure column order is `Date`, `Hr 1`, ..., `Hr 24`.
+    7.  Sort by `Date`? The source is already sorted. The target is sorted. It's safe to sort.
+
+    Let's double check the `12:00 AM` and `12:00 PM` mapping.
+    In 24-hour time:
+    12:00 AM is 00:00 (Hour 0 or Hour 24 depending on convention).
+    12:00 PM is 12:00 (Hour 12).
+    
+    Target `Hr 1` to `Hr 24`.
+    Usually:
+    Hr 1 = 01:00
+    ...
+    Hr 12 = 12:00
+    ...
+    Hr 24 = 00:00 (next day) or 24:00.
+    
+    Given `Hr 1` corresponds to `1:00 AM`, `Hr 12` should correspond to `12:00 PM` (Noon).
+    `Hr 13` should correspond to `1:00 PM`.
+    `Hr 24` should correspond to `12:00 AM` (Midnight).
+    
+    Source Column `12:00 PM` -> Target `Hr 12`.
+    Source Column `12:00 AM` -> Target `Hr 24`.
+    
+    Let's construct the mapping.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Define the mapping from source column names to target column names
+    # Source columns are in a specific order, we need to map them to Hr 1-24
+    
+    # Mapping based on standard 12-hour to 24-hour clock interpretation
+    # 1:00 AM -> Hr 1
+    # ...
+    # 11:00 AM -> Hr 11
+    # 12:00 PM -> Hr 12 (Noon)
+    # 1:00 PM -> Hr 13
+    # ...
+    # 11:00 PM -> Hr 23
+    # 12:00 AM -> Hr 24 (Midnight)
+    
+    col_mapping = {
+        '1:00 AM': 'Hr 1',
+        '2:00 AM': 'Hr 2',
+        '3:00 AM': 'Hr 3',
+        '4:00 AM': 'Hr 4',
+        '5:00 AM': 'Hr 5',
+        '6:00 AM': 'Hr 6',
+        '7:00 AM': 'Hr 7',
+        '8:00 AM': 'Hr 8',
+        '9:00 AM': 'Hr 9',
+        '10:00 AM': 'Hr 10',
+        '11:00 AM': 'Hr 11',
+        '12:00 PM': 'Hr 12',
+        '1:00 PM': 'Hr 13',
+        '2:00 PM': 'Hr 14',
+        '3:00 PM': 'Hr 15',
+        '4:00 PM': 'Hr 16',
+        '5:00 PM': 'Hr 17',
+        '6:00 PM': 'Hr 18',
+        '7:00 PM': 'Hr 19',
+        '8:00 PM': 'Hr 20',
+        '9:00 PM': 'Hr 21',
+        '10:00 PM': 'Hr 22',
+        '11:00 PM': 'Hr 23',
+        '12:00 AM': 'Hr 24'
+    }
+    
+    # Rename the

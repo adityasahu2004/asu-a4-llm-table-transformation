@@ -1,0 +1,59 @@
+Operator plan:
+1. Parse the `date` column into datetime objects.
+2. Derive the calendar date (`MM/DD/YYYY`) and the hour of the day (0-23) from the parsed datetime.
+3. Map the hour (0-23) to the target column names `Hour 1` through `Hour 24`.
+4. Pivot the data: rows become unique calendar dates, columns become the 24 hours, and values are `zone_016`.
+5. Ensure all 24 hour columns are present, filling missing combinations with NaN.
+6. Sort the resulting rows by date descending (as seen in the target sample: `01/02/2018` then `01/01/2018`).
+7. Format the `date` index as a column `MM/DD/YYYY`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date string to datetime
+    # Format observed: "1/2/2018 0:11" -> month/day/year hour:minute
+    df = source.copy()
+    df['datetime'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract calendar date and hour
+    df['cal_date'] = df['datetime'].dt.date
+    df['hour'] = df['datetime'].dt.hour
+    
+    # Map hour 0-23 to "Hour 1" - "Hour 24"
+    df['hour_label'] = 'Hour ' + (df['hour'] + 1).astype(str)
+    
+    # Pivot table
+    # Index: cal_date, Columns: hour_label, Values: zone_016
+    pivot_df = df.pivot_table(
+        index='cal_date',
+        columns='hour_label',
+        values='zone_016',
+        aggfunc='first'
+    )
+    
+    # Ensure all 24 columns exist
+    expected_cols = [f'Hour {i}' for i in range(1, 25)]
+    for col in expected_cols:
+        if col not in pivot_df.columns:
+            pivot_df[col] = np.nan
+            
+    # Reorder columns
+    pivot_df = pivot_df[expected_cols]
+    
+    # Convert index to datetime for sorting, then reset to string
+    pivot_df.index = pd.to_datetime(pivot_df.index)
+    
+    # Sort by date descending
+    pivot_df = pivot_df.sort_index(ascending=False)
+    
+    # Reset index to make date a column
+    pivot_df = pivot_df.reset_index()
+    pivot_df = pivot_df.rename(columns={'index': 'date'})
+    
+    # Format date as MM/DD/YYYY
+    pivot_df['date'] = pivot_df['date'].dt.strftime('%m/%d/%Y')
+    
+    return pivot_df
+```

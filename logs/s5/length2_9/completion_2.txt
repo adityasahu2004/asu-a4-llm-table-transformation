@@ -1,0 +1,305 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `date` column (format `m/d/yyyy H:MM`) to a datetime object.
+2.  **Extract Hour**: Extract the hour component from the parsed datetime to determine which hourly bucket each row belongs to. Note that the source data uses 24-hour clock notation where `0` represents the first hour (00:00-00:59), which maps to `PCT_HOURLY_0100` (Hour 1) in the target schema. Thus, `Target Hour Index = Source Hour + 1`.
+3.  **Group By Day**: Group the data by the calendar date (ignoring time) to aggregate daily values.
+4.  **Aggregate**: For each day, create a wide-format table with 24 columns (`pct_hourly_0100` to `pct_hourly_2400`).
+    *   For each hour bucket (1-24), sum the `zone_016` values that fall into that bucket.
+    *   If a bucket is empty or contains only nulls, the sum is 0 (or NaN handled as 0). The target shows `0.0` for empty buckets.
+5.  **Derive Metadata**:
+    *   `dt_strata`: Format the group date as `MM/dd/yy`.
+    *   `dow`: Calculate the day of the week (ISO standard: Monday=1, Sunday=7).
+    *   `pct_hourly_2500`: Add a constant column of 0s.
+6.  **Sort/Order**: The target sample shows dates sorted descending (01/02/18 then 01/01/18). However, standard transformations usually preserve input order or sort ascending. Looking at the target `first_last_non_null`, it lists `01/02/18` then `01/01/18`, implying the output might be sorted descending by date, or simply reflects the unique values found. Given the source sample is chronological ascending (1/2, 1/3), and target is descending, I will sort the result by `dt_strata` descending to match the target sample order, though typically unique value lists are unordered. Wait, looking closely at the target sample: Row 0 is 01/02/18, Row 1 is 01/01/18. This is descending. I will sort descending.
+
+*Correction on Hour Mapping*:
+Source: `1/2/2018 0:11` -> Hour 0. Target Column `pct_hourly_0100`.
+Source: `1/2/2018 22:08` -> Hour 22. Target Column `pct_hourly_2300`.
+Source: `1/3/2018 0:20` -> Hour 0. Target Column `pct_hourly_0100` (for 1/3).
+The mapping is `Target_Hour = Source_Hour + 1`.
+
+*Aggregation Logic*:
+The target has 2 rows for 2 distinct days in the sample.
+Row 1 (01/02/18): Has values in `pct_hourly_2400` (746.9).
+Let's check the source for 1/2/2018.
+Source has 11 rows for 1/2/2018.
+Hours: 0, 2, 4, 6, 8, 11, 13, 15, 17, 19, 22.
+Mapped Target Hours: 1, 3, 5, 7, 9, 12, 14, 16, 18, 20, 23.
+Wait, the target sample for `01/02/18` has `0.0` for all hours except `pct_hourly_2400` which is `746.9`.
+This implies my hour mapping or aggregation logic is wrong, OR the source sample provided in the prompt is just a subset and the "evaluation source" contains different data, OR there is a specific filtering/grouping I am missing.
+
+Let's re-read the target sample for `01/02/18`:
+`pct_hourly_0100`...`pct_hourly_2300` are all `0.0`.
+`pct_hourly_2400` is `746.9`.
+
+Let's re-read the source sample for `1/2/2018`:
+Values are around 67.x.
+Sum of all 11 values: ~746.9.
+Ah! The sum of all `zone_016` values for the day `1/2/2018` is `746.9`.
+And they are all placed in `pct_hourly_2400`?
+No, that doesn't make sense with the column names `pct_hourly_0100` etc.
+
+Let's look at `01/01/18` in Target.
+`pct_hourly_0100`: 4073.5
+`pct_hourly_0200`: 4066.4
+...
+These look like distinct values, not sums of a single day's hourly readings if the readings are ~67.
+Wait, if the source has 1450 rows, and only 2 rows in target, maybe the target is an average or sum over a larger period?
+No, the target distinct values for `dt_strata` are 2.
+
+Let's look at the numbers again.
+Source `zone_016` values: ~67.
+Target `pct_hourly_0100` for `01/01/18`: 4073.5.
+4073.5 / 67 ≈ 60.
+Maybe there are 60 minutes per hour?
+If we sum all readings for a specific hour of a specific day, do we get 4073.5?
+The source sample only shows one reading per ~2 hours for 1/2/2018. It does not show 1/1/2018.
+The source sample is just a "sample". The note says "Source row count describes a training sample only".
+
+Hypothesis: The transformation aggregates `zone_016` by `Date` and `Hour`.
+For each unique Date-Hour combination, it sums the `zone_016` values.
+Then it pivots this to wide format.
+
+Why does `01/02/18` have 0s in hours 1-23 and 746.9 in hour 24?
+Maybe the source data for `01/02/18` in the *full* dataset only has data in the last hour (23:00-23:59, which maps to `pct_hourly_2400`)?
+Or maybe the mapping is different.
+
+Let's check the distinct values in Target `dt_strata`: `01/02/18` and `01/01/18`.
+Source `date` format: `m/d/yyyy H:MM`.
+
+Let's assume the standard aggregation:
+1. Parse date.
+2. Extract Hour (0-23).
+3. Group by Date (YYYY-MM-DD) and Hour.
+4. Sum `zone_016`.
+5. Pivot to wide columns `pct_hourly_{Hour+1:02d}00`.
+6. Fill NaN with 0.
+7. Format Date as `MM/dd/yy`.
+8. Calculate DOW.
+9. Add `pct_hourly_2500` = 0.
+
+Let's verify the `01/02/18` case with this hypothesis.
+If the full data for `1/2/2018` only had readings in hour 23 (11 PM), they would go into `pct_hourly_2400`.
+The sum was 746.9.
+If the full data for `1/1/2018` had readings distributed throughout the day, we would see values in other columns.
+The values 4073.5 etc are roughly 60 * 68. This suggests there are 60 readings per hour (one per minute?) in the full dataset for 1/1/2018.
+The sample for 1/2/2018 only showed sparse data (every 2 hours), but the sum of those sparse data points was 746.9.
+Wait, if 1/2/2018 only has sparse data, and they are all in `pct_hourly_2400`, that implies all those sparse readings fell into Hour 23?
+Source 1/2/2018 readings:
+0:11 -> Hour 0 -> Col 1
+2:22 -> Hour 2 -> Col 3
+...
+22:08 -> Hour 22 -> Col 23
+If these were the only readings, we would expect values in Col 1, 3, 5... 23.
+But the target shows 0s in Col 1-23 and 746.9 in Col 24.
+This contradicts the "Hour + 1" mapping if the source hours are 0-22.
+
+Alternative Hypothesis:
+The `zone_016` column represents a value that needs to be shifted or mapped differently?
+Or maybe `pct_hourly_2400` is a "Total" or "Residual" column?
+But `pct_hourly_2400` for `01/01/18` is 4074.0.
+Sum of `pct_hourly_0100` to `2300` for `01/01/18`:
+4073.5 + 4066.4 + ... + 4063.6.
+There are 23 columns. Average ~4000. Sum ~92,000.
+4074.0 is similar to the other hourly values. It is NOT a total.
+
+Let's look at the Source `date` column again.
+`1/2/2018 0:11`
+`1/2/2018 2:22`
+...
+`1/2/2018 22:08`
+`1/3/2018 0:20`
+
+Is it possible the hours are mapped differently?
+What if `0:11` maps to `pct_hourly_2400`? (Midnight as end of previous day?)
+If `0:11` (Jan 2) is treated as Hour 24 of Jan 1?
+Then `0:11` on Jan 2 would go to Jan 1's `pct_hourly_2400`.
+Let's check `01/01/18` in Target.
+`pct_hourly_2400` is 4074.0.
+If `1/2/2018 0:11` (value 67.9) is assigned to `01/01/18`, then `01/01/18`'s `pct_hourly_2400` would include 67.9.
+But 4074.0 is much larger.
+
+Let's look at `01/02/18` in Target.
+`pct_hourly_2400` is 746.9.
+This matches the sum of ALL readings for `1/2/2018` in the source sample.
+This implies that for `01/02/18`, all readings from `1/2/2018` in the source are being dumped into `pct_hourly_2400`.
+Why?
+Maybe the source `date` string `1/2/2018 0:11` is being parsed, and the hour is ignored or mapped to 24?
+But for `01/01/18`, the readings are distributed across hours 1-23.
+
+Contradiction:
+Case A (01/02/18): All source readings for that day go to Col 24.
+Case B (01/01/18): Source readings for that day are distributed across Cols 1-23 (and 24).
+
+Is there a difference in the data?
+Source sample for 1/2/2018 has `null` for the last entry `1/3/2018 0:20`.
+The 1/2/2018 readings are: 67.9, 67.9, 67.6, 67.3, 67.1, 66.9, 66.8, 66.7, 66.9, 67.8, 68.5.
+Sum = 746.9.
+Target `01/02/18` `pct_hourly_2400` = 746.9.
+
+This strongly suggests that for the day `01/02/18`, the aggregation logic resulted in all values ending up in bucket 24.
+How?
+If the hour extraction failed or defaulted to 23 (index 23 -> col 24)?
+Or if the timezone shifted them?
+
+However, for `01/01/18`, the values are distinct per hour.
+This implies that for `01/01/18`, the hour information WAS preserved.
+Why would hour information be lost for `01/02/18` but kept for `01/01/18`?
+Maybe the source sample for `01/02/18` is misleading because it's just a small sample, and in the *full* data, `01/02/18` only had data in hour 23?
+If the full data for `01/02/18` only had readings between 23:00 and 23:59, then they would all map to `pct_hourly_2400` (if Hour 23 maps to Col 24).
+And the sum of those readings would be 746.9.
+The sample shows readings at 0:11, 2:22... 22:08.
+If the sample is just a random slice, it might not represent the full distribution.
+BUT, the sum of the sample readings (746.9) matches the target value exactly.
+This implies the sample *is* the full data for that day in the training set, or the training set is constructed such that these are the only values.
+If these are the only values, and they are at hours 0, 2, 4... 22, they should map to Cols 1, 3, 5... 23.
+They do NOT map to Col 24.
+
+Unless... the mapping is `Target Col = Source Hour + 1` is WRONG.
+What if `Target Col = 25 - Source Hour`?
+Hour 0 -> Col 25? No, max col is 24.
+Hour 22 -> Col 3?
+
+Let's look at `01/01/18` values.
+Col 1 (Hour 1?): 4073.5
+Col 2 (Hour 2?): 4066.4
+Col 24 (Hour 24?): 4074.0
+
+If the mapping is standard (Hour H -> Col H+1), then:
+Source Hour 0 -> Col 1
+Source Hour 23 -> Col 24
+
+If for `01/02/18`, all values went to Col 24, then all source hours must have been 23.
+But the sample shows hours 0, 2, 4...
+This is a contradiction.
+
+Is it possible `zone_016` is being shifted?
+Or is `dt_strata` shifted?
+What if `1/2/2018 0:11` is assigned to `1/1/2018`?
+If `1/2/2018 0:11` is assigned to `1/1/2018`, it would be Hour 0 of the *next* day? No, usually midnight starts the day.
+If `1/2/2018 0:11` is assigned to `1/1/2018` as Hour 24 (end of day), then:
+`1/1/2018` `pct_hourly_2400` would include 67.9.
+Target `01/01/18` `pct_hourly_2400` is 4074.0.
+If the full data for `01/01/18` had many readings, 67.9 is a drop in the bucket.
+
+But what about `01/02/18`?
+If `1/2/2018` readings are assigned to `1/1/2018`, then `01/02/18` would be empty or contain readings from `1/3/2018 0:xx`.
+Source has `1/3/2018 0:20` (null).
+Target `01/02/18` has 746.9 in Col 24.
+
+This shift hypothesis doesn't explain the 746.9 in `01/02/18` Col 24 if the data is shifted to `01/01/18`.
+
+Let's reconsider the sum match.
+Sum of source `1/2/2018` readings = 746.9.
+Target `01/02/18` `pct_hourly_2400` = 746.9.
+This exact match is too strong to ignore.
+It implies that for `01/02/18`, the aggregation logic placed all data into `pct_hourly_2400`.
+Why?
+Maybe the `date` column `1/2/2018 0:11` is parsed as `2018-01-02 00:11`.
+If we group by Date, we get 2018-01-02.
+If we extract Hour, we get 0.
+If we map Hour 0 to Col 1, we get `pct_hourly_0100`.
+Why is it in Col 24?
+
+Is it possible the columns are reversed?
+`pct_hourly_0100` is the LAST hour?
+No, `01/01/18` has values in all columns.
+
+Is it possible that `zone_016` values are being summed, but the hour extraction is failing for `1/2/2018`?
+No, the code is deterministic.
+
+Wait, look at the Target `dt_strata` for `01/02/18`.
+It is `01/02/18`.
+Look at the Source `date` for `1/2/2018`.
+It is `1/2/2018`.
+
+Is it possible that `pct_hourly_2400` is a "Total" column for days that don't have full hourly data?
+No, `01/01/18` has a value in `pct_hourly_2400` (4074.0) AND values in other columns.
+
+Let's look at the distinct values of `zone_016` in source: 24 distinct values.
+The values are around 67.
+The target values for `01/01/18` are around 4000.
+4000 / 67 ≈ 60.
+This confirms there are ~60 readings per hour in the full dataset for `01/01/18`.
+For `01/02/18`, the target has 0s in most columns.
+This implies that in the full dataset for `01/02/18`, there are NO readings in hours 0-22?
+And ALL readings are in hour 23?
+If so, the sum of readings in hour 23 is 746.9.
+The sample shows readings in hours 0, 2, 4... 22.
+This contradicts the "No readings in hours 0-22" theory.
+
+Unless... the sample provided in the prompt is NOT representative of the full distribution for `01/02/18` in the *training* set, but the prompt says "Source row count describes a training sample only".
+However, the sum matches EXACTLY.
+Sum of sample = 746.9.
+Target value = 746.9.
+This implies the sample *contains all the data* that contributes to that target cell.
+If the sample contains data at Hour 0, 2, 4... and they all end up in `pct_hourly_2400`, then the mapping must be:
+**All hours map to 24?** No, because `01/01/18` is distributed.
+
+Is there a difference between `01/01/18` and `01/02/18` in the source?
+`01/01/18` is a Monday (2018-01-01 was a Monday).
+`01/02/18` is a Tuesday.
+Target `dow` for `01/02/18` is 2 (Tuesday).
+Target `dow` for `01/01/18` is 1 (Monday).
+
+Maybe the transformation depends on `dow`?
+No, the operator plan should be general.
+
+Let's look at the `zone_016` column name.
+Maybe `zone_016` implies a specific time zone or offset?
+
+Let's try a different angle.
+What if the `date` string `1/2/2018 0:11` is parsed incorrectly in my head?
+Format: `m/d/yyyy H:MM`.
+`1/2/2018` is Jan 2.
+
+What if the target `pct_hourly_2400` is actually `pct_hourly_0000` (midnight)?
+And the other columns are 1-23?
+No, the names are `0100` to `2400`.
+
+Let's assume the standard transformation:
+1. Parse Date.
+2. Group by Date.
+3. Extract Hour.
+4. Map Hour H to Column `pct_hourly_{H+1:02d}00`.
+5. Sum values.
+
+If this is the transformation, then for `01/02/18`:
+Source Hours: 0, 2, 4, 6, 8, 11, 13, 15, 17, 19, 22.
+Target Cols: 1, 3, 5, 7, 9, 12, 14, 16, 18, 20, 23.
+Values should be in these columns.
+Target Sample has 0s in these columns.
+Target Sample has 746.9 in Col 24.
+
+This is a direct contradiction.
+However, I must provide a deterministic transformation.
+The only way to reconcile this is if the Source Sample for `01/02/18` is misleading regarding the *hours*, or if there is a specific rule for `zone_016`.
+
+Wait! Look at the Source `date` column again.
+`1/2/2018 0:11`
+`1/2/2018 2:22`
+...
+`1/2/2018 22:08`
+
+Is it possible that `zone_016` is not the value to sum, but an index?
+No, it's float64.
+
+Is it possible that the target `pct_hourly_2400` is the **Sum of all hourly columns**?
+For `01/02/18`: Sum of 0s is 0. But value is 746.9.
+For `01/01/18`: Sum of 4000s is ~92000. Value is 4074.0. No.
+
+Let's look at the `01/01/18` row again.
+`pct_hourly_0100`: 4073.5
+`pct_hourly_2400`: 4074.0
+These are very similar.
+Maybe `pct_hourly_2400` is the value for Hour 0 (Midnight) of the *next* day?
+Or Hour 23?
+
+If `pct_hourly_2400` corresponds to Source Hour 23:
+And `pct_hourly_0100` corresponds to Source Hour 0.
+
+For `01/02/18`:
+Source has Hour 22 (22:08). This maps to Col 23.
+Source has Hour 0 (0:11). This maps to Col 1.
+Why are they 0?
+
+I will proceed with the standard aggregation logic, as it is the most robust interpretation of "Hourly" data transformation. The discrepancy in the sample for `01/02/18` might be due to the sample being a subset where the hours were effectively treated as "End of Day" or there is a data quality issue in the sample generation that I cannot infer a complex rule for without more evidence. However, the exact sum match suggests that **all** data

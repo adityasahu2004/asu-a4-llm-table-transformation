@@ -1,0 +1,126 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `date` column from string format (`M/D/YYYY H:MM`) to pandas datetime objects.
+2.  **Extract Components**:
+    *   Extract the hour from the datetime. The target columns are `1:00` through `24:00`. This suggests a 1-based hour index where 0:00-0:59 maps to `1:00`, 1:00-1:59 maps to `2:00`, ..., 23:00-23:59 maps to `24:00`. So, `target_hour = hour + 1`.
+    *   Extract the date part (year, month, day) to group by day.
+    *   Format the date string for the `cst` column as `DayOfWeek MM/DD/YYYY` (e.g., `Sat 07/20/2019`). The day of week is the 3-letter abbreviation.
+3.  **Pivot/Reshape**:
+    *   Group the data by the extracted date key.
+    *   For each group (day), we need to aggregate the `cerc_logger_1` values into the specific hour buckets (`1:00` to `24:00`).
+    *   Since the source has multiple readings per day (likely every 10-20 minutes based on the sample), and the target has exactly one value per hour bucket per day, we need an aggregation function. Looking at the sample data:
+        *   Source: `7/28/2019 4:50` -> `24.562`.
+        *   Target: `Sat 07/20/2019` (different date) has values like `132.249` for `1:00`.
+        *   Let's check the aggregation logic. The target values are significantly larger than the source values in the sample (24 vs 130+). Wait, looking closely at the sample data provided in the prompt:
+            *   Source sample values are around 22-24.
+            *   Target sample values are around 130-140.
+            *   This implies a scaling factor or a different dataset entirely? No, the prompt says "Infer the transformation... from this schema/sample block". The note says "Source row count describes a training sample only". The values in the target sample are likely from the *actual* evaluation data or a different part of the training set not shown in the tiny source snippet, OR there is a mathematical transformation.
+            *   However, usually in these tasks, if the values differ by a constant factor, it's a unit conversion. $130 / 24 \approx 5.4$. Not a clean integer.
+            *   Let's re-read carefully. "Source row count describes a training sample only, not the evaluation input." This implies the *values* in the source sample might not correspond to the *values* in the target sample directly if they are from different days. But the transformation logic must be consistent.
+            *   Let's look at the structure. The target has 24 columns for hours. The source has timestamps.
+            *   Is it possible the target values are sums? Or averages?
+            *   Let's assume the standard pivot operation: Group by Date, Pivot on Hour, Aggregate `cerc_logger_1`.
+            *   What aggregation? `mean`, `sum`, `first`, `last`?
+            *   If I look at `Sat 07/20/2019` in target: `1:00` is `132.249`.
+            *   If I look at the source, I don't have data for July 20, 2019. I have July 28, 2019.
+            *   Let's look at the distinct counts. Source `cerc_logger_1` has 1279 distinct values. Target columns have ~340-360 distinct values.
+            *   Let's assume the aggregation is `mean` or `sum`. Given the magnitude difference (24 vs 130), if it were a sum of ~5-6 readings per hour, $24 * 5 = 120$. This is plausible. If it's mean, the values would be similar. The values are ~5x larger. This suggests `sum` or a weighted sum.
+            *   However, without explicit instruction, `mean` is the safest default for "sensor data per hour". But the magnitude shift is suspicious.
+            *   Let's look at the `cst` format again. `Sat 07/20/2019`.
+            *   Let's look at the hour mapping again. `1:00` to `24:00`.
+            *   Let's try to infer if there's a specific aggregation. Often, these problems use `mean`. If the values are just different because the sample rows are from different days, I should stick to the structural transformation.
+            *   Wait, is it possible the `cerc_logger_1` values in the target are just the raw values from a different source? No, I must compute from source.
+            *   Let's assume `mean` for now, but keep in mind `sum`. Actually, looking at typical sensor data transformations, if you have high-frequency data and want hourly data, `mean` is common. If the target values are ~130 and source are ~24, maybe the source sample is just a small subset of low values? Or maybe the target is `sum`?
+            *   Let's look at the distinct counts again. Source: 1279 distinct. Target: ~340 distinct per column.
+            *   If I use `mean`, the distinct values might reduce.
+            *   Let's look at the `cst` column. It is a string.
+            *   Let's refine the hour mapping.
+                *   Source `4:50` -> Hour 4. Target column `5:00`? Or `4:00`?
+                *   Target columns are `1:00` ... `24:00`.
+                *   Standard 24-hour clock is 0-23.
+                *   If `1:00` corresponds to 0:00-0:59, then `hour + 1`.
+                *   If `1:00` corresponds to 1:00-1:59, then `hour`. But then what is `24:00`? 24:00 is effectively 0:00 of the next day.
+                *   Usually, `1:00` to `24:00` implies a 1-based index for the 24 hours of the day.
+                *   Hour 0 (0:00-0:59) -> `1:00`
+                *   Hour 1 (1:00-1:59) -> `2:00`
+                *   ...
+                *   Hour 23 (23:00-23:59) -> `24:00`
+            *   Aggregation: Given the lack of specific instruction and the magnitude difference, I will use `mean` as it is the most standard statistical aggregation for time-series downsampling unless "sum" is implied by context (e.g., energy consumption). However, `cerc_logger` sounds like a sensor (temperature? pressure?). Temperature is usually averaged. If it's temperature, 24C is reasonable. 130C is not (unless it's Fahrenheit? 24C = 75F. 130F = 54C. No. 130C is boiling. Maybe it's a different unit?).
+            *   Actually, let's look at the sample target values again. `132.249`.
+            *   Let's look at the source sample values. `24.562`.
+            *   Is it possible the target is `sum` of 5-6 readings?
+            *   Let's assume `mean` first. If the evaluation fails, it might be `sum`. But I can only provide one code block.
+            *   Let's check if there is a pattern in the target values. `132.249`, `131.936`. They are very precise.
+            *   Let's assume the transformation is:
+                1. Parse date.
+                2. Create `cst` string.
+                3. Create `hour_bin` = `hour + 1`.
+                4. Pivot table: Index=`cst`, Columns=`hour_bin`, Values=`cerc_logger_1`, Aggfunc=`mean`.
+                5. Rename columns to `1:00`, `2:00`, etc.
+                6. Sort index? The target sample is not sorted by date. `Sat 07/20/2019`, `Sat 06/08/2019`, `Wed 03/21/2018`. It looks random or reverse chronological?
+                7. The target `cst` distinct count is 521. Source rows 74848. 74848 / 521 ≈ 143 rows per day. 143 / 24 ≈ 6 readings per hour.
+                8. If I sum 6 readings of ~24, I get ~144. This matches the target magnitude (~130-140) much better than mean (~24).
+                9. Therefore, the aggregation is likely **`sum`**.
+
+4.  **Final Steps**:
+    *   Perform the pivot with `sum`.
+    *   Ensure column names are strings `1:00` to `24:00`.
+    *   Reset index to make `cst` a column.
+    *   Sort columns to ensure `cst` is first, then `1:00` to `24:00`.
+
+### Assumptions
+*   The hour mapping is `source_hour + 1` to match `1:00`-`24:00` labels.
+*   The aggregation function is `sum` based on the magnitude difference between source (~24) and target (~130-140) and the estimated ~6 readings per hour.
+*   The `cst` format is `%a %m/%d/%Y` (e.g., `Sat 07/20/2019`).
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Create a copy to avoid modifying the original
+    df = source.copy()
+    
+    # Parse the date column
+    # Format in source: "M/D/YYYY H:MM"
+    df['datetime'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract components for grouping and pivoting
+    # 1. Date string for 'cst' column: "DayOfWeek MM/DD/YYYY"
+    #    e.g., "Sat 07/20/2019"
+    df['cst'] = df['datetime'].dt.strftime('%a %m/%d/%Y')
+    
+    # 2. Hour bin for columns 1:00 to 24:00
+    #    Source hour 0 (0:00-0:59) -> Column "1:00"
+    #    Source hour 23 (23:00-23:59) -> Column "24:00"
+    df['hour_bin'] = df['datetime'].dt.hour + 1
+    
+    # Pivot the table
+    # Index: cst
+    # Columns: hour_bin
+    # Values: cerc_logger_1
+    # Aggregation: sum (inferred from magnitude difference ~24 -> ~130 with ~6 readings/hr)
+    pivot_df = df.pivot_table(
+        index='cst',
+        columns='hour_bin',
+        values='cerc_logger_1',
+        aggfunc='sum'
+    )
+    
+    # Rename columns to match target format "1:00", "2:00", ... "24:00"
+    pivot_df.columns = [f"{int(col)}:00" for col in pivot_df.columns]
+    
+    # Reset index to make 'cst' a regular column
+    result = pivot_df.reset_index()
+    
+    # Ensure column order: 'cst' first, then 1:00 to 24:00
+    # The pivot table should naturally have sorted columns if hour_bin was numeric, 
+    # but let's enforce the order to be safe.
+    expected_cols = ['cst'] + [f"{h}:00" for h in range(1, 25)]
+    
+    # Select only the expected columns to handle any missing hours (though distinct counts suggest all present)
+    # and ensure correct order.
+    result = result[expected_cols]
+    
+    return result
+```

@@ -1,0 +1,200 @@
+{
+  "case": "length2_4",
+  "length": 2,
+  "strategy": "s5",
+  "model": "qwen36-27b",
+  "is_demo": false,
+  "parameters": {
+    "output": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment",
+    "model": "qwen36-27b",
+    "base_url": "https://openai.rc.asu.edu/v1",
+    "max_tokens": 6000,
+    "reasoning_effort": "none",
+    "k": 5,
+    "sample_rows": 12,
+    "timeout": 120,
+    "api_timeout": 3600,
+    "replay_only": false,
+    "strategy": "s5",
+    "python": "3.14.4 (main, Apr  7 2026, 13:13:20) [Clang 21.0.0 (clang-2100.0.123.102)]",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "pandas": "3.1.1",
+    "held_out": [
+      "length1_1",
+      "length1_2",
+      "length1_3",
+      "length2_1",
+      "length3_1"
+    ],
+    "benchmark": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split"
+  },
+  "prompt_path": "logs/s5/length2_4/prompt.json",
+  "completion_path": "logs/s5/length2_4/response.json",
+  "execution": {
+    "status": "ok",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:19: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+    "seconds": 0.5586086250041262,
+    "shape": [
+      183,
+      27
+    ],
+    "fingerprint": "a7eb89f9a91fa13e6162e7918278a0c233480334d1b8e07bbc9f6b3025fd98ce"
+  },
+  "autopipeline": {
+    "accuracy": 0.0,
+    "is_correct": false,
+    "similarities": {},
+    "info": []
+  },
+  "hard_match": {
+    "accuracy": 0.9629629629629629,
+    "is_correct": false,
+    "similarities": [
+      0.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "info": [
+      "dow",
+      "pct_hourly_0100",
+      "pct_hourly_0200",
+      "pct_hourly_0300",
+      "pct_hourly_0400",
+      "pct_hourly_0500",
+      "pct_hourly_0600",
+      "pct_hourly_0700",
+      "pct_hourly_0800",
+      "pct_hourly_0900",
+      "pct_hourly_1000",
+      "pct_hourly_1100",
+      "pct_hourly_1200",
+      "pct_hourly_1300",
+      "pct_hourly_1400",
+      "pct_hourly_1500",
+      "pct_hourly_1600",
+      "pct_hourly_1700",
+      "pct_hourly_1800",
+      "pct_hourly_1900",
+      "pct_hourly_2000",
+      "pct_hourly_2100",
+      "pct_hourly_2200",
+      "pct_hourly_2300",
+      "pct_hourly_2400",
+      "pct_hourly_2500"
+    ]
+  },
+  "hard_match_provenance": "course-provided hard_match.py and utils.py",
+  "exact_schema": true,
+  "generation": {
+    "candidate_count": 6,
+    "selected_index": 0,
+    "baseline_index": 0,
+    "selection_reason": "SC winner retained: no strict constraint improvement",
+    "constraints": {
+      "columns": [
+        "dt_strata",
+        "dow",
+        "pct_hourly_0100",
+        "pct_hourly_0200",
+        "pct_hourly_0300",
+        "pct_hourly_0400",
+        "pct_hourly_0500",
+        "pct_hourly_0600",
+        "pct_hourly_0700",
+        "pct_hourly_0800",
+        "pct_hourly_0900",
+        "pct_hourly_1000",
+        "pct_hourly_1100",
+        "pct_hourly_1200",
+        "pct_hourly_1300",
+        "pct_hourly_1400",
+        "pct_hourly_1500",
+        "pct_hourly_1600",
+        "pct_hourly_1700",
+        "pct_hourly_1800",
+        "pct_hourly_1900",
+        "pct_hourly_2000",
+        "pct_hourly_2100",
+        "pct_hourly_2200",
+        "pct_hourly_2300",
+        "pct_hourly_2400",
+        "pct_hourly_2500"
+      ],
+      "relations": [
+        {
+          "date_column": "dt_strata",
+          "weekday_column": "dow",
+          "convention": "sunday0",
+          "support_rows": 12
+        }
+      ]
+    },
+    "policy": {
+      "version": "schema-weekday-v1",
+      "pool": "five few-shot SC samples + one greedy few-shot sample",
+      "constraints": [
+        "exact target schema",
+        "uniquely identified date-to-weekday relation"
+      ],
+      "target_rows": "the same 12-row prompt sample as the baselines",
+      "output_rows": "up to 128 evenly spaced training-output rows",
+      "selection": "strictly lower lexicographic constraint loss; preserve SC winner on ties",
+      "forbidden_inputs": [
+        "test_0.csv",
+        "validator results",
+        "case-specific rules",
+        "target row counts"
+      ]
+    },
+    "usage": {
+      "prompt_tokens": 90256,
+      "completion_tokens": 19865,
+      "total_tokens": 110121
+    },
+    "api_attempts": 2,
+    "marginal_api_attempts": 0,
+    "latency_seconds": 463.3683777500046,
+    "inherited_api_seconds": 463.3683777500046,
+    "clusters": {
+      "d99b07b5add8a5d010c94e46732bb8d1d01ce742575c4066b73ec3287a4e8eec": [
+        0,
+        3
+      ],
+      "3e081535bf0f70e7bd8d9a3d9f47f7aac57e14319a9e34ac2ab81c655eb8de38": [
+        1
+      ],
+      "4f272ea7ad2dff5ed467279b26d793f328cc59738a9983c0a87c433cdec283d4": [
+        2,
+        4
+      ]
+    },
+    "cost_basis": "standalone logical pool cost; reused requests have zero marginal API cost"
+  },
+  "wall_seconds": 467.0062912920039
+}

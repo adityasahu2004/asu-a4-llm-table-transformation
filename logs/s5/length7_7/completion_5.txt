@@ -1,0 +1,114 @@
+Operator plan:
+1. Parse the `date` column into datetime objects.
+2. Derive `month` as the full month name (e.g., "January").
+3. Derive `daytype` as "weekday" if the day of the week is Mon-Fri, else "weekend".
+4. Rename the 24 hourly columns from "Hour N" to "hrN".
+5. Group by `month` and `daytype` and aggregate the hourly columns. Since the target row count (183) is greater than the source row count (182) and the target contains combinations not present in the source sample (e.g., January weekday/weekend while source starts in July), we must generate all valid combinations of months and daytypes present in the data's year range or simply all months/daytypes if the data implies a full year pattern. However, looking at the target distinct values for month (Jan-Jul) and the source dates (July-Dec 2015), there is a mismatch in the sample data provided vs the target schema description. The target sample shows Jan-July. The source shows July-Dec.
+   *Correction*: The prompt says "Source row count describes a training sample only". The target has 183 rows. 12 months * 2 daytypes = 24 rows. This doesn't match 183.
+   Let's look closer at the target sample. It has rows for Jan, Feb, Mar, Apr, May, Jun, July.
+   The source has dates from 7/3/2015 to 12/31/2015.
+   Wait, the target `month` distinct values are Jan, Feb, Mar, Apr, May, Jun, July.
+   The source `date` distinct values are 182.
+   The target `rows` is 183.
+   
+   Let's re-read the target sample data.
+   Row 1: January, weekday
+   Row 2: January, weekend
+   Row 3: February, weekday
+   Row 4: February, weekday
+   Row 5: March, weekend
+   Row 6: March, weekday
+   ...
+   
+   It seems the transformation is aggregating the source data by Month and Day Type. But the source data is only July-Dec. The target data is Jan-July. This implies the source data provided in the "sample" block is just a snippet, and the *actual* evaluation source will contain the full year (or the relevant months). The transformation logic should be general: Group by Month and Day Type, and sum/average the hours?
+   
+   Looking at the values:
+   Source Hour 1 is always 0.0002398657.
+   Target hr1 is always 0.0002398657.
+   Source Hour 6 varies (0.0001199328 or 0.0002398657).
+   Target hr6 varies.
+   
+   If we group by Month and DayType, do we sum or mean?
+   If we sum, the values would be much larger (e.g., 0.000239 * 20 days).
+   The target values are the same magnitude as the source values.
+   This suggests the target is not an aggregation of the source rows in the traditional sense (sum/mean), OR the source rows are already unique per day and the target is just a reshaped version?
+   
+   No, the target has 183 rows. The source has 182 rows.
+   The target has `month` and `daytype`.
+   The source has `date`.
+   
+   Let's look at the distinct counts.
+   Source `date`: 182 distinct.
+   Target `month`: 7 distinct.
+   Target `daytype`: 2 distinct.
+   
+   If the target is a grouping, how do we get 183 rows from 7*2=14 groups?
+   Maybe the target isn't a simple groupby.
+   
+   Let's look at the target sample again.
+   Jan weekday, Jan weekend, Feb weekday, Feb weekday, Mar weekend, Mar weekday...
+   It looks like it might be listing every *unique* combination of Month and DayType found in the source? No, that would be max 24 rows.
+   
+   Is it possible the target is just the source data, but with `date` replaced by `month` and `daytype`, and columns renamed?
+   Source rows: 182. Target rows: 183.
+   If it's just a projection, the row count should be identical.
+   Why 183?
+   Maybe one day is split? Or a header? No, it's a DataFrame.
+   
+   Let's look at the source dates: 7/3/2015 to 12/31/2015.
+   July: 31 days. Aug: 31. Sep: 30. Oct: 31. Nov: 30. Dec: 31.
+   Total days in Jul-Dec: 31+31+30+31+30+31 = 184 days.
+   Source has 182 rows. So 2 days are missing.
+   Target has 183 rows.
+   
+   The target sample shows Jan-July. This contradicts the source sample showing Jul-Dec.
+   The note says: "Source row count describes a training sample only, not the evaluation input."
+   This implies the *evaluation* source will have different data. The transformation must be inferred from the schema change.
+   
+   Schema change:
+   Source: `date` (str), `Hour 1`...`Hour 24`
+   Target: `month` (str), `daytype` (str), `hr1`...`hr24`
+   
+   The values in the target sample (Jan-July) are likely from the *evaluation* source which presumably contains Jan-July data, or the sample target is from a different dataset entirely.
+   However, the *operation* is likely:
+   1. Parse `date`.
+   2. Create `month` from `date`.
+   3. Create `daytype` from `date`.
+   4. Rename `Hour N` to `hrN`.
+   5. Return the DataFrame.
+   
+   Why the row count difference (182 vs 183)?
+   If the operation is just a projection/renaming, the row count should be preserved.
+   If the evaluation source has 183 rows, the output will have 183 rows.
+   The sample target having Jan-July while sample source has Jul-Dec is a strong indicator that the samples are from different splits or the "target sample" is illustrative of the *format* rather than the specific data transformation of the *source sample*.
+   
+   Given the instruction "Compute the result only from the source DataFrame", I cannot generate Jan-July data from Jul-Dec data. I must assume the transformation is a row-wise projection.
+   
+   Steps:
+   1. Convert `date` to datetime.
+   2. Extract `month` as full name.
+   3. Extract `daytype` as 'weekday' or 'weekend'.
+   4. Rename columns `Hour 1` -> `hr1`, etc.
+   5. Drop original `date` column.
+   6. Return new DataFrame.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    dt = pd.to_datetime(source['date'])
+    
+    # Create the output dataframe
+    out = pd.DataFrame(index=source.index)
+    
+    # Derive month and daytype
+    out['month'] = dt.dt.strftime('%B')
+    out['daytype'] = dt.apply(lambda x: 'weekday' if x.dayofweek < 5 else 'weekend')
+    
+    # Rename and copy hourly columns
+    for h in range(1, 25):
+        out[f'hr{h}'] = source[f'Hour {h}']
+        
+    return out.reset_index(drop=True)
+```

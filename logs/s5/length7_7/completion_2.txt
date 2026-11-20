@@ -1,0 +1,82 @@
+Operator plan:
+1. Parse the `date` column into datetime objects.
+2. Derive `month` (full name) and `daytype` ("weekday" if Mon-Fri, "weekend" if Sat-Sun) from the parsed dates.
+3. Rename the 24 hourly columns from "Hour X" to "hrX".
+4. Group by `month` and `daytype` and aggregate the hourly columns by taking the maximum value for each hour. This reduces the 182 source rows (bi-weekly) to 183 target rows (7 months * 2 daytypes + 1 extra, likely due to how weekends/weekdays align or a specific aggregation logic, but `max` is the standard non-destructive aggregation for this pattern where values are sparse/constant). Note: The target has 183 rows. 7 months * 2 types = 14. This doesn't match 183. Let's re-examine.
+   - Source: 182 rows. Dates are every 2 weeks? "7/3/2015", "7/19/2015"... Yes, bi-weekly.
+   - Target: 183 rows. Distinct months: 7. Distinct daytypes: 2.
+   - Wait, the target sample shows rows like "January weekday", "January weekend", "February weekday", "February weekday"...
+   - Let's look at the target row count: 183.
+   - Source rows: 182.
+   - The target distinct values for `month` are Jan-Jul (7 months).
+   - The target distinct values for `daytype` are weekday/weekend (2 types).
+   - If we group by month and daytype, we get at most 14 rows. The target has 183 rows.
+   - Therefore, this is **not** a groupby aggregation to a small table. It preserves the row count roughly (182 -> 183).
+   - Let's look at the target sample data again.
+   - Row 1: Jan weekday. Row 2: Jan weekend. Row 3: Feb weekday. Row 4: Feb weekday.
+   - The source has dates like 7/3/2015 (Friday), 7/19/2015 (Sunday).
+   - The target `month` and `daytype` are derived from the date.
+   - The target `hr` columns seem to be the same as the source `Hour` columns.
+   - Why 183 rows? Maybe the source has a date that maps to a new combination? Or maybe the "note" implies the evaluation input is different?
+   - Actually, look at the source sample: 12 rows. Target sample: 12 rows.
+   - The transformation is likely a **row-wise mapping**.
+   - `month` = `date` formatted as month name.
+   - `daytype` = "weekday" or "weekend".
+   - `hr1`-`hr24` = `Hour 1`-`Hour 24`.
+   - Why the row count difference 182 -> 183?
+   - Source distinct dates: 182.
+   - Target distinct `cst` (in prev examples) or date-like keys: 183.
+   - Perhaps one date in the full source data is duplicated or split? Or maybe the source has a leap year issue?
+   - Let's look at the source dates: "7/3/2015" to "12/31/2015".
+   - July 3 is a Friday. July 19 is a Sunday.
+   - The pattern is every 2 weeks.
+   - If I just map each row:
+     - Parse date.
+     - Extract month name.
+     - Extract day type.
+     - Rename columns.
+   - This will produce 182 rows. The target has 183.
+   - Is there a missing row in the source sample that exists in the full source? The prompt says "Source row count describes a training sample only".
+   - However, usually these transformations are deterministic row-wise or group-by.
+   - If it's row-wise, 182 -> 183 is weird.
+   - Let's check if the target has a specific row that isn't in the source.
+   - Or maybe the source has a date that is parsed differently?
+   - Let's look at the distinct values in target `month`: Jan, Feb, Mar, Apr, May, Jun, Jul.
+   - Source dates: Jul 2015 to Dec 2015.
+   - Wait, the source sample shows dates in 2015 (Jul-Dec).
+   - The target sample shows months Jan-Jul.
+   - This implies the **evaluation input** (or the full source) contains dates from Jan 2015 to Dec 2015?
+   - The source schema says `first_last_non_null`: "7/3/2015", "12/31/2015".
+   - The target schema says `first_last_non_null` for `month` is "January", "July".
+   - This suggests the target might be filtering or the source sample provided in the JSON is just a subset, and the *actual* transformation logic is applied to a source that has Jan-Jul data?
+   - No, the prompt says "Infer the transformation from this schema/sample block".
+   - If the source has Jul-Dec and target has Jan-Jul, there is a mismatch in the *sample* vs *schema* description or the data spans a different year in the real evaluation.
+   - However, the logic `month` and `daytype` is clearly derived from `date`.
+   - The column renaming is clear.
+   - I will implement the row-wise mapping. If the row count differs in the hidden evaluation, it might be due to the evaluation source having different rows (as noted: "Source row count describes a training sample only, not the evaluation input"). The transformation logic itself is what matters.
+   - One possibility: The target has 183 rows because the source has 183 rows in the evaluation set.
+   - I will proceed with the row-wise transformation.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    dates = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    
+    # Create the output dataframe
+    out = pd.DataFrame(index=source.index)
+    
+    # Derive month name
+    out['month'] = dates.dt.strftime('%B')
+    
+    # Derive daytype: weekday (Mon-Fri) or weekend (Sat-Sun)
+    # dayofweek: Monday=0, Sunday=6
+    out['daytype'] = dates.dt.dayofweek.apply(lambda x: 'weekend' if x >= 5 else 'weekday')
+    
+    # Rename and map the hourly columns
+    for h in range(1, 25):
+        out[f'hr{h}'] = source[f'Hour {h}']
+        
+    return out.reset_index(drop=True)
+```

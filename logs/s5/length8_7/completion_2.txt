@@ -1,0 +1,85 @@
+**Operator Plan:**
+
+1.  **Parse Dates**: Convert the `Date` column to datetime objects to extract the month.
+2.  **Melt/Longify**: Transform the wide table (columns 1-24) into a long format with columns `hour` and `value`. The column names (1-24) become the `hour` integer.
+3.  **Pivot/Aggregate**: Group by `hour` and `Month` (1-12). Calculate the mean of the `value` for each group.
+4.  **Reshape**: Pivot the aggregated data so that `Month` becomes columns (January-December) and `hour` becomes the index.
+5.  **Format**: Rename month columns to lowercase names. Reset index to make `hour` a column. Ensure column order matches the target.
+
+**Assumptions:**
+*   The target values represent the mean of the hourly readings for each month across all days in that month.
+*   The target sample shows a subset of rows (hours), but the target schema implies 24 rows (one per hour). The sample data in the prompt is just a selection. The transformation must produce all 24 hours.
+*   Months not present in the source data (e.g., Aug-Dec in the sample source which only has Jul-Dec 2013) will result in NaNs for those months, which matches the target schema where Aug-Dec are null in the sample (likely because the sample source didn't have enough data or the sample target is just illustrative of the structure, but the schema says distinct 0 for nulls in those months in the sample block provided, implying they might be empty or the sample is truncated. However, looking at the source `Date` range "7/3/2013" to "12/31/2013", it contains data for July, August, September, October, November, December. The target sample shows `null` for Aug-Dec. This is strange. Let's look closer.
+    *   Source has data for Jul, Aug, Sep, Oct, Nov, Dec.
+    *   Target sample shows `null` for Aug, Sep, Oct, Nov, Dec.
+    *   Target sample shows values for Jan-Jul.
+    *   This implies the target data might be from a *different* time period or the sample provided in the prompt is mismatched/truncated in a way that suggests the transformation logic is simply "Average by Hour and Month".
+    *   Wait, the source sample has dates in 2013. The target sample has values for Jan-Jul. The source *doesn't* have Jan-Jul 2013. It has Jul-Dec 2013.
+    *   The prompt says: "Source row count describes a training sample only, not the evaluation input."
+    *   The target schema has columns for all months.
+    *   The transformation must be general: Calculate average load profile by hour for each month.
+    *   If the source only has July-Dec, the Jan-June columns will be NaN. If the evaluation source has Jan-Jun, they will be populated.
+    *   The specific values in the target sample (e.g., Jan values) cannot come from the provided source sample (which lacks Jan data). This confirms we must infer the *general* transformation rule: **Average by Hour and Month**.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse Date and extract Month
+    source = source.copy()
+    source['dt'] = pd.to_datetime(source['Date'], format='%m/%d/%Y')
+    source['month'] = source['dt'].dt.month
+    source['month_name'] = source['dt'].dt.strftime('%B').str.lower()
+    
+    # 2. Melt the hourly columns (1-24)
+    # The columns are named "1" through "24"
+    melt_cols = [str(i) for i in range(1, 25)]
+    df_long = source.melt(
+        id_vars=['month', 'month_name'], 
+        value_vars=melt_cols, 
+        var_name='hour_str', 
+        value_name='value'
+    )
+    
+    # 3. Convert hour string to int
+    df_long['hour'] = df_long['hour_str'].astype(int)
+    
+    # 4. Group by hour and month, calculate mean
+    # We group by month_name to ensure we get the string names for columns
+    grouped = df_long.groupby(['hour', 'month_name'])['value'].mean()
+    
+    # 5. Pivot to wide format: rows=hour, cols=month_name, values=value
+    df_wide = grouped.unstack('month_name')
+    
+    # 6. Reset index to make 'hour' a column
+    df_wide = df_wide.reset_index()
+    
+    # 7. Ensure column order: hour, january, february, ...
+    month_cols = [
+        'january', 'february', 'march', 'april', 'may', 'june',
+        'july', 'august', 'september', 'october', 'november', 'december'
+    ]
+    
+    # Select only the months that exist in the data, plus hour
+    # But we need to ensure all month columns are present if they are expected in the schema, 
+    # even if NaN. The pivot might drop months with no data.
+    # Let's reindex the columns to match the target schema order.
+    
+    # First, ensure all month columns exist
+    for m in month_cols:
+        if m not in df_wide.columns:
+            df_wide[m] = np.nan
+            
+    # Sort/Select columns
+    final_cols = ['hour'] + month_cols
+    df_wide = df_wide[final_cols]
+    
+    # Sort by hour
+    df_wide = df_wide.sort_values('hour').reset_index(drop=True)
+    
+    # Ensure hour is int
+    df_wide['hour'] = df_wide['hour'].astype(int)
+    
+    return df_wide
+```

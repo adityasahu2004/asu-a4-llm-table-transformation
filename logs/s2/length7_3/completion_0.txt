@@ -1,0 +1,47 @@
+**Operator Plan:**
+1.  **Map Month Names**: Create a mapping from the source 3-letter month abbreviations (e.g., "Mar") to the target full month names (e.g., "September"). Note the shift in the calendar year context implied by the target sample (Source "Mar" -> Target "September", etc.). Specifically:
+    *   Mar -> September
+    *   Apr -> October
+    *   May -> November
+    *   Jun -> December
+    *   Jul -> January
+    *   Aug -> February
+2.  **Map Day Types**: Map "WD" to "weekday" and "WE" to "weekend".
+3.  **Rename Hour Columns**: Rename columns `1:00` through `24:00` to `hr1` through `hr24`.
+4.  **Construct Output**: Create a new DataFrame with the mapped `month`, `day`, and renamed hour columns.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Mapping for months based on the observed shift in the sample data
+    month_map = {
+        'Mar': 'September',
+        'Apr': 'October',
+        'May': 'November',
+        'Jun': 'December',
+        'Jul': 'January',
+        'Aug': 'February'
+    }
+    
+    # Mapping for day types
+    day_map = {
+        'WD': 'weekday',
+        'WE': 'weekend'
+    }
+    
+    # Create the output dataframe
+    out = pd.DataFrame()
+    
+    # Map month and day columns
+    out['month'] = source['Month'].map(month_map)
+    out['day'] = source['Daytype'].map(day_map)
+    
+    # Rename and select hour columns
+    for h in range(1, 25):
+        src_col = f'{h}:00'
+        tgt_col = f'hr{h}'
+        out[tgt_col] = source[src_col]
+        
+    return out
+```

@@ -1,0 +1,183 @@
+Operator plan:
+1. Map `Time Period` (month names) to `season` using standard meteorological seasons (Mar–May: Spring, Jun–Aug: Summer, Sep–Nov: Fall, Dec–Feb: Winter).
+2. Filter for rows where `Day Type` is 'All' to get the aggregate daily profiles, and `Average Demand Per Home With This End Use [kW]` is not null.
+3. Map `End Use` strings to the target column names. The target schema implies a specific aggregation or selection of end uses. Looking at the distinct values in source `End Use` (15 distinct) and target columns, we need to map:
+   - "Freezer" -> `refrigerator`
+   - "Water Heater" (likely present in full data) -> `water_heating`
+   - "HVAC" or similar -> `hvac`
+   - "Dishwasher" -> `dishwasher`
+   - Others like "Clothes Washer", "Clothes Dryer", "Lighting", etc., seem to map to integer 0 columns in the sample, or are aggregated. However, the target sample shows non-zero floats for `hvac`, `water_heating`, `refrigerator`, and `dishwasher`. The other columns are all 0.
+   - Wait, the target sample has `hvac`, `water_heating`, `refrigerator`, `dishwasher` as floats with distinct values. The others are `int64` with distinct value 0. This suggests that only specific end uses are being pivoted to float columns, and the rest are effectively zeroed out or not present in the 'All' day type aggregation in a way that contributes, OR the transformation specifically extracts these four and sets others to 0.
+   - Let's look closer at the source sample. It has "Freezer", "Clothes Dryer - Electric", "Clothes Washer", "Primary TV...", "Misc Metered", "Pool Pump", "Lighting", "Remaining Load".
+   - The target columns are: `hvac`, `water_heating`, `refrigerator`, `clothes_washer`, `clothes_dryer`, `dishwasher`, `cooking_range`, `pool_spa_pumps`, `interior_lighting`, `exterior_lighting`, `lighting`, `plug`, `pool_spa_heater`.
+   - The sample target data shows non-zero values only for `hvac`, `water_heating`, `refrigerator`, `dishwasher`. All others are 0.
+   - This implies that for the 'All' day type, only these specific end uses have non-null/non-zero values, or the transformation explicitly selects these. Given the source sample doesn't show 'All' day type rows with these specific end uses clearly (it shows mixed), I must assume the general transformation is:
+     a. Filter `Day Type` == 'All'.
+     b. Map `End Use` to target column names.
+     c. Pivot `Hour Ending` to columns? No, `hour` is a column in the target. So it's not a full pivot. It's a groupby or just a projection if the data is already unique per season/hour.
+     d. The target has 96 rows. 4 seasons * 24 hours = 96. This confirms one row per season/hour.
+     e. So, we group by `season` and `Hour Ending` (as `hour`), and aggregate the `Average Demand...` for each mapped end use.
+     f. Since the target columns for washer, dryer, etc. are 0, it's likely those end uses are either null/missing in the 'All' data or sum to 0. I will map all known end uses to the target columns. If an end use isn't in the target list, it's dropped. If it is, it goes to the corresponding column.
+     g. Mapping strategy:
+        - "Freezer" -> `refrigerator`
+        - "Water Heater" -> `water_heating`
+        - "HVAC" / "Central AC" / "Heat Pump" etc. -> `hvac`. (Need to infer from common names. "Remaining Load" is likely not HVAC. Usually HVAC is explicit. Let's assume standard names like "HVAC", "Air Conditioning", "Heating" map to `hvac`.)
+        - "Dishwasher" -> `dishwasher`
+        - "Clothes Washer" -> `clothes_washer`
+        - "Clothes Dryer" -> `clothes_dryer`
+        - "Cooking Range" / "Oven" -> `cooking_range`
+        - "Pool Pump" -> `pool_spa_pumps`
+        - "Lighting" -> `lighting` (or interior/exterior if specified)
+        - "TV", "Computer" -> `plug`
+        - "Pool Heater" -> `pool_spa_heater`
+     h. However, the target sample shows `hvac`, `water_heating`, `refrigerator`, `dishwasher` as the only non-zero floats. The integer columns are all 0. This strongly suggests that in the 'All' day type data, only these four categories have values, or the others are filtered out.
+     i. I will perform a pivot on `season` and `hour`, aggregating the demand for each mapped end use. I'll initialize all target columns to 0. Then fill in the mapped ones.
+
+   Refined Plan:
+   1. Create a mapping from `End Use` to target column names.
+   2. Filter source for `Day Type` == 'All' and non-null demand.
+   3. Map `Time Period` to `season`.
+   4. Rename `Hour Ending` to `hour`.
+   5. Map `End Use` to `target_col`.
+   6. Group by `season`, `hour`, `target_col`. Sum the demand.
+   7. Pivot to wide format with `target_col` as columns.
+   8. Reindex to ensure all target columns exist, filling missing with 0.
+   9. Cast columns to appropriate dtypes (float for the 4 active ones, int for the 0 ones? The schema says `clothes_washer` is `int64` with distinct 0. `hvac` is `float64`. I will let pandas infer or cast explicitly based on the target schema description).
+
+   Mapping details (inferred from common energy end-use categories):
+   - "Freezer" -> "refrigerator"
+   - "Refrigerator" -> "refrigerator"
+   - "Water Heater" -> "water_heating"
+   - "HVAC" -> "hvac"
+   - "Central Air" -> "hvac"
+   - "Heat Pump" -> "hvac"
+   - "Dishwasher" -> "dishwasher"
+   - "Clothes Washer" -> "clothes_washer"
+   - "Clothes Dryer" -> "clothes_dryer"
+   - "Cooking Range" -> "cooking_range"
+   - "Oven" -> "cooking_range"
+   - "Pool Pump" -> "pool_spa_pumps"
+   - "Spa Pump" -> "pool_spa_pumps"
+   - "Interior Lighting" -> "interior_lighting"
+   - "Exterior Lighting" -> "exterior_lighting"
+   - "Lighting" -> "lighting"
+   - "TV" -> "plug"
+   - "Computer" -> "plug"
+   - "Pool Heater" -> "pool_spa_heater"
+
+   Note: The source sample has "Remaining Load", "Misc Metered", "Primary TV...", "Primary Desktop Computer".
+   "Primary TV and Peripherals" -> "plug"
+   "Primary Desktop Computer" -> "plug"
+   "Misc Metered" -> likely "plug" or dropped? Given "plug" is a target column, it's a good candidate.
+
+   Let's check the target dtypes again.
+   `hvac`, `water_heating`, `refrigerator`, `dishwasher` are float64.
+   `clothes_washer`, `clothes_dryer`, `cooking_range`, `pool_spa_pumps`, `interior_lighting`, `exterior_lighting`, `lighting`, `plug`, `pool_spa_heater` are int64 (and distinct 0 in sample).
+
+   This suggests that for the 'All' day type, the integer columns are effectively 0. I will sum them up and cast to int if they are 0, or keep as float if not. But the schema says int64. I'll cast them to int.
+
+   Steps:
+   1. Define season map.
+   2. Filter `Day Type` == 'All'.
+   3. Drop rows with null demand.
+   4. Map `End Use` to target column.
+   5. Group by `season`, `hour`, `mapped_end_use`. Sum `Average Demand...`.
+   6. Pivot.
+   7. Fill NaNs with 0.
+   8. Ensure all target columns are present.
+   9. Cast specific columns to int64.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Map months to seasons
+    month_to_season = {
+        'January': 'Winter', 'February': 'Winter', 'March': 'Spring',
+        'April': 'Spring', 'May': 'Spring', 'June': 'Summer',
+        'July': 'Summer', 'August': 'Summer', 'September': 'Fall',
+        'October': 'Fall', 'November': 'Fall', 'December': 'Winter'
+    }
+    
+    # Filter for 'All' day type and non-null demand
+    df = source[source['Day Type'] == 'All'].copy()
+    df = df.dropna(subset=['Average Demand Per Home With This End Use [kW]'])
+    
+    # Map Time Period to season
+    df['season'] = df['Time Period'].map(month_to_season)
+    
+    # Rename Hour Ending to hour
+    df['hour'] = df['Hour Ending']
+    
+    # Map End Use to target columns
+    end_use_map = {
+        'Freezer': 'refrigerator',
+        'Refrigerator': 'refrigerator',
+        'Water Heater': 'water_heating',
+        'HVAC': 'hvac',
+        'Central Air': 'hvac',
+        'Heat Pump': 'hvac',
+        'Air Conditioning': 'hvac',
+        'Heating': 'hvac',
+        'Dishwasher': 'dishwasher',
+        'Clothes Washer': 'clothes_washer',
+        'Clothes Dryer - Electric': 'clothes_dryer',
+        'Clothes Dryer': 'clothes_dryer',
+        'Cooking Range': 'cooking_range',
+        'Oven': 'cooking_range',
+        'Pool Pump': 'pool_spa_pumps',
+        'Spa Pump': 'pool_spa_pumps',
+        'Interior Lighting': 'interior_lighting',
+        'Exterior Lighting': 'exterior_lighting',
+        'Lighting': 'lighting',
+        'Primary TV and Peripherals': 'plug',
+        'Primary Desktop Computer': 'plug',
+        'TV': 'plug',
+        'Computer': 'plug',
+        'Pool Heater': 'pool_spa_heater',
+        'Misc Metered': 'plug' # Assumption
+    }
+    
+    df['target_col'] = df['End Use'].map(end_use_map)
+    df = df.dropna(subset=['target_col']) # Drop unmapped end uses
+    
+    # Group and sum
+    agg_df = df.groupby(['season', 'hour', 'target_col'])['Average Demand Per Home With This End Use [kW]'].sum().reset_index()
+    
+    # Pivot
+    pivot_df = agg_df.pivot_table(index=['season', 'hour'], columns='target_col', values='Average Demand Per Home With This End Use [kW]', fill_value=0)
+    
+    # Define target columns
+    target_cols = [
+        'hvac', 'water_heating', 'refrigerator', 'clothes_washer', 'clothes_dryer',
+        'dishwasher', 'cooking_range', 'pool_spa_pumps', 'interior_lighting',
+        'exterior_lighting', 'lighting', 'plug', 'pool_spa_heater'
+    ]
+    
+    # Reindex to ensure all columns exist
+    pivot_df = pivot_df.reindex(columns=target_cols, fill_value=0)
+    
+    # Reset index
+    pivot_df = pivot_df.reset_index()
+    
+    # Cast integer columns
+    int_cols = ['clothes_washer', 'clothes_dryer', 'cooking_range', 'pool_spa_pumps', 
+                'interior_lighting', 'exterior_lighting', 'lighting', 'plug', 'pool_spa_heater']
+    for col in int_cols:
+        pivot_df[col] = pivot_df[col].astype(int)
+        
+    # Cast float columns
+    float_cols = ['hvac', 'water_heating', 'refrigerator', 'dishwasher']
+    for col in float_cols:
+        pivot_df[col] = pivot_df[col].astype(float)
+        
+    # Ensure hour is int
+    pivot_df['hour'] = pivot_df['hour'].astype(int)
+    
+    # Reorder columns to match target schema
+    final_cols = ['season', 'hour'] + target_cols
+    pivot_df = pivot_df[final_cols]
+    
+    return pivot_df
+```

@@ -1,0 +1,186 @@
+Operator plan:
+1. Derive `season` and `daytype` from the `SEASON DAY TYPE` column by splitting on space and mapping month names to seasons (June–August -> SUMMER, others -> SPRING) and day type suffixes (WD -> WEEKDAY, WE -> WEEKEND).
+2. Keep `hour` from the source `HOUR` column.
+3. Compute `temperature_range` as the difference between `T_MAX_3` and `T_MIN_3` (cast to int). Note: Source `T_MIN_3` and `T_MAX_3` have nulls, but target `temperature_range` has 0 nulls and distinct values match integer differences. Looking at the sample, `T_MIN_3` and `T_MAX_3` are not null for the rows shown in the source sample? Wait, the source sample shows nulls for `T_MIN_3` in some rows? No, the source sample shows `T_MIN_3` as 82.0, 88.0, etc. The schema says `T_MIN_3` has 65 nulls out of 300 rows. The target `temperature_range` has 0 nulls. This implies that for the target, we might be using a different source of truth or the nulls are handled. However, looking at the target sample, it only has 12 rows. The source has 300 rows. The target has 300 rows.
+   Let's look closer at the target columns. `constant` and `coefficient` are all null in the target. `low_end` and `high_end` are integers.
+   Let's map source columns to target:
+   - `season`: derived from `SEASON DAY TYPE`
+   - `daytype`: derived from `SEASON DAY TYPE`
+   - `hour`: from `HOUR`
+   - `temperature_range`: likely `T_MAX_3 - T_MIN_3` or similar. But `T_MIN_3` has nulls. `T_MAX_3` has nulls. `T_MIN_1` and `T_MAX_1` have 0 nulls. `T_MIN_2` and `T_MAX_2` have 0 nulls.
+   Let's check the values.
+   Source Row 1: `T_MIN_1`=68, `T_MAX_1`=75. Diff=7. `T_MIN_2`=75, `T_MAX_2`=82. Diff=7. `T_MIN_3`=82, `T_MAX_3`=91. Diff=9.
+   Target Row 1 (Source Row 1 in sample? No, target sample is different).
+   Let's look at the target sample data vs source sample data. They don't align directly by index because the target sample is just a subset or different rows.
+   However, notice `low_end` and `high_end` in target.
+   Target Row 1: `low_end`=9, `high_end`=62. `temperature_range`=53. 62-9=53.
+   Target Row 2: `low_end`=0, `high_end`=62. `temperature_range`=62. 62-0=62.
+   It seems `temperature_range` = `high_end` - `low_end`.
+   Where do `low_end` and `high_end` come from?
+   Source `T_MIN_1` (68), `T_MAX_1` (75).
+   Source `T_MIN_2` (75), `T_MAX_2` (82).
+   Source `T_MIN_3` (82), `T_MAX_3` (91).
+   
+   Let's look at the distinct values.
+   Target `low_end` distinct: 65.
+   Target `high_end` distinct: 51.
+   Source `T_MIN_1` distinct: 64. `T_MAX_1` distinct: 99.
+   Source `T_MIN_2` distinct: 99. `T_MAX_2` distinct: 95.
+   Source `T_MIN_3` distinct: 82. `T_MAX_3` distinct: 43.
+   
+   This doesn't match perfectly. Let's look at `PROFILE_MIN` and `PROFILE_MAX`. Distinct 13 each.
+   
+   Let's re-read the target schema.
+   `temperature_range`: int64, distinct 44.
+   `low_end`: int64, distinct 65.
+   `high_end`: int64, distinct 51.
+   
+   Let's look at Source `T_MIN_1` (distinct 64) and `T_MAX_1` (distinct 99).
+   Source `T_MIN_3` (distinct 82) and `T_MAX_3` (distinct 43).
+   
+   Maybe `low_end` is `T_MIN_1`? Distinct 64 vs 65. Close.
+   Maybe `high_end` is `T_MAX_3`? Distinct 43 vs 51. No.
+   
+   Let's look at the sample data values more carefully.
+   Source Row 1: `SEASON DAY TYPE`="June WE", `HOUR`=13. `T_MIN_1`=68, `T_MAX_1`=75. `T_MIN_2`=75, `T_MAX_2`=82. `T_MIN_3`=82, `T_MAX_3`=91.
+   Target Row corresponding to "June WE", 13?
+   The target sample doesn't have "June WE", 13.
+   Target Row 5: "SPRING", "WEEKDAY", 13. `temperature_range`=53, `low_end`=29, `high_end`=82.
+   
+   Let's find a row in the source that matches Target Row 5.
+   We need a "SPRING", "WEEKDAY", 13.
+   Spring months: March, April, May.
+   Source sample doesn't show Spring.
+   
+   However, we can infer the logic:
+   `season`: "June", "July", "August" -> "SUMMER". Others -> "SPRING".
+   `daytype`: "WD" -> "WEEKDAY", "WE" -> "WEEKEND".
+   `hour`: `HOUR`.
+   `temperature_range`: `high_end` - `low_end`.
+   `constant`: NaN.
+   `coefficient`: NaN.
+   
+   What are `low_end` and `high_end`?
+   In Target Row 5: `low_end`=29, `high_end`=82. Range 53.
+   In Source, we have `T_MIN_1`, `T_MIN_2`, `T_MIN_3` and `T_MAX_1`, `T_MAX_2`, `T_MAX_3`.
+   
+   Let's look at Target Row 1: `low_end`=9, `high_end`=62.
+   Target Row 8: `low_end`=40, `high_end`=78.
+   Target Row 12: `low_end`=67, `high_end`=89.
+   
+   Notice `T_MAX_1`, `T_MAX_2`, `T_MAX_3` in source are often multiples of 0.5 or integers.
+   `T_MIN_1` is int.
+   
+   Let's look at the distinct counts again.
+   Target `low_end`: 65.
+   Source `T_MIN_1`: 64.
+   Source `T_MIN_2`: 99.
+   Source `T_MIN_3`: 82.
+   
+   Target `high_end`: 51.
+   Source `T_MAX_1`: 99.
+   Source `T_MAX_2`: 95.
+   Source `T_MAX_3`: 43.
+   
+   This is tricky. Let's look at `PROFILE_MIN` and `PROFILE_MAX`. Distinct 13.
+   
+   Is it possible `low_end` and `high_end` are derived from `T_MIN_1` and `T_MAX_1`?
+   Or `T_MIN_3` and `T_MAX_3`?
+   
+   Let's look at the source sample Row 1: `T_MIN_1`=68, `T_MAX_1`=75.
+   If `low_end`=68 and `high_end`=75, range=7.
+   
+   Let's look at Source Row 12: `T_MIN_1`=19, `T_MAX_1`=35. Range 16.
+   
+   There is no direct obvious mapping from the sample data because the target sample rows are not present in the source sample rows (different dates/types).
+   
+   However, usually in these problems, `low_end` and `high_end` correspond to the min and max temperature bounds for the profile.
+   Given `T_MIN_1` has 64 distinct and `low_end` has 65, and `T_MAX_3` has 43 distinct and `high_end` has 51, it's not a direct 1-to-1 rename.
+   
+   Wait, look at `T_MIN_1` dtype `int64`. `low_end` dtype `int64`.
+   `T_MAX_3` dtype `float64`. `high_end` dtype `int64`.
+   
+   Let's check if `high_end` is `T_MAX_1`? 99 distinct vs 51. No.
+   
+   Let's look at `SEASON DAY TYPE`.
+   Maybe `low_end` and `high_end` are constant per `SEASON DAY TYPE`?
+   Distinct `SEASON DAY TYPE`: 13.
+   Distinct `low_end`: 65. (65/13 = 5).
+   Distinct `high_end`: 51. (51/13 is not integer).
+   
+   Let's look at `HOUR`. Distinct 24.
+   
+   What if `low_end` and `high_end` are `T_MIN_1` and `T_MAX_1`?
+   Let's assume the question implies a standard transformation where `constant` and `coefficient` are nullified, and the temperature bounds are taken from specific columns.
+   
+   Given the ambiguity, let's look at the column names `T_MIN_1`, `T_MAX_1`.
+   In many load models, `T_MIN` and `T_MAX` define the range.
+   
+   Let's try to match the distinct counts.
+   Source `T_MIN_1`: 64 distinct. Target `low_end`: 65 distinct.
+   Source `T_MAX_1`: 99 distinct. Target `high_end`: 51 distinct.
+   
+   Source `T_MIN_3`: 82 distinct.
+   Source `T_MAX_3`: 43 distinct.
+   
+   Maybe `high_end` is `T_MAX_3`? 43 vs 51.
+   
+   Let's look at the first target row: `low_end`=9, `high_end`=62.
+   Let's look at the last source row: `T_MIN_1`=19, `T_MAX_1`=35.
+   
+   There is a possibility that `low_end` and `high_end` are simply `T_MIN_1` and `T_MAX_1` cast to int. The distinct count difference might be due to the sample vs full dataset or slight data cleaning (e.g., rounding).
+   
+   However, `T_MAX_1` is float. `T_MAX_3` is float.
+   
+   Let's look at `temperature_range`. Distinct 44.
+   If it's `T_MAX_1 - T_MIN_1`, distinct count would be smaller.
+   
+   Let's assume `low_end` = `T_MIN_1` and `high_end` = `T_MAX_1` (rounded to int).
+   
+   Another possibility: `low_end` and `high_end` come from `T_MIN_3` and `T_MAX_3`?
+   
+   Let's look at the provided solution structure for similar problems. Often, it's a direct rename or simple arithmetic.
+   
+   `season`: Map "June", "July", "August" to "SUMMER", else "SPRING".
+   `daytype`: Map "WD" to "WEEKDAY", "WE" to "WEEKEND".
+   `hour`: `HOUR`.
+   `temperature_range`: `high_end` - `low_end`.
+   `constant`: NaN.
+   `coefficient`: NaN.
+   `low_end`: `T_MIN_1` (as int).
+   `high_end`: `T_MAX_1` (as int).
+   
+   Let's check if `T_MAX_1` makes sense as `high_end`.
+   Source `T_MAX_1` values: 75.0, 78.5, 76.0, 68.5, 59.5, 57.5, 44.5, 61.0, 38.0, 42.0, 32.5, 35.0.
+   Target `high_end` values: 62, 62, 61, 42, 82, 78, 78, 78, 73, 80, 83, 89.
+   
+   The values don't match the sample rows directly, but the ranges are similar.
+   
+   I will proceed with `low_end` = `T_MIN_1` and `high_end` = `T_MAX_1` (cast to int).
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Derive season and daytype
+    parts = source['SEASON DAY TYPE'].str.split(n=1, expand=True)
+    months = parts[0]
+    types = parts[1]
+    
+    season = months.apply(lambda m: 'SUMMER' if m in ['June', 'July', 'August'] else 'SPRING')
+    daytype = types.apply(lambda t: 'WEEKDAY' if t == 'WD' else 'WEEKEND')
+    
+    # Construct the output DataFrame
+    out = pd.DataFrame()
+    out['season'] = season
+    out['daytype'] = daytype
+    out['hour'] = source['HOUR'].astype('int64')
+    out['low_end'] = source['T_MIN_1'].astype('int64')
+    out['high_end'] = source['T_MAX_1'].astype('int64')
+    out['temperature_range'] = out['high_end'] - out['low_end']
+    out['constant'] = np.nan
+    out['coefficient'] = np.nan
+    
+    return out[['season', 'daytype', 'hour', 'temperature_range', 'constant', 'coefficient', 'low_end', 'high_end']]
+```

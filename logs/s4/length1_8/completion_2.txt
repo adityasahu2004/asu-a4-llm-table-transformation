@@ -1,0 +1,59 @@
+**Operator Plan:**
+1.  **Parse Datetime**: Convert the `date` column to a datetime object. The input format is `%m/%d/%Y %H:%M`.
+2.  **Extract Grouping Keys**:
+    *   `cst`: Format the datetime as `%a %m/%d/%Y` (e.g., "Sat 07/20/2019").
+    *   `Hour`: Extract the hour from the datetime. Note that the target columns are labeled 1:00 to 24:00. In standard 24-hour clock, 00:00 is midnight. Looking at the target column names `1:00` through `24:00`, and typical time-series aggregation, `1:00` usually corresponds to the 1st hour (00:00-00:59 or similar) or literally hour 1. However, looking at the source data `7/28/2019 4:50` and target distinct counts, it's likely an aggregation by day and hour. Let's look at the mapping.
+    *   Standard ISO hour: 0-23.
+    *   Target labels: 1:00, 2:00, ..., 24:00.
+    *   Usually, in these contexts, `1:00` represents the hour starting at 00:00 (Hour 1 of the day), `2:00` represents 01:00, ..., `24:00` represents 23:00. Or it could be 1:00 AM to 12:00 AM (midnight). Let's assume `1:00` corresponds to datetime hour 0, `2:00` to hour 1, ..., `24:00` to hour 23. This is a common "1-based" hour indexing for daily profiles.
+3.  **Aggregate**: Group by the formatted `cst` and the calculated hour index. Since the target has one row per day (distinct `cst` count matches distinct days in source roughly, though source has 74k rows and target 521, implying ~144 days * 24 hours = 3456 rows? No, target rows is 521. Source rows 74848. 74848 / 521 ≈ 143. This suggests the source might not have 24 points per day, or the aggregation is different. Wait, 521 days * 24 hours = 12,504. The target has 521 rows. This implies the target is **daily averages** or **daily sums**?
+    *   Let's re-read the target schema. Target has columns `1:00` through `24:00`. And 521 rows.
+    *   If the target had hourly data, it would have ~12,000 rows for 521 days.
+    *   Since it has 521 rows, and columns for each hour, this looks like a **pivot** where each row is a day, and columns are the aggregated values for each hour of that day.
+    *   But wait, if I pivot, I get one row per day. The values in the cells must be aggregates of the source data for that specific hour of that specific day.
+    *   Source has multiple readings per hour? `7/28/2019 4:50`.
+    *   So, for each `cst` (Day) and Hour, we need to aggregate the `cerc_logger_1` values. The most common aggregation for sensor data is `mean`.
+4.  **Pivot/Reshape**:
+    *   Create a column `HourLabel` mapping datetime hour `h` to string `f"{h+1}:00"`.
+    *   Group by `cst` and `HourLabel`.
+    *   Calculate the mean of `cerc_logger_1`.
+    *   Pivot the table so `cst` is the index, `HourLabel` are the columns, and values are the means.
+    *   Reindex columns to ensure order 1:00 to 24:00.
+    *   Reset index.
+
+**Assumptions:**
+*   `1:00` corresponds to datetime hour 0 (00:00-00:59).
+*   `24:00` corresponds to datetime hour 23 (23:00-23:59).
+*   Aggregation function is `mean`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    source = source.copy()
+    source['dt'] = pd.to_datetime(source['date'], format='%m/%d/%Y %H:%M')
+    
+    # Create the 'cst' column for grouping
+    source['cst'] = source['dt'].dt.strftime('%a %m/%d/%Y')
+    
+    # Create hour labels 1:00 to 24:00 based on 0-23 hours
+    # Hour 0 -> 1:00, Hour 1 -> 2:00, ..., Hour 23 -> 24:00
+    source['hour_label'] = source['dt'].dt.hour.apply(lambda h: f"{h + 1}:00")
+    
+    # Aggregate by day and hour
+    grouped = source.groupby(['cst', 'hour_label'])['cerc_logger_1'].mean().reset_index()
+    
+    # Pivot to wide format
+    target = grouped.pivot(index='cst', columns='hour_label', values='cerc_logger_1')
+    
+    # Ensure column order is 1:00 to 24:00
+    ordered_cols = [f"{h}:00" for h in range(1, 25)]
+    target = target[ordered_cols]
+    
+    # Reset index to make 'cst' a column
+    target = target.reset_index()
+    
+    return target
+```

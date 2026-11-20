@@ -1,0 +1,179 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `date` string column (format `m/d/yyyy H:MM`) into a pandas datetime object.
+2.  **Extract Metadata**:
+    *   Create `dt_strata` by formatting the date as `MM/dd/yy`.
+    *   Create `dow` by extracting the ISO day of the week (Monday=1, Sunday=7).
+3.  **Reshape Data**:
+    *   Extract the hour from the parsed datetime to serve as the target column index (1-24). Note: Hour 0 corresponds to `pct_hourly_2400` in the target schema (24-hour clock representation where 00:xx is hour 24). Hours 1-23 map directly to `pct_hourly_0100` through `pct_hourly_2300`.
+    *   Group by the date (or `dt_strata`/`dow`) to aggregate rows into daily profiles.
+    *   Since the source has multiple rows per day (likely irregular intervals), and the target has exactly one row per day with specific values, we need to map the source `zone_016` values to the correct hourly buckets. The sample shows 12 rows per day in the source, but the target has 24 hours. Looking at the sample data:
+        *   Source `1/2/2018 0:11` -> Target `pct_hourly_2400` (Hour 0 -> 24)
+        *   Source `1/2/2018 2:22` -> Target `pct_hourly_0200`? No, wait. The target row for `01/02/18` has `746.9` in `pct_hourly_2400` and `0.0` elsewhere. The source row `1/2/2018 0:11` has value `67.9`. This doesn't match directly.
+        *   Let's look at `01/01/18` (Target Row 2). It has non-zero values for all hours 1-24. The source only has 12 rows for `1/2/2018` and 1 row for `1/3/2018` in the sample snippet. The source sample is likely incomplete or represents a different aggregation.
+        *   However, usually in these problems, if the source has sparse time series data and the target has dense hourly data, it implies an interpolation or a specific mapping. But looking closely at the target values for `01/01/18`: `4073.5, 4066.4...`. These look like cumulative or specific calculated values, not just the raw `zone_016` (which is ~67).
+        *   Wait, look at the distinct values in target `pct_hourly_2400`: `746.9` and `4074.0`.
+        *   Look at source `zone_016`: `67.9, 67.6...`.
+        *   There is a significant transformation happening to the values. `67.9 * 60 = 4074`. `67.9 * 11 = 746.9`.
+        *   Let's check `1/2/2018 0:11`. Value `67.9`. Target `01/02/18` has `746.9` in `pct_hourly_2400`. `67.9 * 11 = 746.9`.
+        *   Let's check `1/2/2018 2:22`. Value `67.9`. If this mapped to hour 2, would it be `67.9 * 22 = 1493.8`? The target for `01/02/18` has `0.0` for hour 2.
+        *   The target `01/01/18` has values like `4073.5`. `67.9 * 60 = 4074`.
+        *   It seems the transformation involves multiplying the value by the minutes component of the timestamp? Or perhaps the values in the target are derived from a different logic.
+        *   Actually, let's look at the source rows again.
+            *   `1/2/2018 0:11` -> `67.9`. Target `01/02/18` `pct_hourly_2400` = `746.9`. `67.9 * 11 = 746.9`.
+            *   `1/2/2018 2:22` -> `67.9`.
+            *   `1/2/2018 4:34` -> `67.6`. `67.6 * 34 = 2298.4`.
+        *   The target `01/02/18` has `0.0` for all hours except 24. This suggests that for `01/02/18`, only the data from `0:11` was used, or the other rows were null/dropped? But the source has data.
+        *   Let's look at `01/01/18` in the target. It has data for all hours. The source sample *does not* show rows for `1/1/2018`. It starts at `1/2/2018`. The note says "Source row count describes a training sample only". The evaluation input will have the full data.
+        *   Hypothesis: The target value for a specific hour `H` is `source_value * minutes_of_the_day`? No.
+        *   Hypothesis: The target value is `source_value * minutes_component_of_timestamp`?
+            *   For `01/01/18` `pct_hourly_0100` = `4073.5`. If source had a row at `1:00`, `val * 0 = 0`. If `1:59`, `val * 59`.
+            *   Let's assume the standard pattern for these "hourly" targets from sparse data is often just taking the value if it exists, or interpolating. But the magnitude difference (67 vs 4000) is huge.
+            *   `4073.5 / 60 = 67.891`.
+            *   `4066.4 / 60 = 67.77`.
+            *   It seems the target values are `source_value * 60`?
+            *   But for `01/02/18` `pct_hourly_2400`, value is `746.9`. `746.9 / 11 = 67.9`.
+            *   So, `Target_Value = Source_Value * Minutes_Part_of_Time`?
+            *   Let's check `01/01/18` `pct_hourly_0100`. Value `4073.5`. `4073.5 / 60 = 67.89`. This implies the source row for Hour 1 had minutes `60`? Or maybe it's `Source_Value * 60` for full hours?
+            *   Let's look at the time `0:11`. Minutes = 11. `67.9 * 11 = 746.9`. Matches.
+            *   Let's assume the source data for `01/01/18` had timestamps like `1:60`? No, max minutes 59.
+            *   Maybe the timestamp `1:00` maps to 60? Or maybe the logic is `Value * (Hour * 60 + Minute)`? No.
+            *   Let's look at `pct_hourly_2400` for `01/01/18`: `4074.0`. `4074 / 67.9 = 60`.
+            *   So, it seems `Target = Source_Value * Minutes`.
+            *   If the source time was `0:11`, `67.9 * 11 = 746.9`.
+            *   If the source time was `0:00` (for hour 24), `67.9 * 0 = 0`. But the target is `4074`.
+            *   Perhaps the time `0:00` is treated as `0:60`? Or `24:00`?
+            *   Let's assume the transformation is:
+                1. Parse date.
+                2. Extract Hour and Minute.
+                3. Map Hour 0 to Column 24, Hour 1-23 to Columns 1-23.
+                4. Calculate `Value = zone_016 * Minute`.
+                5. If Minute is 0, use 60? (Since `4074 / 67.9 = 60`).
+                6. Aggregate by Date. Since there might be multiple rows per hour? The sample shows one row per ~2 hours. The target has one row per day.
+                7. If multiple rows map to the same target column, how are they combined? The target has distinct values per column.
+                8. Actually, looking at the target `01/01/18`, all columns have non-zero values. The source sample doesn't show `01/01/18`.
+                9. However, for `01/02/18`, only `pct_hourly_2400` is non-zero. The source has `0:11` (Hour 0 -> Col 24). The other source rows are `2:22` (Col 2), `4:34` (Col 4), etc. Why are they 0 in the target?
+                10. Maybe the target only captures data if the minute is not 0? No, `0:11` is captured.
+                11. Maybe the target `01/02/18` row in the sample is just showing *one* of the rows, and the other hours are 0 because there was no data? But the source *has* data.
+                12. Wait, look at the target `dt_strata` distinct values: `01/02/18` and `01/01/18`.
+                13. Look at the target `pct_hourly_2400` distinct values: `746.9` and `4074.0`.
+                14. Look at the target `pct_hourly_0100` distinct values: `0.0` and `4073.5`.
+                15. It seems the target is constructed such that if a source row exists for that hour, it is transformed. If not, it is 0?
+                16. But why is `2:22` (Source) not represented in Target `01/02/18` `pct_hourly_0200`? It is `0.0`.
+                17. Maybe the transformation is `Value * Minute`, and if the result is 0 (because minute is 0), it uses 60?
+                18. For `2:22`, `67.9 * 22 = 1493.8`. Why is it 0?
+                19. Perhaps the target sample provided is misleading or I am misinterpreting the "distinct_values".
+                20. Let's look at the `dow`. `01/02/18` is Monday (2). `01/01/18` is Sunday (1).
+                21. Let's reconsider the `01/02/18` target row. It has `746.9` in col 24. All others 0.
+                22. Source `01/02/18` has rows at 0:11, 2:22, 4:34...
+                23. If the logic was `Value * Minute`, then `2:22` -> `1493.8`.
+                24. Is it possible that `pct_hourly_0200` corresponds to the *second* hour of the day, and the source data is aggregated differently?
+                25. Let's look at the column names again. `pct_hourly_0100` to `pct_hourly_2400`.
+                26. What if the transformation is simply:
+                    - Parse date.
+                    - `dt_strata` = `MM/dd/yy`.
+                    - `dow` = ISO day.
+                    - For each row in source:
+                        - `h = dt.hour`. If `h == 0`, `target_col = 24`. Else `target_col = h`.
+                        - `m = dt.minute`.
+                        - `val = zone_016 * m`. If `m == 0`, `val = zone_016 * 60`.
+                        - Place `val` in the target column.
+                    - Aggregate by `dt_strata`. If multiple values for a column, sum? Mean?
+                    - Why is `01/02/18` `pct_hourly_0200` zero?
+                    - Maybe the source data for `01/02/18` *only* had the `0:11` row in the *actual* evaluation set that produced this target? The note says "Source row count describes a training sample only". The sample data provided in the JSON might not be the exact data used to generate the target sample. The target sample shows `01/02/18` with only one non-zero value. This implies that for that specific day in the target's source data, only one measurement existed or was valid.
+                    - I will assume the transformation is:
+                        1. Parse `date`.
+                        2. `dt_strata` = `MM/dd/yy`.
+                        3. `dow` = ISO day of week.
+                        4. `hour_idx` = `hour` if `hour > 0` else `24`.
+                        5. `minute` = `minute`.
+                        6. `value` = `zone_016 * (minute if minute > 0 else 60)`.
+                        7. Pivot/Aggregate by `dt_strata`. Since the target has one row per day, and source has multiple, we likely `sum` or `max` or `first`. Given the "percentage" name, maybe it's a sum? Or maybe the source data is sparse and each day only has one valid reading per hour bucket?
+                        8. Initialize all hourly columns to 0.
+                        9. Fill in the calculated values.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    # Format: "1/2/2018 0:11"
+    dt = pd.to_datetime(source['date'], format='%m/%d/%Y %H:%M')
+    
+    # Create dt_strata: MM/dd/yy
+    dt_strata = dt.dt.strftime('%m/%d/%y')
+    
+    # Create dow: ISO day of week (Monday=1, Sunday=7)
+    dow = dt.dt.isocalendar().day.astype(int)
+    
+    # Prepare hourly columns
+    # Source hour 0 -> Target column 24
+    # Source hour 1-23 -> Target column 1-23
+    # Source hour 24? (Unlikely in 24h format, but if exists, map to 24)
+    
+    # Calculate the value: zone_016 * minutes (if minutes==0, use 60)
+    minutes = dt.dt.minute
+    # Replace 0 minutes with 60 for the calculation factor
+    factor = minutes.replace(0, 60)
+    value = source['zone_016'] * factor
+    
+    # Determine target hour column index
+    # Hour 0 maps to 24, others map to themselves
+    hours = dt.dt.hour
+    target_hour = hours.where(hours != 0, 24)
+    
+    # Create a DataFrame for the hourly values
+    # We need to pivot this data so that each row in source becomes a contribution to the daily aggregate
+    # Construct a series with MultiIndex (dt_strata, target_hour)
+    index = pd.MultiIndex.from_arrays([dt_strata, target_hour.astype(str).str.zfill(2).map(lambda x: f'pct_hourly_{x}00')])
+    # Actually, let's keep the hour number for now to map to columns
+    
+    # Let's create a temporary dataframe with dt_strata, dow, and the value mapped to the correct column name
+    # We will group by dt_strata and sum (or aggregate) the values
+    
+    # Map hour to column name
+    def get_col_name(h):
+        return f'pct_hourly_{h:02d}00'
+        
+    col_names = target_hour.apply(get_col_name)
+    
+    # Create a DataFrame with dt_strata, dow, and one-hot encoded values?
+    # No, we can use pd.crosstab or pivot_table
+    
+    # Create a series of values indexed by dt_strata and column name
+    val_series = pd.Series(value.values, index=pd.MultiIndex.from_arrays([dt_strata, col_names]))
+    
+    # Pivot to get one row per dt_strata
+    # Since there might be multiple entries for the same hour on the same day, we sum them.
+    # Initialize with 0s for missing hours
+    hourly_df = val_series.unstack(fill_value=0)
+    
+    # Ensure all 24 columns exist
+    all_cols = [f'pct_hourly_{h:02d}00' for h in range(1, 25)]
+    for col in all_cols:
+        if col not in hourly_df.columns:
+            hourly_df[col] = 0
+            
+    # Sort columns
+    hourly_df = hourly_df[all_cols]
+    
+    # Add dt_strata and dow
+    # Dow is constant per day? Yes. Take the first one.
+    dow_series = pd.Series(dow.values, index=dt_strata).groupby(dt_strata).first()
+    
+    # Combine
+    result = hourly_df.reset_index()
+    result.rename(columns={'index': 'dt_strata'}, inplace=True)
+    
+    # Add dow
+    result['dow'] = result['dt_strata'].map(dow_series)
+    
+    # Reorder columns
+    cols = ['dt_strata', 'dow'] + all_cols
+    result = result[cols]
+    
+    # Add pct_hourly_2500
+    result['pct_hourly_2500'] = 0
+    
+    return result
+```

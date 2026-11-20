@@ -1,0 +1,107 @@
+{
+  "case": "length10_2",
+  "length": 10,
+  "strategy": "s1",
+  "model": "qwen36-27b",
+  "is_demo": false,
+  "parameters": {
+    "output": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment",
+    "model": "qwen36-27b",
+    "base_url": "https://openai.rc.asu.edu/v1",
+    "max_tokens": 6000,
+    "reasoning_effort": "none",
+    "k": 5,
+    "sample_rows": 12,
+    "timeout": 120,
+    "api_timeout": 3600,
+    "replay_only": true,
+    "strategy": "s1",
+    "python": "3.14.4 (main, Apr  7 2026, 13:13:20) [Clang 21.0.0 (clang-2100.0.123.102)]",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "pandas": "3.1.1",
+    "held_out": [
+      "length1_1",
+      "length1_2",
+      "length1_3",
+      "length2_1",
+      "length3_1"
+    ],
+    "benchmark": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split"
+  },
+  "prompt_path": "logs/s1/length10_2/prompt.json",
+  "completion_path": "logs/s1/length10_2/response.json",
+  "execution": {
+    "status": "ok",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+    "seconds": 9.657690499996534,
+    "shape": [
+      137707,
+      14
+    ],
+    "fingerprint": "9484c9ececfbc74a4aa816fd31fa9fae35cfe0601c247de500a820773fe73670"
+  },
+  "autopipeline": {
+    "accuracy": 0.0,
+    "is_correct": false,
+    "similarities": {},
+    "info": []
+  },
+  "hard_match": {
+    "accuracy": 0.3247137556032529,
+    "is_correct": false,
+    "similarities": [
+      1.0,
+      0.0,
+      0.14623076532057194,
+      0.0558722505028793,
+      0.9056402361535725,
+      0.001924375667177413,
+      0.9056838069233953,
+      0.0,
+      0.023629880833944534,
+      0.001967946437000298,
+      0.501811817845135,
+      0.0032314987618639575,
+      0.0,
+      1.0
+    ],
+    "info": [
+      "datetime",
+      "pool_spa_heater"
+    ]
+  },
+  "hard_match_provenance": "course-provided hard_match.py and utils.py",
+  "exact_schema": true,
+  "generation": {
+    "request_hash": "1c2e2b01a0ce02c3c9c7ab34f9747354d53cae3f6e630dd786f80d1178c187d9",
+    "usage": {
+      "completion_tokens": 4270,
+      "prompt_tokens": 24381,
+      "total_tokens": 28651,
+      "completion_tokens_details": null,
+      "prompt_tokens_details": {
+        "audio_tokens": null,
+        "cache_write_tokens": null,
+        "cached_tokens": 0,
+        "image_tokens": null,
+        "text_tokens": null,
+        "created_cache_tokens": 24192,
+        "multimodal_tokens": null
+      },
+      "co2_g": 0.977517,
+      "energy_wh": 2.900644
+    },
+    "latency_seconds": 60.92881741599922,
+    "api_attempts": 1,
+    "cached": true,
+    "candidate_count": 1,
+    "api_timeout_seconds": 600,
+    "reasoning_effort_header": "none",
+    "selected_index": 0,
+    "clusters": {}
+  },
+  "wall_seconds": 74.22968237500027,
+  "replay_wall_seconds": 12.818523000001733
+}

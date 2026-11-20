@@ -1,0 +1,59 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `Date` column (format `%a %m/%d/%Y`) to datetime objects to extract the month.
+2.  **Melt/Unpivot**: Transform the 24 hourly columns (`1:00` through `24:00:00`) from wide format to long format. The hour index is derived from the column name (1-24).
+3.  **Group and Aggregate**: Group the data by the extracted `hour` and the `month` (1-12). Calculate the mean of the hourly values for each group.
+4.  **Pivot/Reshape**: Pivot the aggregated data so that each month becomes a column (named `january` through `december`) and each hour becomes a row index.
+5.  **Format Output**: Rename the index to `hour`, ensure column names match the target lowercase month names, and reset the index to produce the final DataFrame.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse Date to extract month
+    dt = pd.to_datetime(source['Date'], format='%a %m/%d/%Y')
+    month_num = dt.dt.month
+    
+    # 2. Identify hourly columns and melt
+    # Columns are '1:00', '2:00', ..., '23:00', '24:00:00'
+    hour_cols = [f'{h}:00' if h < 24 else '24:00:00' for h in range(1, 25)]
+    
+    # Create a long format dataframe
+    # We need to keep the month info associated with each row
+    long_df = pd.DataFrame()
+    long_df['month'] = month_num
+    
+    for i, col in enumerate(hour_cols, start=1):
+        long_df[f'val_h{i}'] = source[col]
+        
+    # Melt the hourly values
+    melted = long_df.melt(id_vars=['month'], var_name='hour_col', value_name='value')
+    
+    # Extract hour integer from hour_col (e.g., 'val_h1' -> 1)
+    melted['hour'] = melted['hour_col'].str.extract(r'(\d+)').astype(int)
+    
+    # 3. Group by hour and month, calculate mean
+    aggregated = melted.groupby(['hour', 'month'])['value'].mean().reset_index()
+    
+    # 4. Pivot so months are columns and hours are rows
+    # Map month numbers to target column names
+    month_names = {
+        1: 'january', 2: 'february', 3: 'march', 4: 'april',
+        5: 'may', 6: 'june', 7: 'july', 8: 'august',
+        9: 'september', 10: 'october', 11: 'november', 12: 'december'
+    }
+    
+    aggregated['month_name'] = aggregated['month'].map(month_names)
+    
+    pivoted = aggregated.pivot(index='hour', columns='month_name', values='value')
+    
+    # 5. Format Output
+    pivoted = pivoted.reset_index()
+    pivoted.rename(columns={'hour': 'hour'}, inplace=True)
+    
+    # Ensure all month columns exist and are in order
+    ordered_months = [month_names[i] for i in range(1, 13)]
+    pivoted = pivoted.reindex(columns=['hour'] + ordered_months)
+    
+    return pivoted
+```

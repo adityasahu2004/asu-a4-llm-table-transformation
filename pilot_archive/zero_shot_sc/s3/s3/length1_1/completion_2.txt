@@ -1,0 +1,78 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `DT_STRATA` column from string format (`M/D/YYYY`) to pandas datetime objects.
+2.  **Format Date Column**: Create a new column `cst` by formatting the parsed dates into the target string format `Day DD/MM/YYYY` (e.g., "Fri 01/01/2016"). The day of the week is the three-letter abbreviation, and the date components are zero-padded.
+3.  **Rename Hourly Columns**: Map the source columns `PCT_HOURLY_0100` through `PCT_HOURLY_2400` to the target column names `1:00` through `24:00`.
+    *   Source column pattern: `PCT_HOURLY_HH00`
+    *   Target column pattern: `HH:00` (where HH is the hour, 1-24).
+    *   Note: The source has `PCT_HOURLY_2500` which is not present in the target schema, so it is dropped.
+4.  **Select and Order Columns**: Construct the final DataFrame with columns in the exact order specified by the target schema: `cst` followed by the hourly columns `1:00` to `24:00`.
+
+### Assumptions
+*   The date format in `DT_STRATA` is consistently `M/D/YYYY` or `MM/DD/YYYY`.
+*   The mapping from `PCT_HOURLY_HH00` to `HH:00` is strictly based on the numeric hour extracted from the source column name.
+*   The row count and order are preserved (1-to-1 mapping), as indicated by the identical row counts in source and target.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    """
+    Transforms the source DataFrame to match the target schema.
+    
+    Operations:
+    1. Parses DT_STRATA to datetime.
+    2. Formats date to 'Day MM/DD/YYYY' string for column 'cst'.
+    3. Renames PCT_HOURLY_XX00 columns to XX:00 format.
+    4. Selects and orders columns as per target schema.
+    """
+    
+    # 1. Parse the date column
+    # The format M/D/YYYY can be handled by pandas to_datetime
+    df = source.copy()
+    df['parsed_date'] = pd.to_datetime(df['DT_STRATA'], format='%m/%d/%Y')
+    
+    # 2. Format the date string for the 'cst' column
+    # Target format: "Fri 01/01/2016" -> %a %m/%d/%Y
+    # Note: %a gives locale's abbreviated weekday name (e.g., Fri, Sun)
+    df['cst'] = df['parsed_date'].dt.strftime('%a %m/%d/%Y')
+    
+    # 3. Rename hourly columns
+    # Source: PCT_HOURLY_0100, ..., PCT_HOURLY_2400
+    # Target: 1:00, ..., 24:00
+    
+    rename_map = {}
+    for col in df.columns:
+        if col.startswith('PCT_HOURLY_') and col.endswith('00'):
+            # Extract the middle part, e.g., '01' from 'PCT_HOURLY_0100'
+            hour_str = col.replace('PCT_HOURLY_', '').replace('00', '')
+            # Convert to int to remove leading zeros for the key, but we need to format it
+            # Actually, the target is "1:00", "10:00". 
+            # Source "PCT_HOURLY_0100" -> Hour 1 -> "1:00"
+            # Source "PCT_HOURLY_1000" -> Hour 10 -> "10:00"
+            try:
+                hour_int = int(hour_str)
+                new_col_name = f"{hour_int}:00"
+                rename_map[col] = new_col_name
+            except ValueError:
+                pass
+                
+    df.rename(columns=rename_map, inplace=True)
+    
+    # 4. Select and order columns
+    # Target columns: cst, 1:00, 2:00, ..., 24:00
+    target_cols = ['cst'] + [f"{h}:00" for h in range(1, 25)]
+    
+    # Filter to ensure only requested columns are present and in order
+    # Check if columns exist to avoid errors if data is missing
+    existing_target_cols = [col for col in target_cols if col in df.columns]
+    
+    result = df[existing_target_cols]
+    
+    # Clean up temporary column
+    if 'parsed_date' in result.columns:
+        result.drop(columns=['parsed_date'], inplace=True)
+        
+    return result
+```

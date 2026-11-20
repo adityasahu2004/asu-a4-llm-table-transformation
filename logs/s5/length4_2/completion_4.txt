@@ -1,0 +1,165 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `date` column from `M/D/YYYY` format to a pandas datetime object.
+2.  **Format Date**: Convert the parsed datetime to the target string format `YYYY-MM-DD HH:MM:SS`.
+3.  **Map Hours**: Map the source columns `value1` through `value24` to the target columns `1:00 AM` through `12:00 PM`.
+    *   `value1` (Hour 1) -> `1:00 AM`
+    *   ...
+    *   `value11` (Hour 11) -> `11:00 AM`
+    *   `value12` (Hour 12) -> `12:00 PM` (Note: Target schema lists `12:00 AM` then `1:00 PM`... wait, let's look closer at the target sample order vs standard time).
+    *   Standard 24-hour cycle usually starts at 00:00 (Midnight).
+    *   Source `value1` is typically 01:00 (1 AM) in these datasets if it's "Hour 1". Let's check the target sample order.
+    *   Target Columns: `1:00 AM`, `2:00 AM`, ..., `11:00 AM`, `12:00 AM`, `1:00 PM`, ..., `11:00 PM`, `12:00 PM`.
+    *   Wait, the target column order in the schema is: `1:00 AM` ... `11:00 AM`, `12:00 AM`, `1:00 PM` ... `11:00 PM`, `12:00 PM`. This is a non-chronological order or a specific shift.
+    *   Let's check the data values. Source `value1` for `7/3/2011` is `1.0243`. Target `1:00 AM` for `2011-07-02` (which corresponds to source `7/3/2011`? No, source `7/3/2011` is distinct. Let's look at the first row of target: `2011-01-01`. Source doesn't have Jan 1.
+    *   Let's look at the mapping logic based on indices.
+    *   Source `value1` corresponds to the 1st hour. Target `1:00 AM` is the 1st hour column.
+    *   Source `value12` corresponds to the 12th hour. Target `12:00 AM` is the 12th column in the list?
+    *   Target Columns List:
+        1.  `1:00 AM`
+        2.  `2:00 AM`
+        3.  `3:00 AM`
+        4.  `4:00 AM`
+        5.  `5:00 AM`
+        6.  `6:00 AM`
+        7.  `7:00 AM`
+        8.  `8:00 AM`
+        9.  `9:00 AM`
+        10. `10:00 AM`
+        11. `11:00 AM`
+        12. `12:00 AM`  <-- This is likely Noon (12:00 PM) or Midnight? In 12-hour clocks, 12:00 AM is Midnight. 12:00 PM is Noon.
+        13. `1:00 PM`
+        ...
+        24. `12:00 PM` <-- This is likely Noon? Or Midnight?
+    *   Let's look at the sample data values to deduce the mapping.
+    *   Source `7/3/2011`: `value1`=1.02, `value12`=1.53, `value13`=1.67.
+    *   Target `2011-07-02`: `1:00 AM`=0.83, `12:00 AM`=1.61, `1:00 PM`=1.71.
+    *   Wait, the dates don't match directly between source sample and target sample. The source sample starts `7/3/2011`. The target sample starts `2011-01-01`. The target note says "Source row count describes a training sample only". The target sample contains dates *not* in the source sample. This implies the transformation is generic.
+    *   However, we must infer the column mapping.
+    *   Standard interpretation: `value1` = 01:00 (1 AM). `value12` = 12:00 (Noon/PM or Midnight/AM?). `value13` = 13:00 (1 PM).
+    *   If `value1` is 1 AM, then `value12` is 12 PM (Noon). `value13` is 1 PM.
+    *   Let's look at the target column names again: `1:00 AM` ... `11:00 AM`, `12:00 AM`, `1:00 PM` ... `11:00 PM`, `12:00 PM`.
+    *   This naming is weird. `12:00 AM` is midnight. `12:00 PM` is noon.
+    *   If `value1` (1 AM) maps to `1:00 AM`, then:
+        *   `value12` (12:00 Noon) should map to `12:00 PM`.
+        *   `value13` (1:00 PM) should map to `1:00 PM`.
+    *   Let's check the target column list order again:
+        *   Index 11 (0-based 10): `11:00 AM`
+        *   Index 12 (0-based 11): `12:00 AM`
+        *   Index 13 (0-based 12): `1:00 PM`
+    *   If `value12` (Noon) maps to `12:00 PM`, where is `12:00 PM` in the target list? It's the last column (Index 23).
+    *   If `value12` maps to `12:00 AM` (Midnight), that implies `value1` is not 1 AM.
+    *   Alternative: `value1` is 00:00 (Midnight).
+        *   `value1` -> `12:00 AM` (Midnight).
+        *   `value2` -> `1:00 AM`.
+    *   Let's check the target column order if `value1` is Midnight:
+        *   Target Col 1: `1:00 AM`. This would be `value2`.
+        *   Target Col 2: `2:00 AM`. This would be `value3`.
+        *   ...
+        *   Target Col 11: `11:00 AM`. This would be `value12`.
+        *   Target Col 12: `12:00 AM`. This would be `value13`? No, `value13` is 1 PM.
+    *   Let's look at the target columns again carefully.
+        `1:00 AM`, `2:00 AM`, `3:00 AM`, `4:00 AM`, `5:00 AM`, `6:00 AM`, `7:00 AM`, `8:00 AM`, `9:00 AM`, `10:00 AM`, `11:00 AM`, `12:00 AM`, `1:00 PM`, `2:00 PM`, `3:00 PM`, `4:00 PM`, `5:00 PM`, `6:00 PM`, `7:00 PM`, `8:00 PM`, `9:00 PM`, `10:00 PM`, `11:00 PM`, `12:00 PM`.
+    *   This list contains `12:00 AM` at index 11 and `12:00 PM` at index 23.
+    *   If `value1` is 1 AM (01:00):
+        *   `value1` -> `1:00 AM`
+        *   `value11` -> `11:00 AM`
+        *   `value12` -> `12:00 PM` (Noon). But the column at index 11 is `12:00 AM`. The column at index 23 is `12:00 PM`.
+        *   This suggests the target columns are NOT in chronological order, OR my assumption about `value1` is wrong, OR the labels `12:00 AM` and `12:00 PM` are swapped/misleading in the schema definition vs standard time.
+    *   Let's look at the values in the target sample for `2011-07-02`.
+        *   `1:00 AM`: 0.83
+        *   `11:00 AM`: 1.30
+        *   `12:00 AM`: 1.61
+        *   `1:00 PM`: 1.71
+        *   `12:00 PM`: 1.19
+    *   Let's find a row in the source that matches `2011-07-02`? No, source starts in 2011-07-03.
+    *   Let's assume the standard mapping for these "HourlyLoad" datasets: `value1` = 01:00, `value12` = 12:00 (Noon), `value13` = 13:00 (1 PM).
+    *   If `value12` is Noon, it should map to `12:00 PM`.
+    *   If `value13` is 1 PM, it should map to `1:00 PM`.
+    *   In the target schema, `1:00 PM` is at index 12. `12:00 PM` is at index 23.
+    *   If `value13` maps to `1:00 PM` (Index 12), then `value12` should map to Index 11. Index 11 is `12:00 AM`.
+    *   This implies `12:00 AM` in the target schema actually represents Noon (12:00 PM in standard terms) or the labels are swapped.
+    *   Let's check `value24` (00:00 / Midnight). If `value1` is 1 AM, `value24` is Midnight (00:00).
+    *   Midnight is `12:00 AM`.
+    *   In the target schema, `12:00 AM` is at Index 11. `12:00 PM` is at Index 23.
+    *   If `value24` maps to `12:00 AM` (Index 11), then `value24` is at Index 11? No, `value24` is the last source column.
+    *   Let's try the mapping where `value1` = 00:00 (Midnight).
+        *   `value1` (Midnight) -> `12:00 AM`.
+        *   `value2` (1 AM) -> `1:00 AM`.
+        *   ...
+        *   `value12` (11 AM) -> `11:00 AM`.
+        *   `value13` (12 PM/Noon) -> `12:00 PM`.
+        *   `value14` (1 PM) -> `1:00 PM`.
+        *   ...
+        *   `value24` (11 PM) -> `11:00 PM`.
+        *   Where is `12:00 AM` (Midnight) for the next day? Or is `value24` 11 PM?
+        *   If `value1` is Midnight, `value24` is 23:00 (11 PM).
+        *   Target columns: `1:00 AM`...`11:00 AM`, `12:00 AM`, `1:00 PM`...`11:00 PM`, `12:00 PM`.
+        *   This target list has `12:00 AM` in the middle and `12:00 PM` at the end. This is very strange.
+    *   Let's look at the Target Sample Data again.
+        Row `2011-07-02`:
+        `1:00 AM`: 0.83
+        `12:00 AM`: 1.61
+        `1:00 PM`: 1.71
+        `12:00 PM`: 1.19
+    *   If `value1`=1 AM, `value12`=Noon, `value13`=1 PM, `value24`=Midnight.
+    *   If `value1`=1 AM -> `1:00 AM` (0.83).
+    *   If `value12`=Noon -> `12:00 PM` (1.19)? Or `12:00 AM` (1.61)?
+    *   If `value13`=1 PM -> `1:00 PM` (1.71).
+    *   If `value24`=Midnight -> `12:00 AM` (1.61)?
+    *   Let's check the position.
+    *   Target Col `1:00 AM` is Index 0.
+    *   Target Col `12:00 AM` is Index 11.
+    *   Target Col `1:00 PM` is Index 12.
+    *   Target Col `12:00 PM` is Index 23.
+    *   If `value1` (Index 0 in source values) maps to `1:00 AM` (Index 0 in target).
+    *   If `value12` (Index 11 in source values) maps to `12:00 AM` (Index 11 in target).
+    *   If `value13` (Index 12 in source values) maps to `1:00 PM` (Index 12 in target).
+    *   If `value24` (Index 23 in source values) maps to `12:00 PM` (Index 23 in target).
+    *   This positional mapping (Source Col N -> Target Col N) fits perfectly with the indices.
+    *   Therefore:
+        *   `value1` -> `1:00 AM`
+        *   `value2` -> `2:00 AM`
+        *   ...
+        *   `value11` -> `11:00 AM`
+        *   `value12` -> `12:00 AM` (Label says AM, but positionally it's the 12th hour, likely Noon in this specific dataset's quirk or mislabeling, but we must use the target name).
+        *   `value13` -> `1:00 PM`
+        *   ...
+        *   `value23` -> `11:00 PM`
+        *   `value24` -> `12:00 PM` (Label says PM, positionally 24th hour).
+    *   We will strictly follow the target column names provided in the schema.
+
+4.  **Construct DataFrame**: Create a new DataFrame with the formatted `date` and the mapped value columns.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date from M/D/YYYY to datetime
+    dt = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    
+    # Format to YYYY-MM-DD HH:MM:SS
+    formatted_date = dt.strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Define the target column names in the exact order provided
+    target_cols = [
+        "1:00 AM", "2:00 AM", "3:00 AM", "4:00 AM", "5:00 AM", "6:00 AM", 
+        "7:00 AM", "8:00 AM", "9:00 AM", "10:00 AM", "11:00 AM", "12:00 AM", 
+        "1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM", "5:00 PM", "6:00 PM", 
+        "7:00 PM", "8:00 PM", "9:00 PM", "10:00 PM", "11:00 PM", "12:00 PM"
+    ]
+    
+    # Map source value1..value24 to target columns positionally
+    # value1 -> 1:00 AM (index 0)
+    # value12 -> 12:00 AM (index 11)
+    # value13 -> 1:00 PM (index 12)
+    # value24 -> 12:00 PM (index 23)
+    result = pd.DataFrame()
+    result['date'] = formatted_date
+    
+    for i in range(1, 25):
+        src_col = f'value{i}'
+        tgt_col = target_cols[i-1]
+        result[tgt_col] = source[src_col]
+        
+    return result
+```

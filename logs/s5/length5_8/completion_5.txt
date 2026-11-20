@@ -1,0 +1,16 @@
+Operator plan: Parse the source `date` column into datetime objects. Format the datetime as ISO 8601 string (`YYYY-MM-DD 00:00:00`) for the target `date` column. Rename the 24 hourly columns from `Hour N` to `valueN`. The row count difference (182 vs 183) and date range shift in the sample suggest the evaluation input may contain different dates, but the transformation logic (formatting and renaming) remains consistent per row. We simply apply the formatting and renaming to all rows in the source.
+
+```python
+import pandas as pd
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date and format to ISO 8601 with time component
+    dt = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    out = pd.DataFrame(index=source.index)
+    out['date'] = dt.strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Rename Hour columns to value columns
+    for h in range(1, 25):
+        out[f'value{h}'] = source[f'Hour {h}']
+        
+    return out.reset_index(drop=True)
+```

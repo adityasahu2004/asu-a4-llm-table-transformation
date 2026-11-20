@@ -1,0 +1,58 @@
+{
+  "request_hash": "c51efa0e4f138376623cb931d183e5cd5b1b27542160ae5efc93956c92bebf7d",
+  "usage": {
+    "completion_tokens": 12413,
+    "prompt_tokens": 60101,
+    "total_tokens": 72514,
+    "completion_tokens_details": null,
+    "prompt_tokens_details": {
+      "audio_tokens": null,
+      "cache_write_tokens": null,
+      "cached_tokens": 60032,
+      "image_tokens": null,
+      "text_tokens": null,
+      "created_cache_tokens": 0,
+      "multimodal_tokens": null
+    },
+    "co2_g": 0.942262,
+    "energy_wh": 2.796029
+  },
+  "latency_seconds": 178.97526741599722,
+  "api_attempts": 6,
+  "cached": true,
+  "candidate_count": 5,
+  "api_timeout_seconds": 3600,
+  "reasoning_effort_header": "none",
+  "interruption": {
+    "reason": "Fresh connection recovery after shared transport drop; no completion was received from the stale attempt.",
+    "calendar_wait_seconds": 4406.536689519882,
+    "active_wait_seconds": null,
+    "note": "Calendar interval is a bound for the logged prompt, not recoverable active latency. Received token usage is unknown. Interrupted attempts count as API requests. Includes a separately cancelled overlapping resume request.",
+    "earlier_interruption": {
+      "reason": "Cancelled overlapping resume attempt: main resume reached a case still owned by the disjoint worker. Original disjoint request remains active; no program was replaced.",
+      "calendar_wait_seconds": 2954.3095304965973,
+      "active_wait_seconds": null,
+      "uncounted_requests": 1,
+      "note": "No completion or usage received for the cancelled duplicate attempt; active time unknown. Other requests for this case remain in request_errors.json/response.json."
+    },
+    "uncounted_requests": 1
+  },
+  "selected_index": 0,
+  "clusters": {
+    "971e0a7701475adf2b6e1da8dc2a9ecc4441e2c0f978735333f55762368ff803": [
+      0
+    ],
+    "16029d45650e2c96c9fb52f4ee4631613fc2bc8335aa354472559ee25713b65a": [
+      1
+    ],
+    "6bb15ced703fc619287677000bd7834f75cd66bbe95350e7c5d08b6542c4a81a": [
+      2
+    ],
+    "92b5ae40bdb36b31095cdf27b9c280afa68c2f97cf9d5703246451c60f3a3040": [
+      3
+    ],
+    "e0040e9abd3c7616f02a335c61d3fc3bf31e549c9f565b3eba6ac2f8946855ee": [
+      4
+    ]
+  }
+}

@@ -1,0 +1,345 @@
+**Operator plan:**
+1.  **Parse Date**: Convert the `Date` column from string (`%m/%d/%Y`) to datetime objects.
+2.  **Shift Date**: Subtract 6 months from each parsed date to align with the target date range (e.g., `7/3/2013` -> `1/3/2013` is not quite right, let's look closer. Source `7/3/2013` is not in target. Target starts `01/01/2013`. Source starts `7/3/2013`. Wait, the sample data shows source `7/3/2013` maps to... actually, let's look at the row counts. Source 182 rows, Target 183 rows. The dates in source are bi-weekly? No, `7/3`, `7/19`, `8/4`... roughly 2 weeks.
+    Let's re-examine the date transformation.
+    Source `Date`: `7/3/2013`. Target `Date`: `01/01/2013`.
+    Source `Date`: `7/19/2013`. Target `Date`: `01/17/2013`.
+    Source `Date`: `8/4/2013`. Target `Date`: `02/03/2013`.
+    
+    Let's check the difference.
+    `7/3/2013` to `1/3/2013` is -6 months. But target is `1/1/2013`.
+    `7/19/2013` to `1/19/2013` is -6 months. Target is `1/17/2013`.
+    `8/4/2013` to `2/4/2013` is -6 months. Target is `2/3/2013`.
+    
+    It seems the target dates are shifted by exactly 6 months minus 2 days? Or perhaps the source dates are "end of period" and target are "start"?
+    Actually, let's look at the day of week.
+    `7/3/2013` is a Wednesday. `1/1/2013` is a Tuesday.
+    `7/19/2013` is a Friday. `1/17/2013` is a Wednesday.
+    
+    Let's look at the values.
+    Source `7/3/2013` values: `0.56, 0.51...`
+    Target `01/01/2013` values: `0.89, 0.80...`
+    These values are completely different. This implies the rows are not just shifted dates of the same data, but the data itself is different. The prompt says "Infer the transformation... Compute the result only from the source DataFrame." This usually implies a structural transformation (rename, reshape, calculate derived columns) rather than fetching external data.
+    
+    However, the row counts differ (182 vs 183). And the values differ.
+    Let's look at the column names.
+    Source: `1`, `2`, ..., `24`.
+    Target: `Hr 1`, `Hr 2`, ..., `Hr 24`.
+    
+    The values in the target sample `01/01/2013` (`0.89...`) do not appear in the source sample.
+    Wait, look at the last source row: `12/31/2013`. Values: `0.94, 0.90...`.
+    Look at the first target row: `01/01/2013`. Values: `0.89, 0.80...`.
+    
+    Is it possible the source data provided in the JSON is just a *sample* of the source, and the *target* is a sample of the target, and they don't align row-by-row in the sample view?
+    "Source row count describes a training sample only, not the evaluation input."
+    
+    Let's look for a pattern in the dates.
+    Source dates: `7/3/2013` to `12/31/2013`.
+    Target dates: `01/01/2013` to `07/02/2013`.
+    
+    If I subtract 6 months from `7/3/2013`, I get `1/3/2013`.
+    If I subtract 6 months from `12/31/2013`, I get `6/30/2013`.
+    
+    The target range `01/01/2013` to `07/02/2013` roughly corresponds to Source `7/1/2013` to `12/31/2013` shifted back 6 months.
+    
+    Let's check `12/31/2013` - 6 months = `6/30/2013`.
+    Target last date is `07/02/2013`.
+    
+    Let's check `7/3/2013` - 6 months = `1/3/2013`.
+    Target first date is `01/01/2013`.
+    
+    There is a slight offset.
+    `1/3/2013` vs `1/1/2013` (-2 days).
+    `6/30/2013` vs `7/02/2013` (+2 days).
+    
+    Let's look at the DOW.
+    Source `7/3/2013` (Wed). Target `1/1/2013` (Tue).
+    Source `7/19/2013` (Fri). Target `1/17/2013` (Wed).
+    
+    It looks like the transformation is:
+    1.  Parse `Date`.
+    2.  Subtract 6 months.
+    3.  Subtract 2 days?
+    
+    Let's test `12/31/2013` - 6 months = `6/30/2013`. - 2 days = `6/28/2013`. Target is `7/02/2013`. This doesn't match.
+    
+    Let's try adding 6 months to Target to see if it matches Source.
+    `01/01/2013` + 6 months = `07/01/2013`. Source starts `7/3/2013`.
+    `07/02/2013` + 6 months = `01/02/2014`. Source ends `12/31/2013`.
+    
+    Maybe the operation is `Date - 6 months + 2 days`?
+    `7/3/2013` - 6m = `1/3/2013`. + 2d = `1/5/2013`. No.
+    
+    Let's look at the values again.
+    Source `12/31/2013`: `0.94, 0.90, 0.89...`
+    Target `07/02/2013`: `0.66, 0.61, 0.58...`
+    
+    Source `7/3/2013`: `0.56, 0.51...`
+    Target `01/01/2013`: `0.89, 0.80...`
+    
+    The values are distinctly different. This suggests that the "Source" and "Target" in the prompt might be from different datasets entirely, or the transformation involves a lookup/replacement that I cannot infer from the schema alone if the values are arbitrary.
+    
+    HOWEVER, usually these problems involve:
+    1.  Renaming columns.
+    2.  Formatting dates.
+    3.  Maybe shifting dates.
+    
+    Let's look at the column mapping again.
+    Source `1` -> Target `Hr 1`.
+    Source `2` -> Target `Hr 2`.
+    ...
+    Source `24` -> Target `Hr 24`.
+    
+    The values in the target *sample* provided in the JSON block for `01/01/2013` are `0.89, 0.80...`.
+    The values in the source *sample* for `7/3/2013` are `0.56, 0.51...`.
+    
+    If the transformation is purely deterministic based on the source dataframe, and the values change, it must be a calculation.
+    Is it a scaling factor?
+    `0.89 / 0.56 = 1.58`.
+    `0.80 / 0.51 = 1.56`.
+    
+    Let's check another row.
+    Source `7/19/2013` (`0.81, 0.75...`) -> Target `01/17/2013` (`0.68, 0.66...`).
+    `0.68 / 0.81 = 0.83`.
+    
+    The ratios are not constant.
+    
+    Let's look at the date shift again.
+    Source: `7/3/2013`. Target: `01/01/2013`.
+    Source: `7/19/2013`. Target: `01/17/2013`.
+    Source: `8/4/2013`. Target: `02/03/2013`.
+    
+    `7/3` to `1/1`: -183 days? (July has 31, Aug 31, Sep 30, Oct 31, Nov 30, Dec 31, Jan 1).
+    Days from 7/3 to 1/3 is 183 days (non-leap 2013).
+    1/3 to 1/1 is -2 days.
+    So `Date - 185 days`?
+    
+    `7/19` to `1/17`.
+    7/19 to 1/19 is 183 days.
+    1/19 to 1/17 is -2 days.
+    So `Date - 185 days`?
+    
+    `8/4` to `2/3`.
+    8/4 to 2/4 is 183 days.
+    2/4 to 2/3 is -1 day.
+    
+    `8/21` to `2/19`.
+    8/21 to 2/21 is 183 days.
+    2/21 to 2/19 is -2 days.
+    
+    `9/6` to `3/8`.
+    9/6 to 3/6 is 183 days.
+    3/6 to 3/8 is +2 days.
+    
+    The day offset varies.
+    
+    Let's look at the Day of Week.
+    Source `7/3/2013` (Wed). Target `1/1/2013` (Tue).
+    Source `7/19/2013` (Fri). Target `1/17/2013` (Wed).
+    Source `8/4/2013` (Sun). Target `2/3/2013` (Sat).
+    
+    It seems the target date is the **Monday** of the week containing the source date shifted by 6 months?
+    
+    `7/3/2013` (Wed). Shift -6m -> `1/3/2013` (Thu). Monday of that week is `12/31/2012`? No, target is `1/1/2013`.
+    
+    Let's try: Target Date = Source Date - 6 months. Then adjust to nearest business day?
+    
+    Actually, looking at the provided samples, the values in the Target DO NOT MATCH the values in the Source for the corresponding shifted rows.
+    Source `7/3/2013` values are `~0.5`. Target `1/1/2013` values are `~0.8`.
+    Source `12/31/2013` values are `~0.9`. Target `7/02/2013` values are `~0.6`.
+    
+    This implies the data in the Target sample is **not** derived from the Source sample values provided in the JSON.
+    
+    **CRITICAL REALIZATION**: The prompt says "Infer the transformation from this schema/sample block". It also says "Compute the result only from the source DataFrame."
+    
+    If the values in the target sample are different from the source, and I cannot use external data, is it possible that the `Class` column or some other factor modifies the values?
+    Source has `Class` = "RESIDENT".
+    
+    Wait, look at the target schema. It does NOT have a `Class` column.
+    
+    Let's look at the first target row: `01/01/2013`.
+    Let's look at the source row for `07/01/2013` (approx).
+    Source `7/3/2013`.
+    
+    Is it possible the transformation is just:
+    1.  Rename columns `1`..`24` to `Hr 1`..`Hr 24`.
+    2.  Drop `Class`.
+    3.  Format `Date`.
+    
+    But the values are different.
+    
+    Let's look at the `first_last_non_null` for dates.
+    Source: `7/3/2013` to `12/31/2013`.
+    Target: `01/01/2013` to `07/02/2013`.
+    
+    If I take `01/01/2013` and add 6 months, I get `07/01/2013`.
+    If I take `07/02/2013` and add 6 months, I get `01/02/2014`.
+    
+    The source data ends at `12/31/2013`.
+    
+    There is a mismatch in the data values provided in the samples. In many of these "infer the transformation" tasks, if the sample data values don't match, it might be because the sample rows in the JSON are just the first N rows of the respective files, and the files themselves contain the same data but sorted or filtered differently, OR the transformation involves a time-shift that aligns the data.
+    
+    However, `0.56` vs `0.89` is a huge difference. It's unlikely to be a simple sort.
+    
+    Let's check if the Target values match a *different* row in the Source.
+    Target `01/01/2013` (`0.89, 0.80...`).
+    Does any source row have `0.89, 0.80...`?
+    Source `12/31/2013` has `0.94, 0.90...`. Close, but not exact.
+    Source `12/14/2013` has `0.99, 0.95...`.
+    
+    Target `07/02/2013` (`0.66, 0.61...`).
+    Source `7/3/2013` has `0.56, 0.51...`.
+    Source `7/19/2013` has `0.81, 0.75...`.
+    
+    There is no obvious row-to-row value match.
+    
+    **Alternative Theory**: The `Class` column indicates a rate class. Maybe the target is a different rate class? But the target has no class column.
+    
+    **Alternative Theory**: The values are transformed. E.g., `Target = Source * Factor`.
+    But the factor changes per row.
+    
+    **Alternative Theory**: The provided "Source" and "Target" samples are from different years or datasets, and I should only infer the **schema** transformation (column renaming, date formatting) and assume the values pass through?
+    
+    If I assume the values pass through, I just need to figure out the date and column names.
+    
+    Column Names:
+    `1` -> `Hr 1`
+    `2` -> `Hr 2`
+    ...
+    `24` -> `Hr 24`
+    
+    Date:
+    Source `Date` is `m/d/yyyy`.
+    Target `Date` is `mm/dd/yyyy`.
+    
+    What about the date value itself?
+    If I simply format the source date as `mm/dd/yyyy`, `7/3/2013` becomes `07/03/2013`.
+    The target has `01/01/2013`.
+    
+    If the task requires me to output the *values* from the source, but the *dates* shifted, I need the shift logic.
+    If the task requires me to output the *values* from the source, and the *dates* are just formatted differently, then the sample data in the prompt is misleading or from a different slice.
+    
+    Given "Compute the result only from the source DataFrame", I cannot fetch new values. I must use the source values.
+    Therefore, the transformation is likely:
+    1.  Keep the values from columns `1`-`24`.
+    2.  Rename them to `Hr 1`-`Hr 24`.
+    3.  Drop `Class`.
+    4.  Transform `Date`.
+    
+    What is the Date transformation?
+    If I look at `7/3/2013` -> `01/01/2013`, it's a shift.
+    If I look at `12/31/2013` -> `07/02/2013`, it's a shift.
+    
+    Let's check the shift `Date - 6 months`.
+    `7/3/2013` - 6m = `1/3/2013`.
+    `12/31/2013` - 6m = `6/30/2013`.
+    
+    The target dates are `01/01/2013` and `07/02/2013`.
+    
+    `1/3/2013` is a Thursday. `01/01/2013` is a Tuesday.
+    `6/30/2013` is a Sunday. `07/02/2013` is a Tuesday.
+    
+    It looks like the target date is the **Tuesday** of the week? Or the start of the week?
+    
+    Let's try: `Date - 6 months`, then find the **Monday** of that week?
+    `1/3/2013` (Thu). Monday is `12/31/2012`. No.
+    
+    Let's try: `Date - 6 months`, then find the **Tuesday**?
+    
+    Actually, let's look at the distinct values.
+    Source `Date` distinct: 182.
+    Target `Date` distinct: 183.
+    
+    This implies a 1-to-1 mapping is not possible if rows are added/removed.
+    
+    However, often in these problems, if the values don't match, it's because the **sample** rows shown are just the first few rows of the file, and the files are sorted differently.
+    
+    Source sorted by Date? `7/3, 7/19...` Yes.
+    Target sorted by Date? `01/01, 01/17...` Yes.
+    
+    If I shift the Source dates by -6 months:
+    `7/3/2013` -> `1/3/2013`.
+    `7/19/2013` -> `1/19/2013`.
+    
+    Target has `1/1/2013` and `1/17/2013`.
+    
+    The Target dates are consistently **2 days before** the shifted Source dates?
+    `1/3` - 2 = `1/1`.
+    `1/19` - 2 = `1/17`.
+    `2/4` (from 8/4) - 2 = `2/2`. Target is `2/3`. (Close).
+    `2/21` (from 8/21) - 2 = `2/19`. Target is `2/19`. (Match).
+    `3/6` (from 9/6) - 2 = `3/4`. Target is `3/8`. (No).
+    
+    The offset is not constant.
+    
+    Let's look at the Day of Week again.
+    Source `7/3` (Wed). Target `1/1` (Tue).
+    Source `7/19` (Fri). Target `1/17` (Wed).
+    Source `8/4` (Sun). Target `2/3` (Sat).
+    Source `8/21` (Sat). Target `2/19` (Mon).
+    
+    There is no consistent DOW mapping.
+    
+    **Conclusion on Data Values**: Since I cannot derive the target values from the source values (they are different) and I cannot use external data, and the prompt says "Compute the result only from the source DataFrame", there is a high probability that the **values in the target sample are simply from a different part of the dataset or the sample is illustrative of the schema only**.
+    
+    However, I must produce code that transforms the Source DataFrame.
+    
+    If I assume the standard behavior for these tasks:
+    1.  Rename columns `1`-`24` to `Hr 1`-`Hr 24`.
+    2.  Drop `Class`.
+    3.  Format `Date` to `mm/dd/yyyy`.
+    4.  **Do not shift the date values** unless there is a clear, consistent rule. The date shift is inconsistent. The value mismatch is total.
+    
+    Wait, look at the first target date: `01/01/2013`.
+    Look at the first source date: `7/3/2013`.
+    
+    If I just format the date `7/3/2013` as `mm/dd/yyyy`, I get `07/03/2013`.
+    The target has `01/01/2013`.
+    
+    If I submit code that outputs `07/03/2013`, it will likely fail if the evaluator checks against the target sample values.
+    
+    BUT, the evaluator checks against the **evaluation source** which will have different rows. The target specification is the goal.
+    
+    If the goal is to shift dates by 6 months, I should do that.
+    
+    Let's try `pd.tseries.offsets.MonthBegin(6)`? No.
+    
+    Let's try `Source['Date'] - pd.DateOffset(months=6)`.
+    
+    Let's assume the transformation is:
+    1.  Parse Date.
+    2.  Subtract 6 months.
+    3.  Format as `mm/dd/yyyy`.
+    4.  Rename hour columns.
+    5.  Drop Class.
+    6.  Keep values as is.
+    
+    This is the most logical structural transformation. The value discrepancy in the sample is likely due to the sample rows being from different parts of the dataset (e.g. Source sample is H2 2013, Target sample is H1 2013, which corresponds to Source H2 2013 shifted).
+    
+    Wait, if Source is H2 2013 (`7/1` to `12/31`), and Target is H1 2013 (`1/1` to `6/30`), then `Target = Source - 6 months`.
+    
+    Source `7/3/2013` - 6m = `1/3/2013`.
+    Target `1/1/2013`.
+    
+    Source `12/31/2013` - 6m = `6/30/2013`.
+    Target `7/02/2013`.
+    
+    The Target sample dates `01/01/2013` and `07/02/2013` are slightly off from the exact -6 month shift of the Source sample dates `7/3/2013` and `12/31/2013`.
+    
+    However, `1/3/2013` is close to `1/1/2013`.
+    `6/30/2013` is close to `7/02/2013`.
+    
+    I will proceed with `Date - 6 months` and formatting.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Create a copy to avoid SettingWithCopy warnings
+    df = source.copy()
+    
+    # Parse the Date column
+    df['Date'] = pd.to_datetime(df['Date'], format='%m/%d/%Y')
+    
+    # Shift dates back by 6 months
+    df['Date'] = df['Date']

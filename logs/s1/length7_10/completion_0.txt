@@ -1,0 +1,110 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `date` column from string format (`%m/%d/%Y %H:%M`) to pandas datetime objects.
+2.  **Extract Features**:
+    *   Extract the month name from the datetime. Format it as a string padded with spaces to match the target schema (e.g., "August   "). The target shows 10-character strings for month names.
+    *   Determine `daytype`: "weekday" if the day of the week is Monday-Friday (0-4), "weekend" if Saturday-Sunday (5-6).
+    *   Extract the hour of the day (0-23).
+3.  **Pivot/Reshape**:
+    *   Group the data by `month` and `daytype`.
+    *   For each group, calculate the mean of `cerc_logger_1` for each hour of the day (0-23).
+    *   Create columns `hr1` through `hr24` corresponding to hours 0 through 23. Note: The target columns are `hr1` (hour 0) to `hr24` (hour 23).
+4.  **Format Output**:
+    *   Ensure the `month` column matches the specific spacing observed in the target (10 characters, right-padded with spaces).
+    *   Ensure `daytype` is lowercase string.
+    *   Ensure numeric columns are float64.
+    *   Sort the result to match a deterministic order (e.g., by month name and daytype) if necessary, though the target sample isn't strictly sorted by calendar order. The target distinct values list suggests a specific order, but standard sorting by month name then daytype is a safe deterministic approach. Looking at the target sample, it seems somewhat random or grouped. However, since the target has 84 rows (12 months * 2 daytypes), we just need to ensure all combinations are present. I will sort by `month` (alphabetical) and then `daytype` to ensure determinism, or perhaps by the natural calendar order of months. Let's look at the distinct values: August, April, September... This is not alphabetical. It's not calendar order either. It might be the order of appearance in the source or just arbitrary. Given the instruction "deterministic", I will sort by the month name alphabetically and then daytype, or perhaps by the integer month value. Let's check the target distinct values again: `["August   ", "April    ", "September", "December ", "March    ", "October  ", "February ", "May      ", "January  ", "November ", "June     ", "July     "]`. This looks like it might be sorted by the first appearance in the source data or just random. However, usually, these tasks expect a canonical sort. Let's try sorting by the month name alphabetically first. If that doesn't match, I'll consider other sorts. Actually, looking at the sample data provided in the target, the rows are: August weekday, October weekend, January weekday... This is not sorted. But the *distinct values* list is often just a set. I will produce the dataframe and sort by `month` (alphabetical) and `daytype` to be safe, as "deterministic" usually implies a canonical sort order unless specified otherwise. Wait, looking at the distinct values list in the target schema, it is NOT alphabetical. It is: August, April, September, December, March, October, February, May, January, November, June, July. This is very specific. It might be the order of first appearance in the source data? Or perhaps it's sorted by the average value? No. Let's look at the source sample. The source sample has dates from July 2019 to Jan 2021.
+    *   Let's re-read the prompt: "Keep target column names exactly... Preserve NaNs...". It doesn't explicitly mandate row order, but "deterministic" does.
+    *   Let's look at the distinct values list again. It has 12 items.
+    *   Let's try to infer the sort order from the distinct values list provided in the target schema. It is likely the order the rows should appear if we were to list them. But the sample data rows are mixed.
+    *   Actually, a common pattern in these problems is that the row order in the target sample is just a subset. The distinct values list is often just a set. I will sort by `month` (alphabetical) and `daytype` (alphabetical) as a standard deterministic output. If the evaluation checks for exact row order, it might fail, but without a clear rule, alphabetical is the most robust assumption.
+    *   *Correction*: The distinct values list in the target schema is `["August   ", "April    ", ...]`. This is not alphabetical. It is not calendar order. It is not reverse calendar. It is not sorted by length.
+    *   Let's look at the source data first/last. Source starts July 2019.
+    *   Let's assume the standard pandas `groupby` result order or sort by the grouping keys. I will sort by `month` (alphabetical) and `daytype` (alphabetical).
+
+    *Refined Plan for Month Formatting*: The target month strings are 10 characters long. "August   " (6 chars + 4 spaces). "September" (9 chars + 1 space). "December " (8 chars + 2 spaces). "January  " (7 chars + 3 spaces). "November " (8 chars + 2 spaces). "February " (8 chars + 2 spaces). "October  " (7 chars + 3 spaces). "March    " (5 chars + 5 spaces). "April    " (5 chars + 5 spaces). "May      " (3 chars + 7 spaces). "June     " (4 chars + 6 spaces). "July     " (4 chars + 6 spaces).
+    So, `month_name.ljust(10)`.
+
+    *Refined Plan for Hours*:
+    Hour 0 -> `hr1`
+    Hour 1 -> `hr2`
+    ...
+    Hour 23 -> `hr24`
+
+    *Aggregation*: Mean of `cerc_logger_1`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse dates
+    df = source.copy()
+    df['date'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # 2. Extract features
+    # Month name, padded to 10 characters with spaces
+    df['month'] = df['date'].dt.strftime('%B').str.ljust(10)
+    
+    # Day type: weekday (0-4) or weekend (5-6)
+    # dt.dayofweek: Monday=0, Sunday=6
+    df['daytype'] = np.where(df['date'].dt.dayofweek < 5, 'weekday', 'weekend')
+    
+    # Hour (0-23)
+    df['hour'] = df['date'].dt.hour
+    
+    # 3. Pivot/Aggregate
+    # We need to group by month and daytype, and calculate mean for each hour
+    # Create a pivot table
+    # Index: month, daytype
+    # Columns: hour
+    # Values: cerc_logger_1
+    # Aggfunc: mean
+    
+    pivot_df = df.groupby(['month', 'daytype'])['cerc_logger_1'].apply(
+        lambda x: x.groupby(df.loc[x.index, 'hour']).mean()
+    ).unstack(fill_value=np.nan)
+    
+    # The above apply might be tricky with index alignment. Let's do a standard groupby.
+    # Better approach:
+    # Group by month, daytype, hour and mean
+    grouped = df.groupby(['month', 'daytype', 'hour'])['cerc_logger_1'].mean().reset_index()
+    
+    # Pivot
+    pivot_df = grouped.pivot_table(index=['month', 'daytype'], columns='hour', values='cerc_logger_1', aggfunc='mean')
+    
+    # 4. Rename columns to hr1...hr24
+    # Current columns are 0..23
+    new_cols = {h: f'hr{h+1}' for h in range(24)}
+    pivot_df.rename(columns=new_cols, inplace=True)
+    
+    # Ensure all 24 hours are present, even if NaN
+    for h in range(24):
+        col_name = f'hr{h+1}'
+        if col_name not in pivot_df.columns:
+            pivot_df[col_name] = np.nan
+            
+    # Reorder columns to hr1...hr24
+    pivot_df = pivot_df[[f'hr{i}' for i in range(1, 25)]]
+    
+    # Reset index to make month and daytype columns
+    result = pivot_df.reset_index()
+    
+    # 5. Sort deterministically
+    # The target distinct values list is not alphabetical. 
+    # However, without a clear rule, alphabetical sort on month and daytype is standard.
+    # Let's check if the distinct values list order matters for row order.
+    # The sample data is not sorted.
+    # I will sort by month (alphabetical) and daytype (alphabetical).
+    result = result.sort_values(by=['month', 'daytype']).reset_index(drop=True)
+    
+    # Ensure dtypes
+    result['month'] = result['month'].astype(str)
+    result['daytype'] = result['daytype'].astype(str)
+    
+    # Ensure numeric columns are float64
+    for col in [f'hr{i}' for i in range(1, 25)]:
+        result[col] = result[col].astype(float)
+        
+    return result
+```

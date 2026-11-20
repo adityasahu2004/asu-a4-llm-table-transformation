@@ -1,0 +1,159 @@
+**Operator Plan:**
+1.  **Parse Date:** Convert the `Date` column to datetime objects. Extract the month number and the hour index (1-24) from the column names/values.
+2.  **Melt/Reshape:** Transform the wide format (columns 1-24) into a long format with columns: `Date`, `Month`, `Hour`, `Value`.
+3.  **Aggregate:** Group by `Month` and `Hour`. Calculate the mean of `Value` for each group.
+4.  **Pivot:** Pivot the aggregated data so that `Hour` becomes the index (or a column) and `Month` becomes the column headers.
+5.  **Format Columns:** Rename the month columns to their lowercase full names (e.g., 1 -> 'january'). Ensure all 12 months are present, filling missing ones with NaN.
+6.  **Finalize:** Reset index to make `hour` a column, ensure `hour` is integer type, and sort the dataframe by `hour` to match the target schema order (though the target sample is unsorted, standard practice is often sorted or index-based; looking at the target sample, it seems unordered, but the distinct values suggest a standard 1-24 range. The target sample shows `hour` as int64. I will sort by hour for deterministic output unless specified otherwise, but typically `reset_index` after pivot maintains the sort of the index. The target sample is not sorted by hour, but the distinct values are 1-24. I will return the dataframe sorted by hour for consistency, or just reset index. Let's look at the target sample again: 1, 11, 13... it's not sorted. However, the instruction says "Infer a general transformation". Usually, pivots result in sorted indices. I will sort by hour to be safe and clean, as the target schema doesn't enforce row order, but the sample is just a sample. Wait, the target sample has 24 rows. The source has 182 rows (approx 7 days * 24 hours? No, 182/24 = 7.58. It's likely weekly data or irregular. The target has 24 rows (one per hour). The aggregation is clearly `mean` per month per hour across all dates in the source).
+
+Let's refine the aggregation.
+Source: 182 rows. Dates range from July 2013 to Dec 2013.
+Target: 24 rows. Columns: hour, january...december.
+Values in target: e.g., hour 1, january 1.03.
+This implies we are averaging the value for Hour 1 across all dates that fall in January.
+Since the source only has Jul-Dec 2013, the months Jan-Jun should be NaN?
+Wait, the target sample shows values for Jan, Feb, Mar, Apr, May, Jun, Jul.
+But the source data *only* contains dates from 7/3/2013 to 12/31/2013.
+How can there be values for January in the target if the source has no January data?
+Let's re-read the source schema.
+`first_last_non_null`: ["7/3/2013", "12/31/2013"].
+Distinct dates: 182.
+Target `january` has distinct values 18.
+Target `august` has nulls 24.
+This is a contradiction if the source only has Jul-Dec.
+Unless... the "source" provided in the prompt is just a *sample* block, and the "note" says "Source row count describes a training sample only, not the evaluation input."
+However, I must infer the transformation from the *schema/sample block*.
+If the source sample *only* has Jul-Dec, but the target has Jan-Jul values, either:
+1. The source sample provided is incomplete/truncated and represents a larger dataset that *does* have Jan-Jun.
+2. The transformation involves some other logic.
+
+Let's look at the target values.
+Hour 1, January: 1.03.
+Hour 1, July: 0.68.
+Source Hour 1 values for July (7/3/2013): 0.56.
+Source Hour 1 values for July (7/19/2013): 0.81.
+Average of 0.56 and 0.81 is 0.685. Rounded to 0.68 or 0.69? Target says 0.68.
+Let's check Hour 1, July in source.
+Rows with July dates:
+7/3/2013: 0.56
+7/19/2013: 0.81
+Mean = 0.685.
+Target `july` for hour 1 is 0.68.
+Let's check Hour 11, July.
+7/3/2013: 0.83
+7/19/2013: 1.09
+Mean = 0.96.
+Target `july` for hour 11 is 0.89.
+Wait. 0.96 != 0.89.
+Let's check other July rows?
+Are there more July rows?
+The source sample has 12 rows.
+Dates:
+7/3/2013
+7/19/2013
+8/4/2013
+8/21/2013
+9/6/2013
+9/23/2013
+10/9/2013
+10/26/2013
+11/11/2013
+11/28/2013
+12/14/2013
+12/31/2013
+
+There are only 2 rows for July in the sample.
+Mean of Hour 11 for July: (0.83 + 1.09) / 2 = 0.96.
+Target says 0.89.
+
+Is it possible the target is not a mean?
+Maybe it's a weighted average? Or maybe the source sample is just a tiny slice of a much larger dataset, and the target reflects the aggregate of the *full* dataset, not just the sample?
+The note says: "Source row count describes a training sample only, not the evaluation input."
+This strongly suggests that the transformation logic is general (e.g., "Group by Month and Hour, then Mean"), and the specific values in the target sample are derived from the *full* source data, which is not fully visible in the sample block. The sample block only shows 12 rows, but the schema says `rows: 182`.
+182 rows / 24 hours = 7.58 days? No.
+182 distinct dates.
+If it's weekly data, 182 days is roughly 26 weeks.
+If the target values don't match the sample means, I should trust the *operation* (Aggregate by Month/Hour) rather than trying to reverse-engineer the exact arithmetic from a mismatched sample. The mismatch is likely due to the sample being a subset of the 182 rows.
+
+So the operation is:
+1. Melt the hour columns (1-24) into a long format.
+2. Parse Date, extract Month.
+3. Group by Month and Hour.
+4. Aggregate by Mean.
+5. Pivot to wide format with Months as columns.
+6. Rename months.
+7. Ensure all 12 months are columns.
+
+One detail: The target `hour` column is int64. The source columns are strings "1", "2"... "24".
+The target month columns are lowercase full names.
+
+Steps:
+1. `df['Date'] = pd.to_datetime(df['Date'])`
+2. `df['Month'] = df['Date'].dt.month`
+3. `df_long = df.melt(id_vars=['Date', 'Month'], value_vars=[str(i) for i in range(1,25)], var_name='Hour', value_name='Value')`
+4. `df_long['Hour'] = df_long['Hour'].astype(int)`
+5. `agg_df = df_long.groupby(['Month', 'Hour'])['Value'].mean().reset_index()`
+6. `pivot_df = agg_df.pivot(index='Hour', columns='Month', values='Value')`
+7. Rename columns 1-12 to 'january'...'december'.
+8. `pivot_df = pivot_df.reindex(columns=range(1,13)).rename(columns={...})`
+9. `result = pivot_df.reset_index()`
+10. Rename 'index' to 'hour'.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse dates
+    source['Date'] = pd.to_datetime(source['Date'])
+    
+    # Extract Month
+    source['Month'] = source['Date'].dt.month
+    
+    # Define hour columns
+    hour_cols = [str(i) for i in range(1, 25)]
+    
+    # Melt the dataframe
+    # Keep Date and Month, melt the hour columns
+    long_df = source.melt(
+        id_vars=['Date', 'Month'],
+        value_vars=hour_cols,
+        var_name='Hour',
+        value_name='Value'
+    )
+    
+    # Convert Hour to int
+    long_df['Hour'] = long_df['Hour'].astype(int)
+    
+    # Group by Month and Hour and calculate mean
+    agg_df = long_df.groupby(['Month', 'Hour'])['Value'].mean().reset_index()
+    
+    # Pivot to wide format
+    # Index: Hour, Columns: Month, Values: Mean
+    pivot_df = agg_df.pivot(index='Hour', columns='Month', values='Value')
+    
+    # Define month names
+    month_names = {
+        1: 'january', 2: 'february', 3: 'march', 4: 'april',
+        5: 'may', 6: 'june', 7: 'july', 8: 'august',
+        9: 'september', 10: 'october', 11: 'november', 12: 'december'
+    }
+    
+    # Ensure all months are present columns
+    pivot_df = pivot_df.reindex(columns=range(1, 13), fill_value=np.nan)
+    
+    # Rename columns
+    pivot_df.rename(columns=month_names, inplace=True)
+    
+    # Reset index to make Hour a column
+    result = pivot_df.reset_index()
+    result.rename(columns={'index': 'hour'}, inplace=True)
+    
+    # Ensure hour is int64
+    result['hour'] = result['hour'].astype(int)
+    
+    # Sort by hour to ensure consistent order (optional but good practice)
+    result = result.sort_values('hour').reset_index(drop=True)
+    
+    return result
+```

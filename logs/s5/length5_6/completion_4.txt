@@ -1,0 +1,71 @@
+**Operator Plan:**
+1.  **Filtering**: The target dataset excludes rows where the `DSL` column is `0.119509`. We filter the source DataFrame to keep only rows where `DSL` is `0.0` (or simply not equal to the non-zero distinct value, but given the distinct values are `0.0` and `0.119509`, filtering for `DSL == 0.0` is the robust interpretation of "valid" data in this context, or potentially just dropping the specific outlier value. Looking at the sample data, all rows have `DSL` = 0.0. The target has 183 rows vs source 182. Wait, source has 182 rows, target has 183. This implies a join or expansion, or perhaps the source sample is just a subset. Let's look at the dates. Source: 7/3/2014 to 12/31/2014. Target: 2014-01-01 to 2014-07-02. The date ranges are disjoint. This suggests the transformation logic is purely structural (formatting/renaming) and the "evaluation source" will contain the appropriate rows. The note says "Source row count describes a training sample only". The target has more distinct values (183 vs 182). It is likely that `DSL == 0.119509` rows are invalid/placeholder and should be dropped, or `DSL == 0.0` are the valid ones. Given the target has *more* rows, and the sample source only shows 0.0, it's safer to assume we keep rows where `DSL` is 0.0. However, if the evaluation set has the 0.119509 rows, we might need to drop them. Let's assume we filter for `DSL == 0.0`.
+    *Correction*: The target row count (183) is slightly higher than the source sample (182). The source sample dates are late 2014. The target sample dates are early 2014. This confirms the samples are disjoint. The transformation must be general. The `DSL` column in the source has two values. The target does not have a `DSL` column. It is highly probable that `DSL == 0.119509` indicates a bad/missing record and should be filtered out.
+2.  **Date Formatting**: Parse the `date` column (format `%m/%d/%Y`) and reformat it to ISO 8601 style `YYYY-MM-DD 00:00:00`.
+3.  **Column Renaming**: The source has 24 hourly columns with AM/PM labels (`1:00 AM`, `12:00 AM`, `1:00 PM`, etc.). These need to be mapped to sequential `value1` through `value24`.
+    *   `1:00 AM` -> `value1`
+    *   `2:00 AM` -> `value2`
+    *   ...
+    *   `11:00 AM` -> `value11`
+    *   `12:00 PM` -> `value12` (Note: Source has `12:00 PM` and `12:00 AM`. In 12-hour clock, 12:00 PM is noon, 12:00 AM is midnight).
+    *   Let's map them carefully:
+        *   1:00 AM (1)
+        *   2:00 AM (2)
+        *   3:00 AM (3)
+        *   4:00 AM (4)
+        *   5:00 AM (5)
+        *   6:00 AM (6)
+        *   7:00 AM (7)
+        *   8:00 AM (8)
+        *   9:00 AM (9)
+        *   10:00 AM (10)
+        *   11:00 AM (11)
+        *   12:00 PM (12)  <- Noon
+        *   1:00 PM (13)
+        *   2:00 PM (14)
+        *   3:00 PM (15)
+        *   4:00 PM (16)
+        *   5:00 PM (17)
+        *   6:00 PM (18)
+        *   7:00 PM (19)
+        *   8:00 PM (20)
+        *   9:00 PM (21)
+        *   10:00 PM (22)
+        *   11:00 PM (23)
+        *   12:00 AM (24) <- Midnight
+    *   We will create a mapping dictionary for these column names.
+4.  **Projection**: Select the formatted date and the 24 renamed value columns. Drop `DSL` and original hour columns.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Filter out rows with non-zero DSL (assuming 0.119509 is invalid/placeholder)
+    # If DSL is not 0.0, it's likely noise based on the distinct values provided.
+    df = source[source['DSL'] == 0.0].copy()
+    
+    # Format the date column
+    # Source format: "7/3/2014" -> Target format: "2014-01-01 00:00:00"
+    df['date'] = pd.to_datetime(df['date'], format='%m/%d/%Y').dt.strftime('%Y-%m-%d 00:00:00')
+    
+    # Define the mapping from source AM/PM columns to target value columns
+    # Order: 1AM, 2AM, ..., 11AM, 12PM, 1PM, ..., 11PM, 12AM
+    hour_cols = [
+        "1:00 AM", "2:00 AM", "3:00 AM", "4:00 AM", "5:00 AM", "6:00 AM", "7:00 AM", "8:00 AM",
+        "9:00 AM", "10:00 AM", "11:00 AM", "12:00 PM", "1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM",
+        "5:00 PM", "6:00 PM", "7:00 PM", "8:00 PM", "9:00 PM", "10:00 PM", "11:00 PM", "12:00 AM"
+    ]
+    
+    target_cols = [f"value{i}" for i in range(1, 25)]
+    
+    rename_map = dict(zip(hour_cols, target_cols))
+    
+    # Rename the columns
+    df = df.rename(columns=rename_map)
+    
+    # Select only the required columns in the correct order
+    result_cols = ['date'] + target_cols
+    df = df[result_cols]
+    
+    return df.reset_index(drop=True)
+```

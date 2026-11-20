@@ -1,0 +1,21 @@
+Operator plan: Parse `DT_STRATA` into a datetime object. Format it as `%a %m/%d/%Y` for the `cst` column. Select the 24 hourly columns (`PCT_HOURLY_0100` through `PCT_HOURLY_2400`) and rename them to `1:00` through `24:00`. Discard `Strata_ID`, `Strata`, `DOW`, and `PCT_HOURLY_2500`.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date string to datetime
+    dt = pd.to_datetime(source['DT_STRATA'], format='%m/%d/%Y')
+    
+    # Create the output dataframe with the formatted date
+    out = pd.DataFrame()
+    out['cst'] = dt.dt.strftime('%a %m/%d/%Y')
+    
+    # Map the 24 hourly columns
+    for h in range(1, 25):
+        src_col = f'PCT_HOURLY_{h:02d}00'
+        tgt_col = f'{h}:00'
+        out[tgt_col] = source[src_col]
+        
+    return out.reset_index(drop=True)
+```

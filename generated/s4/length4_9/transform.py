@@ -1,0 +1,53 @@
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date
+    df = source.copy()
+    df['datetime'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    df['date_str'] = df['datetime'].dt.strftime('%m/%d/%Y')
+    df['hour'] = df['datetime'].dt.hour
+    
+    # Map hour to target column names
+    def hour_to_label(h):
+        if h == 0:
+            return "12:00 AM"
+        elif h < 12:
+            return f"{h}:00 AM"
+        elif h == 12:
+            return "12:00 PM"
+        else:
+            return f"{h-12}:00 PM"
+            
+    df['hour_label'] = df['hour'].apply(hour_to_label)
+    
+    # Pivot
+    # The target has specific column order. We will pivot and then reorder.
+    pivot_df = df.pivot_table(index='date_str', columns='hour_label', values='zone_016', aggfunc='first')
+    
+    # Define the target column order
+    target_cols = []
+    # 1:00 AM to 11:00 AM
+    for h in range(1, 12):
+        target_cols.append(f"{h}:00 AM")
+    # 12:00 PM to 11:00 PM
+    target_cols.append("12:00 PM")
+    for h in range(1, 12):
+        target_cols.append(f"{h}:00 PM")
+    # 12:00 AM
+    target_cols.append("12:00 AM")
+    
+    # Reorder columns. If a column is missing (e.g., no data for that hour in any day), it won't be in pivot_df.
+    # However, the problem implies a full grid or at least the observed structure.
+    # We select only existing columns in the defined order.
+    existing_cols = [c for c in target_cols if c in pivot_df.columns]
+    
+    result = pivot_df[existing_cols]
+    
+    # Rename index to 'date'
+    result = result.reset_index()
+    result.rename(columns={'date_str': 'date'}, inplace=True)
+    
+    return result
+
+transform

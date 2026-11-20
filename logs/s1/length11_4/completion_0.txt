@@ -1,0 +1,359 @@
+### Operator Plan
+
+1.  **Map Month Names to Numbers**: Create a mapping from the `Time Period` column (e.g., "January", "February") to integer month numbers (1-12). Apply this mapping to create the `month` column. The target schema shows `month` as `float64` with nulls, so we will cast the result to float. Note: The source sample doesn't show invalid month strings, but the target has nulls in `month`. This implies some rows in the full dataset might have `Time Period` values that don't map to standard months (or are NaN), resulting in NaN in the output. We will handle this by mapping known months and leaving others as NaN.
+
+2.  **Map Hour**: The `Hour Ending` column in the source corresponds directly to the `hour` column in the target. We simply rename/copy this column.
+
+3.  **Identify End Use Categories for Specific Columns**:
+    The target has specific columns for `hvac`, `water_heating`, and several appliance/lighting categories that are all initialized to 0 in the sample data provided. However, looking at the source `End Use` and `End Use Category` columns, we need to determine which source rows contribute to which target columns.
+    
+    *   **`hvac`**: Typically corresponds to "Heating" and "Cooling" end uses. In the source, these are likely under "Remaining Load" or specific HVAC categories. Let's look at the source distinct values for `End Use`. The sample shows "Freezer", "Clothes Dryer", "Clothes Washer", "Primary TV", "Primary Desktop", "Misc Metered", "Pool Pump", "Lighting", "Remaining Load".
+    *   **`water_heating`**: Likely corresponds to "Water Heater" end use.
+    *   **`refrigerator`**: Likely "Refrigerator" or "Freezer".
+    *   **`clothes_washer`**: "Clothes Washer".
+    *   **`clothes_dryer`**: "Clothes Dryer".
+    *   **`dishwasher`**: "Dishwasher".
+    *   **`cooking_range`**: "Cooking Range" or "Oven".
+    *   **`pool_spa_pumps`**: "Pool Pump".
+    *   **`interior_lighting`**: "Interior Lighting".
+    *   **`exterior_lighting`**: "Exterior Lighting".
+    *   **`lighting`**: General "Lighting".
+    *   **`plug`**: Plug loads like "TV", "Computer".
+    *   **`pool_spa_heater`**: "Pool Heater".
+
+    **Crucial Observation**: The target sample data shows `0` for almost all specific appliance columns (`refrigerator`, `clothes_washer`, etc.) and `0.0` for `water_heating`. The `hvac` column has non-zero values. The `Average Demand Per Home With This End Use [kW]` from the source seems to be the value being distributed.
+    
+    However, the target row count is identical to the source row count (258,420). This suggests a **row-wise transformation** rather than an aggregation. Each source row maps to one target row.
+    
+    Let's re-examine the target columns. Most are `int64` with distinct value `0`. This is suspicious. Why would they be 0?
+    Perhaps the transformation is:
+    1.  Extract `month` and `hour`.
+    2.  Determine which "bucket" the source `End Use` falls into.
+    3.  If it falls into `hvac` or `water_heating`, put the `Average Demand...` value there.
+    4.  For all other specific appliance columns, if the source row *is* that appliance, put the value there? But the target sample shows 0s.
+    
+    Let's look closer at the target sample data vs source sample data.
+    Source Row 1: Kitchen, Freezer, March, Weekend, 13, 11 homes, 0.031 kW.
+    Target Row 1: month=null, hour=1, hvac=1.07, water_heating=0.0, others=0.
+    
+    Wait, the target sample rows do **not** correspond 1-to-1 with the source sample rows in terms of content. The source sample has 12 rows, the target sample has 12 rows.
+    Source Row 1 (Freezer, March, 13) -> Target Row 1 (null, 1, 1.07...). This doesn't match.
+    Source Row 2 (Dryer, Dec, 9) -> Target Row 2 (11.0, 21, 0.034...). This doesn't match.
+    
+    Actually, looking at the counts:
+    Source `Time Period` "March" -> Month 3.
+    Source `Hour Ending` 13 -> Hour 13.
+    
+    The target sample data seems to be a *different* set of rows or shuffled. The prompt says "Infer the transformation... The evaluation source contains different rows". The sample data is just for schema inspection.
+    
+    Let's look at the column types again.
+    `hvac`: float64, nulls present.
+    `water_heating`: float64, no nulls (0.0 in sample).
+    `refrigerator`, `clothes_washer`, etc.: int64, distinct value 0.
+    
+    This implies that for the *specific rows shown in the target sample*, the values for appliances are 0. But in the full dataset, do they ever become non-zero?
+    The target schema says `refrigerator` has `distinct: 1` and `distinct_values: [0]`. This means **every single row** in the target dataset has `refrigerator = 0`. Same for `clothes_washer`, `clothes_dryer`, `dishwasher`, `cooking_range`, `pool_spa_pumps`, `interior_lighting`, `exterior_lighting`, `lighting`, `plug`, `pool_spa_heater`.
+    
+    This is a very strong signal. The transformation likely **discards** the specific appliance breakdowns and only retains `hvac` and `water_heating` (and maybe others if they weren't all 0, but they are).
+    
+    So, where do `hvac` and `water_heating` come from?
+    The source has `Average Demand Per Home With This End Use [kW]`.
+    
+    Hypothesis:
+    1.  `month`: Mapped from `Time Period`.
+    2.  `hour`: From `Hour Ending`.
+    3.  `hvac`: If the `End Use` is related to HVAC (Heating/Cooling), take the `Average Demand...` value. Otherwise 0.0 or NaN? The target `hvac` has nulls.
+    4.  `water_heating`: If the `End Use` is Water Heating, take the `Average Demand...` value. Otherwise 0.0.
+    5.  All other columns are constant 0.
+    
+    Let's verify the "HVAC" and "Water Heating" mapping.
+    Source `End Use` distinct values are not fully listed, but we see "Freezer", "Clothes Dryer", "Lighting", "Remaining Load".
+    Usually, "Remaining Load" in energy datasets often contains HVAC if not separated, or HVAC is a separate category.
+    However, the target has `hvac` and `water_heating` as the only non-constant float columns.
+    
+    Let's look at the source `End Use Category`.
+    "Kitchen", "Laundry", "Miscellaneous", "Lighting", "Remaining Load".
+    
+    If `hvac` is derived from `Remaining Load`, that's a big assumption.
+    Alternatively, maybe `hvac` is derived from specific `End Use` strings like "Heating", "Cooling", "AC".
+    
+    Let's look at the target `hvac` nulls: 13,728.
+    Source `Average Demand...` nulls: 70,248.
+    
+    If `hvac` is 0.0 for non-HVAC rows, and the value for HVAC rows, then the nulls in `hvac` must come from nulls in the source `Average Demand...` for HVAC rows.
+    
+    What about `water_heating`? Target nulls: 0. Distinct: 269.
+    This suggests `water_heating` is 0.0 for most rows, and has values for some.
+    
+    **Refined Hypothesis**:
+    The transformation maps specific `End Use` strings to the `hvac` and `water_heating` columns. All other target columns are constant 0.
+    
+    Which `End Use` strings map to `hvac`?
+    Common HVAC end uses: "Heating", "Cooling", "Space Heating", "Space Cooling", "HVAC".
+    Which map to `water_heating`?
+    "Water Heater", "Water Heating".
+    
+    Since I don't have the full list of `End Use` distinct values, I have to infer from common patterns or the "Remaining Load" category.
+    However, there is a simpler possibility.
+    Look at the target columns again.
+    `refrigerator`, `clothes_washer`, `clothes_dryer`, `dishwasher`, `cooking_range`, `pool_spa_pumps`, `interior_lighting`, `exterior_lighting`, `lighting`, `plug`, `pool_spa_heater` are ALL 0.
+    
+    This implies the transformation is:
+    1.  Create `month` from `Time Period`.
+    2.  Create `hour` from `Hour Ending`.
+    3.  Create `hvac` column:
+        -   If `End Use` is in a set of HVAC-related strings, value = `Average Demand...`
+        -   Else value = 0.0
+    4.  Create `water_heating` column:
+        -   If `End Use` is in a set of Water Heating-related strings, value = `Average Demand...`
+        -   Else value = 0.0
+    5.  Create all other columns as 0.
+    
+    But wait, if `hvac` is 0.0 for non-HVAC, why are there nulls in `hvac`?
+    The nulls in `hvac` (13,728) are likely from source rows where `End Use` IS HVAC but `Average Demand...` is NaN.
+    
+    How to identify HVAC and Water Heating `End Use` strings?
+    Without the full distinct list, I must guess based on standard energy disaggregation datasets (like REDD or similar).
+    Common strings:
+    HVAC: "Heating", "Cooling", "Space Heating", "Space Cooling", "AC", "Heat Pump".
+    Water Heating: "Water Heater", "Water Heating".
+    
+    Let's check the source sample again.
+    "Freezer", "Clothes Dryer - Electric", "Clothes Washer", "Primary TV and Peripherals", "Primary Desktop Computer", "Misc Metered", "Pool Pump", "Lighting", "Remaining Load".
+    
+    "Remaining Load" is a catch-all. It might contain HVAC.
+    However, if "Remaining Load" contained HVAC, and we mapped it to `hvac`, then `hvac` would have many values.
+    
+    Let's look at the distinct count of `hvac` in target: 425.
+    Source `Average Demand...` distinct: 341.
+    
+    If `hvac` takes values from `Average Demand...`, the distinct count should be <= 341 (plus 0.0 and NaN). 425 is higher than 341. This contradicts the simple "copy value" hypothesis unless `hvac` is calculated differently or combines multiple sources.
+    
+    Wait, `hvac` distinct is 425. `Average Demand` distinct is 341.
+    This implies `hvac` is NOT just a direct copy of `Average Demand`.
+    
+    Let's re-read the target schema carefully.
+    `hvac`: float64, nulls 13728, distinct 425.
+    `water_heating`: float64, nulls 0, distinct 269.
+    
+    Maybe `hvac` and `water_heating` are **aggregations**?
+    But the row count is preserved (258,420).
+    
+    Is it possible that `hvac` and `water_heating` are derived from `Number of Homes...`? No, dtype is float.
+    
+    Let's look at the `End Use` column again.
+    Maybe the `End Use` column *is* the key.
+    
+    Alternative Theory:
+    The target columns `refrigerator`, `clothes_washer`, etc. are 0 because the source data *doesn't* have those specific end uses in the sample, or they are mapped to 0.
+    
+    Let's look at the `month` column in target.
+    Distinct values: null, 1.0 ... 12.0.
+    Source `Time Period`: "March" ... "December".
+    Mapping: January=1, ..., December=12.
+    Why is there a null in `month`?
+    Source `Time Period` has 14 distinct values.
+    Months are 12.
+    So 2 distinct values in `Time Period` do not map to months.
+    What could they be? "All"? "Annual"?
+    Source `Day Type` has "All". `Time Period` might have "All" or "Annual".
+    If `Time Period` is "All", `month` becomes NaN.
+    
+    Now, back to `hvac` and `water_heating`.
+    If the row count is preserved, and most appliance columns are 0, it's highly likely that:
+    1.  Rows corresponding to HVAC end uses get their demand value in `hvac`.
+    2.  Rows corresponding to Water Heating end uses get their demand value in `water_heating`.
+    3.  All other rows get 0.0 in `hvac` and `water_heating`.
+    
+    But why is `hvac` distinct (425) > `Average Demand` distinct (341)?
+    Maybe `hvac` is not just `Average Demand`.
+    Or maybe `Average Demand` has more distinct values in the full dataset than the sample suggests? The sample shows 341 distinct for `Average Demand`. The target `hvac` has 425.
+    
+    Could `hvac` be `Average Demand` * `Number of Homes`?
+    `Number of Homes` is string ("11", "0 (Modeled)").
+    If we parse `Number of Homes` to int, and multiply, we get total demand.
+    Let's check the sample.
+    Source Row 1: 11 homes, 0.031 kW. Total = 0.341 kW.
+    Target Row 1: hvac = 1.07.
+    This doesn't match.
+    
+    Let's look at Target Row 1 again: `month`=null, `hour`=1, `hvac`=1.07.
+    Source Row 1: `Time Period`="March" (3), `Hour`=13.
+    These don't match. The samples are not aligned.
+    
+    Let's assume the standard mapping:
+    `month`: Map `Time Period` to int.
+    `hour`: Copy `Hour Ending`.
+    
+    For the values:
+    The target has specific columns for appliances. In the target schema, they are all 0.
+    This suggests that for the purpose of this transformation, we are **only** interested in `hvac` and `water_heating`.
+    
+    How to distinguish HVAC and Water Heating from the source?
+    Source `End Use` strings.
+    I will assume standard naming conventions:
+    HVAC: "Heating", "Cooling", "Space Heating", "Space Cooling", "HVAC", "AC".
+    Water Heating: "Water Heater", "Water Heating".
+    
+    If an `End Use` matches HVAC, `hvac` = `Average Demand...`, else 0.0.
+    If an `End Use` matches Water Heating, `water_heating` = `Average Demand...`, else 0.0.
+    
+    Why the distinct count mismatch?
+    Maybe `hvac` includes "Remaining Load" if it's not HVAC? No.
+    Maybe `hvac` is calculated as `Average Demand` for HVAC rows, and 0.0 for others.
+    Distinct values of `hvac` = Distinct values of `Average Demand` for HVAC rows + {0.0} + {NaN}.
+    If `Average Demand` has 341 distinct values overall, the subset for HVAC might have fewer.
+    Unless... `hvac` is not `Average Demand`.
+    
+    Let's look at `water_heating`. Distinct 269.
+    
+    Is it possible that `hvac` and `water_heating` are **not** derived from `Average Demand`?
+    What else is there? `Number of Homes`? No.
+    
+    Let's reconsider the `End Use Category`.
+    "Remaining Load" often contains HVAC.
+    "Kitchen" contains Refrigerator, Dishwasher, Cooking.
+    "Laundry" contains Washer, Dryer.
+    "Miscellaneous" contains Plug loads, Pool pumps.
+    "Lighting" contains Lighting.
+    
+    If the target columns for appliances are all 0, it implies we are **ignoring** the specific appliance breakdowns provided in the source `End Use` column for those categories.
+    
+    However, `hvac` and `water_heating` are present.
+    Where do they come from?
+    If "Remaining Load" contains HVAC, and we map "Remaining Load" to `hvac`, then `hvac` would have values for all "Remaining Load" rows.
+    
+    Let's try this mapping:
+    -   If `End Use Category` == "Remaining Load":
+        -   `hvac` = `Average Demand...`
+        -   `water_heating` = 0.0
+    -   Else:
+        -   `hvac` = 0.0
+        -   `water_heating` = 0.0
+    
+    But what about Water Heating? Is it in "Remaining Load"? Or "Kitchen"? Or "Miscellaneous"?
+    Usually Water Heating is a major category. If it's not in "Remaining Load", where is it?
+    If it's in "Remaining Load", then `hvac` and `water_heating` would both be non-zero for the same rows? Unlikely.
+    
+    Let's look at the `End Use` distinct values again.
+    The sample shows: "Freezer", "Clothes Dryer - Electric", "Clothes Washer", "Primary TV and Peripherals", "Primary Desktop Computer", "Misc Metered", "Pool Pump", "Lighting", "Remaining Load".
+    
+    Note: "Remaining Load" appears as an `End Use` value in the sample (Row 12).
+    Row 12: Category "Remaining Load", End Use "Remaining Load".
+    
+    If `End Use` == "Remaining Load", does it map to `hvac`?
+    
+    Let's look at the target `hvac` nulls: 13,728.
+    Source `Average Demand` nulls: 70,248.
+    
+    If `hvac` is 0.0 for non-HVAC, and `Average Demand` for HVAC, then the nulls in `hvac` are the nulls in `Average Demand` for HVAC rows.
+    
+    I will proceed with the following assumption:
+    1.  `month`: Map `Time Period` to month number. Unknown/Invalid -> NaN.
+    2.  `hour`: `Hour Ending`.
+    3.  `hvac`: If `End Use` is in a predefined list of HVAC strings (e.g., "Heating", "Cooling", "Space Heating", "Space Cooling", "HVAC", "AC", "Heat Pump"), then `Average Demand...`. Else 0.0.
+    4.  `water_heating`: If `End Use` is in a predefined list of Water Heating strings (e.g., "Water Heater", "Water Heating"), then `Average Demand...`. Else 0.0.
+    5.  All other columns: 0.
+    
+    Since I don't have the full list, I will use a broad set of common HVAC and Water Heating terms. If the source uses "Remaining Load" for HVAC, I might miss it. But "Remaining Load" is also an `End Use` value.
+    
+    Actually, looking at the target `hvac` distinct count (425) vs source `Average Demand` (341), it's possible that `hvac` is **not** just `Average Demand`.
+    
+    Wait, what if `hvac` is `Average Demand` *for* HVAC, and `water_heating` is `Average Demand` *for* Water Heating, and the distinct count difference is due to the subset?
+    If `Average Demand` has 341 distinct values, a subset cannot have 425.
+    Therefore, `hvac` is **not** a direct subset of `Average Demand` values.
+    
+    This implies `hvac` is calculated differently.
+    Could it be `Average Demand` + some offset? Unlikely.
+    Could it be `Average Demand` * `Number of Homes`?
+    Let's check the distinct count of `Number of Homes`. 241.
+    341 * 241 is huge.
+    
+    What if `hvac` is `Average Demand` for HVAC rows, and `water_heating` is `Average Demand` for Water Heating rows, and the "distinct" count in the target schema includes 0.0 and NaN?
+    Source `Average Demand` distinct: 341.
+    If we add 0.0 and NaN, that's 343.
+    Target `hvac` distinct: 425.
+    Still doesn't match.
+    
+    Is it possible that `hvac` combines multiple source columns?
+    No other numeric columns.
+    
+    Let's look at the `End Use` column again.
+    Maybe `hvac` is derived from `End Use` string parsing?
+    
+    Let's step back.
+    The target columns `refrigerator`, `clothes_washer`, etc. are all 0.
+    This suggests the transformation is **filtering** or **selecting** only HVAC and Water Heating, and zeroing out the rest.
+    
+    If the distinct count of `hvac` (425) is higher than `Average Demand` (341), there must be a calculation.
+    
+    What if `hvac` is `Average Demand` * 1.0? No.
+    
+    Let's look at the `Time Period` mapping again.
+    Source `Time Period` has 14 distinct values.
+    Target `month` has 13 distinct values (1-12 + NaN).
+    So 2 source values map to NaN.
+    
+    Let's assume the standard mapping for `month` and `hour`.
+    For the values, I will assume:
+    `hvac` = `Average Demand...` if `End Use` contains "Heat" or "Cool" or "HVAC" or "AC".
+    `water_heating` = `Average Demand...` if `End Use` contains "Water".
+    Else 0.0.
+    
+    If this results in a distinct count mismatch, it might be due to the specific dataset's `End Use` strings.
+    
+    However, there is one more possibility.
+    The target `hvac` and `water_heating` might be **aggregated** from the source?
+    But the row count is the same.
+    
+    I will implement the row-wise mapping with 0.0 for non-matching rows.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Map Time Period to Month Number
+    month_map = {
+        'January': 1.0, 'February': 2.0, 'March': 3.0, 'April': 4.0,
+        'May': 5.0, 'June': 6.0, 'July': 7.0, 'August': 8.0,
+        'September': 9.0, 'October': 10.0, 'November': 11.0, 'December': 12.0
+    }
+    # Map known months, others become NaN
+    month_series = source['Time Period'].map(month_map)
+    
+    # 2. Hour
+    hour_series = source['Hour Ending']
+    
+    # 3. Identify HVAC and Water Heating End Uses
+    # We need to identify which 'End Use' strings correspond to HVAC and Water Heating.
+    # Based on common energy datasets, we look for keywords.
+    # Since the target appliance columns are all 0, we assume only HVAC and Water Heating are extracted.
+    
+    # Helper to check if end use is HVAC
+    def is_hvac(end_use):
+        if pd.isna(end_use):
+            return False
+        end_use_lower = str(end_use).lower()
+        hvac_keywords = ['heating', 'cooling', 'hvac', 'ac', 'heat pump', 'space heating', 'space cooling']
+        return any(kw in end_use_lower for kw in hvac_keywords)
+    
+    # Helper to check if end use is Water Heating
+    def is_water_heating(end_use):
+        if pd.isna(end_use):
+            return False
+        end_use_lower = str(end_use).lower()
+        wh_keywords = ['water heater', 'water heating']
+        return any(kw in end_use_lower for kw in wh_keywords)
+    
+    # Apply masks
+    hvac_mask = source['End Use'].apply(is_hvac)
+    wh_mask = source['End Use'].apply(is_water_heating)
+    
+    # Get the demand values
+    demand = source['Average Demand Per Home With This End Use [kW]']
+    
+    # Create hvac column: value if HVAC, else 0.0
+    hvac_series = np.where(hvac_mask, demand, 0.0)
+    
+    # Create water_heating column: value if Water Heating, else 0.

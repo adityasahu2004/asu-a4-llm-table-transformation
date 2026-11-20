@@ -1,0 +1,91 @@
+### Operator Plan
+
+1.  **Parse Date**: Convert the `DT_STRATA` column (format `M/D/YYYY`) into a pandas datetime object to extract month information.
+2.  **Extract Month Name**: Extract the month name from the parsed date. Format it to match the target schema exactly: left-aligned, padded with spaces to a width of 11 characters (e.g., "January  ", "September").
+3.  **Determine Day Type**: Map the `DOW` column to the `daytype` column. The target shows only "weekday". The source `DOW` values are '1'-'7' (Monday-Sunday) and 'H'/'D' (Holiday/Day?). Based on the target distinct values being only "weekday", and typical energy data patterns where 'H' might be holiday but the target simplifies or filters, we need to check if 'H' or 'D' exist in the target. The target distinct values for `daytype` is just `["weekday"]`. This implies either:
+    *   The source only contains weekdays (but 'H' and 'D' are present in source distinct values).
+    *   The transformation maps all days to "weekday" (unlikely for 'H').
+    *   The transformation filters out non-weekdays? No, row counts are identical (5673).
+    *   Let's look closer at `DOW` distinct values: `['7', '1', 'H', '3', '4', '5', '6', '2', 'D']`.
+    *   Target `daytype` distinct values: `['weekday']`.
+    *   This is a strong signal that the target *only* contains weekdays, or the mapping is trivial. However, since row counts are identical, we cannot filter.
+    *   Wait, looking at the sample data:
+        *   Source `DOW` '7' (Sunday) -> Target `daytype` 'weekday'?
+        *   Source `DOW` '2' (Tuesday) -> Target `daytype` 'weekday'?
+        *   Source `DOW` 'H' (Holiday) -> ?
+        *   Source `DOW` 'D' (Day?) -> ?
+    *   If the target *only* has "weekday", and row counts are preserved, it implies that for the purpose of this specific transformation task, *all* rows are labeled "weekday", OR the source data provided in the sample doesn't contain 'H' or 'D' in the specific rows shown, but the schema says they exist.
+    *   Let's re-read the target distinct values carefully. `distinct_values: ["weekday"]`.
+    *   If I map '1'-'5' to 'weekday' and '6','7','H','D' to something else, the distinct count would be > 1.
+    *   Since the distinct count is 1, the operation must map *every* row to "weekday". This seems semantically incorrect for 'H' (Holiday), but strictly follows the schema constraint that the output column `daytype` only contains the value "weekday".
+    *   *Alternative interpretation*: Maybe the source `DOW` 'H' and 'D' are not present in the *evaluation* set, or the prompt implies a simplification. Given the strict instruction "Keep target column names exactly... Compute the result only from the source DataFrame", and the target schema explicitly lists only "weekday" as a distinct value, I will map all rows to "weekday".
+    *   *Correction*: Let's look at the sample data again.
+        *   Row 1: DOW '7' (Sunday). Target: 'weekday'.
+        *   Row 2: DOW '2' (Tuesday). Target: 'weekday'.
+        *   Row 11: DOW '7' (Sunday). Target: 'weekday'.
+    *   It appears the transformation ignores the actual day type and labels everything as "weekday". This is unusual but consistent with the provided target schema statistics.
+
+4.  **Rename Hourly Columns**: Map `PCT_HOURLY_0100` through `PCT_HOURLY_2400` to `hr1` through `hr24`.
+    *   `PCT_HOURLY_0100` -> `hr1`
+    *   ...
+    *   `PCT_HOURLY_2400` -> `hr24`
+    *   Note: `PCT_HOURLY_2500` is dropped (not in target).
+
+5.  **Construct Output**: Create a new DataFrame with columns `month`, `daytype`, `hr1`...`hr24`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    """
+    Transforms the source DataFrame by:
+    1. Extracting the month name from DT_STRATA and formatting it to 11 chars.
+    2. Setting daytype to 'weekday' for all rows.
+    3. Renaming PCT_HOURLY_XX00 columns to hrX.
+    4. Dropping unused columns.
+    """
+    
+    # 1. Parse Date and Extract Month
+    # Format is M/D/YYYY
+    dt = pd.to_datetime(source['DT_STRATA'], format='%m/%d/%Y')
+    
+    # Extract month name
+    month_names = dt.dt.strftime('%B')
+    
+    # Format to match target: Left aligned, padded to 11 characters
+    # e.g., "January" -> "January  " (2 spaces)
+    # "September" -> "September" (0 spaces)
+    # "December" -> "December " (1 space)
+    month_formatted = month_names.str.ljust(11)
+    
+    # 2. Determine Day Type
+    # Target schema shows only "weekday" as distinct value.
+    # Sample data shows Sundays (7) mapped to "weekday".
+    # Therefore, map all rows to "weekday".
+    daytype = pd.Series(['weekday'] * len(source), index=source.index)
+    
+    # 3. Rename Hourly Columns
+    # Map PCT_HOURLY_0100 -> hr1, ..., PCT_HOURLY_2400 -> hr24
+    rename_map = {}
+    for i in range(1, 25):
+        src_col = f"PCT_HOURLY_{i:04d}"
+        tgt_col = f"hr{i}"
+        if src_col in source.columns:
+            rename_map[src_col] = tgt_col
+            
+    # Select and rename columns
+    # We need to keep the order: month, daytype, hr1...hr24
+    df_out = pd.DataFrame()
+    df_out['month'] = month_formatted
+    df_out['daytype'] = daytype
+    
+    # Add hourly columns in order
+    for i in range(1, 25):
+        src_col = f"PCT_HOURLY_{i:04d}"
+        tgt_col = f"hr{i}"
+        if src_col in source.columns:
+            df_out[tgt_col] = source[src_col].astype(float)
+            
+    return df_out
+```

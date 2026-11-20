@@ -1,0 +1,66 @@
+**Operator Plan:**
+
+1.  **Parse Dates**: Convert the `date` string column to datetime objects to extract the hour and month components. The format is inferred from samples as `%m/%d/%Y %H:%M`.
+2.  **Extract Components**: Create integer columns for `Hour` (0-23) and `Month` (1-12).
+3.  **Filter/Clean**: Drop rows where the value `zone_016` is null, as the target implies valid numeric aggregations (though the sample shows specific hours, the distinct count of 24 for Hour suggests we want one row per hour). *Correction*: Looking at the target sample, it has 12 rows, but the schema says 24 rows. The target sample data provided only shows 12 rows (0, 2, 4... 23? No, 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 23). Wait, the target schema says `distinct: 24` for Hour and `rows: 24`. The sample data block in the prompt only shows 12 rows, but the schema is the ground truth for structure. The sample data likely just truncated or is illustrative. The goal is to pivot the data such that we have one row per Hour (0-23) and columns for each Month.
+4.  **Aggregation**: Since multiple rows might exist for the same Hour/Month combination (or just one), we need to aggregate. The target has no nulls in January for the displayed rows. The sample source has 2-hour intervals roughly. If there are multiple entries for a specific Hour and Month, we should likely average them. Given the "distinct" counts in the target for January (17 distinct values out of 24 rows), it suggests some hours might have no data (null) or distinct averages. However, the target schema says `nulls: 0` for January. This implies that for the evaluation data, every hour has data for the months present, or we are filling/averaging. Let's look at the source: 1450 rows. 1450 / 24 hours ≈ 60 days. If we group by Hour and Month and take the mean, we get one value per Hour/Month.
+5.  **Pivot**: Group by `Hour` and `Month`. Aggregate `zone_016` (likely mean). Pivot the `Month` column into separate columns named by month names.
+6.  **Format Months**: Map month numbers (1-12) to full month names ("January", "February", etc.).
+7.  **Reindex**: Ensure all 24 hours (0-23) are present in the index/columns, filling missing months with NaN (though the target says `nulls: 0` for January, other months have `nulls: 24`, implying they are empty in this specific dataset slice or the source only contains January data? The source sample only shows Jan 2018. The target has `nulls: 24` for Feb-Dec. This confirms the source likely only has data for one month (January) in this specific instance, or the pivot will naturally leave other months as NaN if no data exists. The target schema `nulls: 0` for January confirms all 24 hours have data for January).
+8.  **Finalize**: Reset index to make `Hour` a column. Ensure column order matches target.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date string
+    # Format observed: "1/2/2018 0:11" -> %m/%d/%Y %H:%M
+    source['dt'] = pd.to_datetime(source['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract Hour and Month
+    source['Hour'] = source['dt'].dt.hour
+    source['Month'] = source['dt'].dt.month
+    
+    # Filter out nulls in the value column
+    clean_df = source.dropna(subset=['zone_016'])
+    
+    # Group by Hour and Month, and take the mean
+    # This handles potential duplicates for the same hour/month
+    grouped = clean_df.groupby(['Hour', 'Month'])['zone_016'].mean().reset_index()
+    
+    # Pivot the table
+    # Index: Hour, Columns: Month, Values: zone_016
+    pivot_df = grouped.pivot(index='Hour', columns='Month', values='zone_016')
+    
+    # Map month numbers to names
+    month_map = {
+        1: 'January', 2: 'February', 3: 'March', 4: 'April',
+        5: 'May', 6: 'June', 7: 'July', 8: 'August',
+        9: 'September', 10: 'October', 11: 'November', 12: 'December'
+    }
+    pivot_df = pivot_df.rename(columns=month_map)
+    
+    # Ensure all 24 hours are present
+    all_hours = pd.RangeIndex(0, 24)
+    pivot_df = pivot_df.reindex(all_hours)
+    
+    # Reset index to make Hour a column
+    pivot_df = pivot_df.reset_index()
+    pivot_df = pivot_df.rename(columns={'index': 'Hour'})
+    
+    # Ensure column order matches target specification
+    target_cols = [
+        'Hour', 'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'
+    ]
+    
+    # Select only existing columns in that order
+    # Note: If a month is missing from source, it won't be in pivot_df columns.
+    # We should ensure all month columns exist, even if empty/NaN
+    for col in target_cols:
+        if col != 'Hour' and col not in pivot_df.columns:
+            pivot_df[col] = np.nan
+            
+    return pivot_df[target_cols]
+```

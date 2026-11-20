@@ -1,0 +1,232 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `date` column from string format (`M/D/YYYY H:MM`) to datetime objects.
+2.  **Extract Date Component**: Create a new column `date_only` containing just the date part (YYYY-MM-DD) to group records by day.
+3.  **Determine Hour Index**:
+    *   The target has 24 columns (`Hour 1` to `Hour 24`).
+    *   The source data shows timestamps roughly every 2 hours (0:11, 2:22, 4:34...).
+    *   We need to map each source row to one of the 24 hourly buckets.
+    *   Looking at the sample:
+        *   `1/2/2018 0:11` -> `Hour 1` (value 67.9)
+        *   `1/2/2018 2:22` -> `Hour 2` (value 67.9)
+        *   `1/2/2018 4:34` -> `Hour 3` (value 67.6)
+        *   ...
+        *   `1/2/2018 22:08` -> `Hour 12`? No, let's look closer.
+        *   Target `Hour 24` for `01/01/2018` is 67.9. Source last entry for Jan 1st is `1/2/2018 0:11`? No, the sample shows `1/2/2018` entries.
+        *   Let's re-examine the target sample data for `01/01/2018`.
+            *   `Hour 1`: 67.9. Source `1/2/2018 0:11` is 67.9. Wait, the date in target is `01/01/2018` (Jan 1st) and `01/02/2018` (Jan 2nd).
+            *   Source `1/2/2018` is Jan 2nd.
+            *   Source `1/2/2018 0:11` is early morning Jan 2nd.
+            *   Target `01/02/2018` has `Hour 24` = 67.9.
+            *   Target `01/01/2018` has `Hour 1` = 67.9.
+            *   This implies the source `1/2/2018 0:11` (Jan 2nd 00:11) maps to `Hour 24` of Jan 1st? Or `Hour 1` of Jan 2nd?
+            *   Let's look at the values.
+                *   Source `1/2/2018 0:11` = 67.9.
+                *   Target `01/02/2018` (Jan 2) `Hour 24` = 67.9.
+                *   Target `01/01/2018` (Jan 1) `Hour 1` = 67.9.
+            *   This is contradictory if we assume standard day boundaries. Let's look at the next value.
+                *   Source `1/2/2018 2:22` = 67.9.
+                *   Target `01/02/2018` `Hour 23` = 67.8? No, `Hour 23` is 67.8. `Hour 24` is 67.9.
+                *   Target `01/01/2018` `Hour 2` = 67.8.
+            *   It seems the target `01/01/2018` row contains the values from the source `1/2/2018` timestamps?
+                *   Source `1/2/2018 0:11` (67.9) -> Target `01/01/2018` `Hour 1` (67.9).
+                *   Source `1/2/2018 2:22` (67.9) -> Target `01/01/2018` `Hour 2` (67.8)? No, 67.9 != 67.8.
+                *   Let's check `Hour 3`. Target `01/01/2018` `Hour 3` is 67.7. Source `1/2/2018 4:34` is 67.6.
+            *   Let's look at the Target `01/02/2018` row.
+                *   `Hour 24` is 67.9.
+                *   All other hours are null.
+            *   This suggests that the source data provided in the sample is primarily for Jan 2nd (`1/2/2018`), but the target shows data for Jan 1st and Jan 2nd.
+            *   Actually, look at the source sample again. It starts with `1/2/2018`.
+            *   The target has `01/01/2018` and `01/02/2018`.
+            *   The values in Target `01/01/2018` (67.9, 67.8, 67.7...) look like a smooth curve.
+            *   The values in Source `1/2/2018` (67.9, 67.9, 67.6...) are slightly different.
+            *   Hypothesis: The source data contains timestamps. We need to pivot them into 24 hourly buckets per day.
+            *   How are the buckets defined?
+                *   `Hour 1` corresponds to the first measurement of the day?
+                *   `Hour 24` corresponds to the last?
+                *   Or is it based on the hour of the day?
+                *   Source `1/2/2018 0:11` is hour 0.
+                *   Source `1/2/2018 2:22` is hour 2.
+                *   Source `1/2/2018 4:34` is hour 4.
+                *   ...
+                *   Source `1/2/2018 22:08` is hour 22.
+                *   There are 12 measurements per day in the sample (0, 2, 4, ..., 22).
+                *   But the target has 24 columns.
+                *   And the target `01/01/2018` has 24 non-null values.
+                *   This implies interpolation or that the source actually has more data not shown in the small sample, OR the "Hour" columns represent sequential measurements, not clock hours.
+                *   Let's check the distinct count of `zone_016` in source: 24.
+                *   Let's check the target `Hour` columns. They have distinct values.
+                *   If the source has 1450 rows and 24 distinct values, and the target has 2 rows (days) with 24 hours each, it's likely a pivot operation.
+                *   Key Insight: The target columns are `Hour 1` to `Hour 24`. This usually implies a rank or sequence within the day, or a specific time bin.
+                *   Given the source timestamps are every ~2 hours, and there are 24 target columns, it is highly likely that the source data in the *full* dataset has hourly data, or we need to interpolate. However, the prompt says "Infer a general transformation".
+                *   Let's look at the mapping again.
+                *   Source `1/2/2018 0:11` -> Value 67.9.
+                *   Target `01/01/2018` `Hour 1` -> 67.9.
+                *   Target `01/02/2018` `Hour 24` -> 67.9.
+                *   This is very confusing. Let's look at the date format.
+                *   Source: `1/2/2018`. Target: `01/02/2018` (MM/DD/YYYY).
+                *   Source `1/2/2018` is Jan 2nd.
+                *   Target `01/02/2018` is Jan 2nd.
+                *   Target `01/01/2018` is Jan 1st.
+                *   The source sample *only* shows Jan 2nd data.
+                *   The target shows Jan 1st and Jan 2nd.
+                *   The values for Jan 1st in the target (67.9, 67.8, 67.7...) are NOT in the source sample for Jan 2nd.
+                *   Therefore, the source *must* contain Jan 1st data as well, which is just not in the `sample` block provided in the prompt description (the sample block is truncated).
+                *   So, we assume the source has data for multiple days.
+                *   We need to group by Date.
+                *   Within each date, we need to assign each row to `Hour 1` ... `Hour 24`.
+                *   How?
+                    *   Option A: By clock hour. `dt.hour`. But source has 0, 2, 4... If we pivot by hour, we get sparse data. The target has dense data for Jan 1st. This implies the full source has hourly data.
+                    *   Option B: By rank. Sort by time within the day, assign 1..N. If N=24, then `Hour 1` is the first measurement.
+                    *   Let's check the values for Jan 1st in Target.
+                        *   Hour 1: 67.9
+                        *   Hour 2: 67.8
+                        *   ...
+                        *   Hour 24: 67.9
+                    *   Let's check the values for Jan 2nd in Source (sample).
+                        *   0:11: 67.9
+                        *   2:22: 67.9
+                        *   4:34: 67.6
+                        *   ...
+                        *   22:08: 68.5
+                    *   If we assume the full source has hourly data for Jan 2nd, what would it look like?
+                    *   The target for Jan 2nd (`01/02/2018`) has only `Hour 24` = 67.9 and rest null.
+                    *   This is extremely strange. Why would Jan 2nd be mostly null?
+                    *   Maybe the source `1/2/2018 0:11` is considered the *last* hour of the previous day? No, it's 0:11.
+                    *   Maybe the target `01/02/2018` row is incomplete in the sample?
+                    *   Let's look at the `distinct_values` for `Hour 24` in target: `[67.9]`.
+                    *   `Hour 1` distinct values: `[null, 67.9]`.
+                    *   This implies that for some days, Hour 1 is null.
+                    *   Let's reconsider the "Rank" hypothesis.
+                    *   If we sort by time within a day:
+                        *   Jan 1st (hypothetical full data): 24 rows. Rank 1..24.
+                        *   Jan 2nd (sample data): 12 rows shown. If full data has 24, Rank 1..24.
+                    *   Why is Jan 2nd mostly null in target?
+                    *   Maybe the source data for Jan 2nd *only* has the last measurement?
+                    *   Source sample shows 12 measurements for Jan 2nd.
+                    *   Target shows 1 measurement for Jan 2nd.
+                    *   This contradicts the "Rank" hypothesis unless the target sample is also truncated or specific to a subset.
+                    *   Wait, look at the target `distinct_values` for `Hour 24`. It is `[67.9]`.
+                    *   Look at `Hour 1`. `[null, 67.9]`.
+                    *   Look at `Hour 2`. `[null, 67.8]`.
+                    *   This pattern (null for Jan 2, value for Jan 1) suggests that Jan 2nd data is missing for hours 1-23.
+                    *   But the source *has* data for Jan 2nd hours 0, 2, 4...
+                    *   Is it possible the target date `01/02/2018` corresponds to source `1/2/2018`? Yes.
+                    *   Is it possible the target date `01/01/2018` corresponds to source `1/1/2018`? Yes.
+                    *   Why is source `1/2/2018` data not appearing in target `01/02/2018` hours 1-23?
+                    *   Maybe the source `1/2/2018` data in the sample is actually for `1/1/2018`?
+                        *   Source: `1/2/2018 0:11`.
+                        *   If this was `1/1/2018 0:11`, it would map to Jan 1st.
+                        *   But the string is explicitly `1/2/2018`.
+                    *   Let's look at the Target `01/01/2018` values again.
+                        *   67.9, 67.8, 67.7, 67.6, 67.5, 67.3, 67.1, 67.0, 66.9, 66.8, 66.7, 66.5, 66.4, 66.3, 66.1, 66.0, 66.2, 66.4, 66.7, 67.0, 67.3, 67.6, 67.8, 67.9.
+                    *   Let's look at Source `1/2/2018` values.
+                        *   67.9, 67.9, 67.6, 67.3, 67.1, 66.9, 66.8, 66.7, 66.9, 67.8, 68.5.
+                    *   They are different.
+                    *   Conclusion: The source contains data for Jan 1st (not shown in sample) and Jan 2nd (shown in sample).
+                    *   The target shows Jan 1st (full) and Jan 2nd (partial/null).
+                    *   Why is Jan 2nd partial in target?
+                    *   Maybe the target sample is just showing the first 2 rows, and for Jan 2nd, the data *is* there but the sample display is misleading?
+                    *   No, `nulls: 1` for Hour 1 means one of the two rows is null.
+                    *   `distinct_values: [null, 67.9]`.
+                    *   Row 1 (`01/02/2018`) is null. Row 2 (`01/01/2018`) is 67.9.
+                    *   So, for Jan 2nd, Hour 1 is null.
+                    *   But Source has `1/2/2018 0:11` with value 67.9.
+                    *   If `1/2/2018 0:11` maps to `Hour 1` of `01/02/2018`, it should be 67.9, not null.
+                    *   Unless... `1/2/2018 0:11` maps to `Hour 24` of `01/01/2018`?
+                        *   If `1/2/2018 0:11` is the last hour of Jan 1st?
+                        *   Then `Hour 24` of `01/01/2018` would be 67.9.
+                        *   Target `01/01/2018` `Hour 24` is 67.9.
+                        *   This matches!
+                        *   Let's check `1/2/2018 2:22` (67.9).
+                        *   If this is `Hour 1` of `01/02/2018`?
+                        *   Target `01/02/2018` `Hour 1` is null.
+                        *   Contradiction.
+                    *   Let's try another mapping.
+                    *   Maybe the source `1/2/2018` data is actually for `1/1/2018` in the target's view?
+                        *   If Source `1/2/2018` -> Target `01/01/2018`.
+                        *   Source `1/2/2018 0:11` (67.9) -> Target `01/01/2018` `Hour 1` (67.9). Match.
+                        *   Source `1/2/2018 2:22` (67.9) -> Target `01/01/2018` `Hour 2` (67.8). Mismatch (67.9 vs 67.8).
+                        *   Source `1/2/2018 4:34` (67.6) -> Target `01/01/2018` `Hour 3` (67.7). Mismatch.
+                    *   Okay, let's look at the Target `01/02/2018` again.
+                        *   Only `Hour 24` is 67.9.
+                        *   Source `1/2/2018` has `0:11` = 67.9.
+                        *   If `0:11` is `Hour 24` of the *previous* day (Jan 1st), then Jan 1st `Hour 24` = 67.9.
+                        *   Target Jan 1st `Hour 24` = 67.9.
+                        *   This works for the value.
+                        *   What about Jan 2nd?
+                        *   If the source `1/2/2018` data is actually Jan 1st data, where is Jan 2nd data?
+                        *   The source sample ends at `1/3/2018 0:20` (null).
+                        *   Maybe the source `1/2/2018` rows are Jan 1st?
+                        *   If Source `1/2/2018` == Target `01/01/2018`:
+                            *   We established the values don't match perfectly for Hour 2+.
+                            *   Source: 67.9, 67.9, 67.6...
+                            *   Target: 67.9, 67.8, 67.7...
+                            *   The target values are smoother. The source values are jagged.
+                            *   This suggests the target might be interpolated or averaged?
+                            *   Or, the source sample is just a subset and the full source has hourly data that matches the target.
+                            *   If the full source has hourly data, then:
+                                *   Source `1/1/2018 0:00` -> Hour 1.
+                                *   Source `1/1/2018 1:00` -> Hour 2.
+                                *   ...
+                                *   Source `1/1/2018 23:00` -> Hour 24.
+                            *   And Source `1/2/2018 0:00` -> Hour 1 of Jan 2nd.
+                            *   Why is Target Jan 2nd mostly null?
+                            *   Maybe the evaluation source *only* has data for Jan 1st and the last hour of Jan 2nd?
+                            *   The prompt says "Source row count describes a training sample only".
+                            *   The target sample shows 2 rows.
+                            *   If I assume the standard pivot:
+                                1. Parse date.
+                                2. Extract Date.
+                                3. Extract Hour (0-23).
+                                4. Map Hour 0->1, 1->2, ..., 23->24.
+                                5. Pivot.
+                            *   Let's verify this logic with the "Jan 1st" data.
+                                *   If Source has `1/1/2018 0:xx` -> Hour 1.
+                                *   If Source has `1/1/2018 23:xx` -> Hour 24.
+                            *   This is the most standard interpretation of "Hour 1..24".
+                            *   The discrepancy in the sample values (Source Jan 2nd vs Target Jan 1st) is likely due to the sample showing different days or the sample being illustrative of format rather than exact value mapping for the specific rows shown.
+                            *   However, note that `1/2/2018 0:11` is in the source.
+                            *   If we map `1/2/2018 0:11` to `Hour 1` of `01/02/2018`, the target shows `null`.
+                            *   If we map `1/2/2018 0:11` to `Hour 24` of `01/01/2018`, the target shows `67.9`.
+                            *   This "shift" (0:00 of Day N is Hour 24 of Day N-1) is a common convention in some time-series (e.g., business days ending at midnight).
+                            *   Let's check if this shift explains the Jan 1st data.
+                                *   If Source `1/1/2018 0:xx` -> Hour 24 of `12/31/2017`?
+                                *   We don't have Dec 31 data.
+                                *   If Source `1/1/2018 23:xx` -> Hour 23 of `01/01/2018`?
+                                *   Let's assume the standard: `Hour 1` = 0:00-0:59, `Hour 24` = 23:00-23:59.
+                                *   Why would Target `01/02/2018` be null?
+                                *   Maybe the source *doesn't* have data for Jan 2nd hours 1-23 in the evaluation set?
+                                *   The prompt says "Source row count... 1450".
+                                *   If there are ~24 hours/day, 1450 rows is ~60 days.
+                                *   The target has 2 rows.
+                                *   The target sample is just a snippet.
+                                *   I will proceed with the standard pivot:
+                                    1. Parse `date` to datetime.
+                                    2. Create `date_str` in `MM/DD/YYYY` format.
+                                    3. Create `hour_bin` = `dt.hour` + 1. (0->1, 23->24).
+                                    4. Pivot on `date_str`, `hour_bin`, values `zone_016`.
+                                    5. Rename columns to `Hour 1`...`Hour 24`.
+                                    6. Sort by date descending? Target has `01/02/2018` then `01/01/2018`. Yes, descending date.
+
+4.  **Refinement on Date Format**:
+    *   Source: `1/2/2018 0:11`.
+    *   Target: `01/02/2018`.
+    *   Format: `%m/%d/%Y`.
+
+5.  **Refinement on Hour Mapping**:
+    *   Standard: `hour` 0 -> `Hour 1`, `hour` 23 -> `Hour 24`.
+    *   This assumes the source has hourly data. The sample shows 2-hour intervals, but the distinct count of `zone_016` is 24, and target has 24 columns. It's safe to assume the full data is hourly or we map the existing timestamps to their respective hour buckets. If multiple rows fall in the same hour, we might need an aggregation (mean/first). Given "distinct: 24" in source for the value column, and 24 hours, it's likely 1 value per hour per day.
+
+6.  **Final Steps**:
+    *   Group by Date.
+    *   Pivot.
+    *   Format Date column.
+    *   Sort Date descending.
+    *   Ensure column names are `Hour 1` to `Hour 24`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame)

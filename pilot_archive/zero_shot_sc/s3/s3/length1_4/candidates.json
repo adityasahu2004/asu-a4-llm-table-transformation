@@ -1,0 +1,78 @@
+[
+  {
+    "index": 0,
+    "finish_reason": "stop",
+    "path": "generated/s3/length1_4/candidates/0.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:28: Pandas4Warning: For backward compatibility, 'str' dtypes are included by select_dtypes when 'object' dtype is specified. This behavior is deprecated and will be removed in a future version. Explicitly pass 'str' to `include` to select them, or to `exclude` to remove them and silence this warning.\nSee https://pandas.pydata.org/docs/dev/user_guide/migration.html#string-migration-select-dtypes for details on how to write code that works with pandas 2 and 3.\n  for column in output.select_dtypes(include=['object']).columns:\n",
+      "seconds": 0.5645736250007758,
+      "shape": [
+        182,
+        25
+      ],
+      "fingerprint": "75e23289a1819bb22d7ef036f1be0e5107b1091a2c4ff29993499f98bcff7ce2"
+    }
+  },
+  {
+    "index": 1,
+    "finish_reason": "stop",
+    "path": "generated/s3/length1_4/candidates/1.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:28: Pandas4Warning: For backward compatibility, 'str' dtypes are included by select_dtypes when 'object' dtype is specified. This behavior is deprecated and will be removed in a future version. Explicitly pass 'str' to `include` to select them, or to `exclude` to remove them and silence this warning.\nSee https://pandas.pydata.org/docs/dev/user_guide/migration.html#string-migration-select-dtypes for details on how to write code that works with pandas 2 and 3.\n  for column in output.select_dtypes(include=['object']).columns:\n",
+      "seconds": 0.5662067909979669,
+      "shape": [
+        182,
+        25
+      ],
+      "fingerprint": "75e23289a1819bb22d7ef036f1be0e5107b1091a2c4ff29993499f98bcff7ce2"
+    }
+  },
+  {
+    "index": 2,
+    "finish_reason": "length",
+    "execution": {
+      "status": "extraction_error",
+      "error": "unexpected indent (<generated>, line 2)"
+    }
+  },
+  {
+    "index": 3,
+    "finish_reason": "stop",
+    "path": "generated/s3/length1_4/candidates/3.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:28: Pandas4Warning: For backward compatibility, 'str' dtypes are included by select_dtypes when 'object' dtype is specified. This behavior is deprecated and will be removed in a future version. Explicitly pass 'str' to `include` to select them, or to `exclude` to remove them and silence this warning.\nSee https://pandas.pydata.org/docs/dev/user_guide/migration.html#string-migration-select-dtypes for details on how to write code that works with pandas 2 and 3.\n  for column in output.select_dtypes(include=['object']).columns:\n",
+      "seconds": 0.5596953329986718,
+      "shape": [
+        182,
+        25
+      ],
+      "fingerprint": "75e23289a1819bb22d7ef036f1be0e5107b1091a2c4ff29993499f98bcff7ce2"
+    }
+  },
+  {
+    "index": 4,
+    "finish_reason": "stop",
+    "path": "generated/s3/length1_4/candidates/4.py",
+    "execution": {
+      "status": "ok",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:28: Pandas4Warning: For backward compatibility, 'str' dtypes are included by select_dtypes when 'object' dtype is specified. This behavior is deprecated and will be removed in a future version. Explicitly pass 'str' to `include` to select them, or to `exclude` to remove them and silence this warning.\nSee https://pandas.pydata.org/docs/dev/user_guide/migration.html#string-migration-select-dtypes for details on how to write code that works with pandas 2 and 3.\n  for column in output.select_dtypes(include=['object']).columns:\n",
+      "seconds": 0.5564966250021826,
+      "shape": [
+        182,
+        25
+      ],
+      "fingerprint": "75e23289a1819bb22d7ef036f1be0e5107b1091a2c4ff29993499f98bcff7ce2"
+    }
+  }
+]

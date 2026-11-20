@@ -1,0 +1,47 @@
+Operator plan:
+1. Parse the `Date` column into datetime objects.
+2. Create `dt_strata` by formatting the parsed dates as `M/D/YYYY` (matching the source format style but ensuring consistency, though the target sample shows `1/1/2014` which is standard `%m/%d/%Y` without leading zeros if single digit, or just standard string representation. Looking at target sample: `1/1/2014`, `7/19/2014`. This corresponds to `pd.to_datetime(...).dt.strftime('%m/%d/%Y')` which usually keeps leading zeros for month/day in pandas strftime unless specified otherwise? Actually `strftime('%m/%d/%Y')` produces `01/01/2014`. The target sample shows `1/1/2014`. This implies removing leading zeros or using a specific format. Let's look closer. `1/1/2014` vs `01/01/2014`. The source has `1/1/2014`. The target has `1/1/2014`. Pandas `strftime('%m/%d/%Y')` gives `01/01/2014`. To get `1/1/2014`, we can use `dt.strftime('%-m/%-d/%Y')` (Unix/Linux) or strip zeros. A safer cross-platform way is `dt.strftime('%m/%d/%Y').str.lstrip('0')`? No, that breaks 10,11,12. Better: `dt.strftime('%-m/%-d/%Y')` works on Linux. On Windows it might fail. A robust way: `dt.strftime('%m/%d/%Y').str.replace('0(\d)/', r'\1/').str.replace('/0(\d)/', r'/\1/')`. Or simply rely on the fact that `pd.to_datetime` preserves the string if possible? No, we need to parse. Let's look at `first_last_non_null` in target: `1/1/2014`. Source: `1/1/2014`. It seems the format is just the standard date string without leading zeros. I will use `dt.strftime('%m/%d/%Y')` and then strip leading zeros from month and day parts carefully.
+   Actually, looking at `7/19/2014`, the day is 2 digits. `1/1/2014` is 1 digit.
+   Standard `strftime('%m/%d/%Y')` -> `01/01/2014`.
+   We want `1/1/2014`.
+   We can do: `dates.dt.strftime('%m/%d/%Y').apply(lambda x: '/'.join([str(int(m)) for m in x.split('/')]))`.
+
+3. Create `dow` using `dates.dt.dayofweek` (Monday=0, Sunday=6). The target distinct values are `0..6`.
+
+4. Rename hourly columns `Hr 1`...`Hr 24` to `pct_hourly_0100`...`pct_hourly_2400`.
+
+5. Add `pct_hourly_2500` column filled with `0` (integer).
+
+6. Return the new DataFrame.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse dates
+    dates = pd.to_datetime(source['Date'])
+    
+    # Format dt_strata as M/D/YYYY (no leading zeros)
+    # strftime('%m/%d/%Y') gives MM/DD/YYYY
+    # We convert to int and back to string to remove leading zeros
+    dt_strata = dates.apply(lambda x: f"{x.month}/{x.day}/{x.year}")
+    
+    # Calculate day of week (Monday=0, ..., Sunday=6)
+    dow = dates.dt.dayofweek
+    
+    # Map hourly columns
+    out = pd.DataFrame()
+    out['dt_strata'] = dt_strata
+    out['dow'] = dow
+    
+    for h in range(1, 25):
+        src_col = f'Hr {h}'
+        tgt_col = f'pct_hourly_{h:02d}00'
+        out[tgt_col] = source[src_col]
+        
+    # Add the constant 25th hour column
+    out['pct_hourly_2500'] = 0
+    
+    return out
+```

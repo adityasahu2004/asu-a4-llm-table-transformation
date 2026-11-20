@@ -1,0 +1,12 @@
+Operator plan: Parse CST; format date as MM/DD/YYYY; project the 24 hourly measurements and rename them to value1 through value24.
+
+```python
+import pandas as pd
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    out = pd.DataFrame(index=source.index)
+    out['date'] = pd.to_datetime(source['CST'], format='%a %m/%d/%Y').dt.strftime('%m/%d/%Y')
+    for h in range(1,25):
+        name = f'{h}:00' if h < 24 else '24:00:00'
+        out[f'value{h}'] = source[name]
+    return out.reset_index(drop=True)
+```

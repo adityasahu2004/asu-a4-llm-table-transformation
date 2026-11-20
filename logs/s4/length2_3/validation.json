@@ -1,0 +1,154 @@
+{
+  "case": "length2_3",
+  "length": 2,
+  "strategy": "s4",
+  "model": "qwen36-27b",
+  "is_demo": false,
+  "parameters": {
+    "output": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment",
+    "model": "qwen36-27b",
+    "base_url": "https://openai.rc.asu.edu/v1",
+    "max_tokens": 6000,
+    "reasoning_effort": "none",
+    "k": 5,
+    "sample_rows": 12,
+    "timeout": 120,
+    "api_timeout": 3600,
+    "replay_only": true,
+    "strategy": "s4",
+    "python": "3.14.4 (main, Apr  7 2026, 13:13:20) [Clang 21.0.0 (clang-2100.0.123.102)]",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "pandas": "3.1.1",
+    "held_out": [
+      "length1_1",
+      "length1_2",
+      "length1_3",
+      "length2_1",
+      "length3_1"
+    ],
+    "benchmark": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split"
+  },
+  "prompt_path": "logs/s4/length2_3/prompt.json",
+  "completion_path": "logs/s4/length2_3/response.json",
+  "execution": {
+    "status": "ok",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+    "seconds": 0.5761327080035699,
+    "shape": [
+      183,
+      27
+    ],
+    "fingerprint": "2553f3e67484980214c64344efe5dd8951c092104b44791dfd54fb1ef6549a32"
+  },
+  "autopipeline": {
+    "accuracy": 0.0,
+    "is_correct": false,
+    "similarities": {},
+    "info": []
+  },
+  "hard_match": {
+    "accuracy": 0.9338190649666059,
+    "is_correct": false,
+    "similarities": [
+      1.0,
+      0.994535519125683,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      0.1092896174863388,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      0.1092896174863388,
+      1.0
+    ],
+    "info": [
+      "dt_strata",
+      "pct_hourly_0100",
+      "pct_hourly_0200",
+      "pct_hourly_0300",
+      "pct_hourly_0400",
+      "pct_hourly_0500",
+      "pct_hourly_0600",
+      "pct_hourly_0700",
+      "pct_hourly_0800",
+      "pct_hourly_0900",
+      "pct_hourly_1000",
+      "pct_hourly_1100",
+      "pct_hourly_1300",
+      "pct_hourly_1400",
+      "pct_hourly_1500",
+      "pct_hourly_1600",
+      "pct_hourly_1700",
+      "pct_hourly_1800",
+      "pct_hourly_1900",
+      "pct_hourly_2000",
+      "pct_hourly_2100",
+      "pct_hourly_2200",
+      "pct_hourly_2300",
+      "pct_hourly_2500"
+    ]
+  },
+  "hard_match_provenance": "course-provided hard_match.py and utils.py",
+  "exact_schema": true,
+  "generation": {
+    "request_hash": "4498772ab2d97e158889a1dd59e3ef2a286580d72556a551fea8363ed2d43d6a",
+    "usage": {
+      "completion_tokens": 8061,
+      "prompt_tokens": 47690,
+      "total_tokens": 55751,
+      "completion_tokens_details": null,
+      "prompt_tokens_details": {
+        "audio_tokens": null,
+        "cache_write_tokens": null,
+        "cached_tokens": 47488,
+        "image_tokens": null,
+        "text_tokens": null,
+        "created_cache_tokens": 0,
+        "multimodal_tokens": null
+      },
+      "co2_g": 1.558121,
+      "energy_wh": 4.623504
+    },
+    "latency_seconds": 89.64092141699803,
+    "api_attempts": 1,
+    "cached": true,
+    "candidate_count": 5,
+    "api_timeout_seconds": 600,
+    "reasoning_effort_header": "none",
+    "selected_index": 0,
+    "clusters": {
+      "9a18871e4aa8b4a6088857a2203169e0f8a98d16422cf03667fa537bfc8ae82d": [
+        0,
+        1,
+        4
+      ],
+      "878a86a3bbfc8a9e1f093a707034c33f4ce3555b509454c34e00431616c86617": [
+        2
+      ],
+      "08f46a5c58f1541a6b1000b9f4ee79057e3a565adbac2afb74c9d5a0eb8d654d": [
+        3
+      ]
+    }
+  },
+  "wall_seconds": 92.96166537499812,
+  "replay_wall_seconds": 3.468237125001906
+}

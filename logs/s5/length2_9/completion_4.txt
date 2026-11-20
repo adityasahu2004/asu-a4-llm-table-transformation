@@ -1,0 +1,167 @@
+**Operator Plan:**
+1.  **Parse Dates**: Convert the `date` column (format `m/d/Y H:MM`) to a pandas datetime object.
+2.  **Extract Components**:
+    *   Derive `dt_strata` by formatting the date as `MM/DD/YY`.
+    *   Derive `dow` (Day of Week) using ISO standard (Monday=1 ... Sunday=7) from the datetime.
+    *   Extract the hour component (0-23) from the datetime to map values to the correct hourly bucket.
+3.  **Map Values to Hours**:
+    *   The target schema has 24 hourly columns (`pct_hourly_0100` to `pct_hourly_2400`).
+    *   Source timestamps have hours 0-23.
+    *   Mapping logic: Source Hour `h` maps to Target Column `h+1`.
+        *   Source Hour 0 (midnight) -> `pct_hourly_0100`
+        *   Source Hour 1 -> `pct_hourly_0200`
+        *   ...
+        *   Source Hour 23 -> `pct_hourly_2400`
+    *   Initialize a DataFrame of zeros for the 24 hourly columns.
+    *   Assign `zone_016` values to the corresponding column based on the extracted hour. Note: If multiple rows exist for the same date/hour, the last one wins (or they are identical), but given the distinct dates in target and the nature of strata, we likely aggregate or just assign. The target has unique dates. The source has multiple rows per date. We must aggregate. Looking at the sample, source has ~12 rows per day (every 2 hours). Wait, the target has *one* row per day. The source has multiple entries per day.
+    *   *Correction*: The target `pct_hourly` columns contain single values per day. The source has multiple timestamps per day. We need to aggregate `zone_016` by Date and Hour.
+    *   Let's look at the sample data:
+        *   Source: `1/2/2018 0:11` (Hour 0), `1/2/2018 2:22` (Hour 2)...
+        *   Target `01/02/18` has `0.0` for hours 1-23 and `746.9` for hour 24.
+        *   Wait, the target `01/02/18` row has `746.9` in `pct_hourly_2400`. Source `1/2/2018` has values like 67.9, 67.6... none are 746.9.
+        *   Let's look at `01/01/18` in target. It has values ~4000. Source `1/1/2018` is not in the sample data provided (sample starts 1/2/2018).
+        *   However, the target row `01/02/18` has `746.9` in col 24.
+        *   Let's re-read the source sample. It only shows `1/2/2018` and `1/3/2018`.
+        *   The target shows `01/02/18` and `01/01/18`.
+        *   There is a huge discrepancy in values. Source `zone_016` is ~67. Target `pct_hourly` is ~4000 or 746.
+        *   Is there a scaling factor? Or is `zone_016` just one of many zones, and the target is an aggregate of *all* zones? The schema only provides `zone_016`.
+        *   *Hypothesis*: The problem statement implies inferring transformation from *schema/sample*. The sample data provided for source is very small (12 rows). The target sample has 2 rows.
+        *   Let's look at the mapping of dates.
+            *   Source `1/2/2018` -> Target `01/02/18`.
+            *   Source `1/3/2018` -> Not in target sample? Target has `01/01/18`.
+            *   Maybe the source sample is just a snippet and the actual evaluation data contains the rows for Jan 1st.
+        *   Let's look at the values again.
+            *   Target `01/01/18` (DOW 1, Monday). Values are ~4000.
+            *   Target `01/02/18` (DOW 2, Tuesday). Values are 0 except last col is 746.9.
+            *   Source `1/2/2018` (Tuesday) values are ~67.
+            *   This suggests `zone_016` is NOT the direct source of the `pct_hourly` values in the target. OR, the target is aggregating multiple zones, and `zone_016` is just one column in the source that happens to be shown? No, the source schema only lists `date` and `zone_016`.
+            *   *Alternative*: Maybe `zone_016` *is* the data, but the values in the target sample correspond to a different date or there's a specific aggregation?
+            *   Actually, look at Target `01/02/18`. `pct_hourly_2400` is 746.9. All others 0.
+            *   Look at Source `1/2/2018`. It has values at hours 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22.
+            *   If we sum them? 67.9*12 is ~800. Close to 746? No.
+            *   If we take the last value? 68.5. No.
+            *   Let's look at the Target `01/01/18`. It has non-zero values for ALL hours.
+            *   This implies the source for `01/01/18` had values for all hours.
+            *   The source sample for `1/2/2018` only has every 2 hours.
+            *   Perhaps the "0.0" in target `01/02/18` for hours 1-23 means those hours were missing in the source for that day? But the source sample shows data for those hours (e.g., 0:11, 2:22...).
+            *   Wait, the target `01/02/18` has `746.9` in `pct_hourly_2400` (Hour 23 source). Source `1/2/2018` last entry is `22:08` (Hour 22).
+            *   There is a `1/3/2018 0:20` with null.
+            *   This puzzle is tricky because the values don't match directly. However, in these types of problems, often the `zone_016` column *is* the value to be pivoted, and the discrepancy in the sample might be due to the sample being illustrative or from a different run, OR I am missing a scaling factor.
+            *   BUT, look at the distinct values in Target `pct_hourly_2400`: `746.9` and `4074.0`.
+            *   Look at Source `zone_016` distinct: 24 values.
+            *   If I assume the transformation is simply: **Pivot `zone_016` by Date and Hour**, filling missing hours with 0.
+            *   Why would `01/02/18` be 0 for most hours? In the source sample, `1/2/2018` has data.
+            *   Maybe the Target `01/02/18` corresponds to a date where data was missing?
+            *   Let's ignore the specific values in the sample for a moment and look at the structure.
+            *   Structure: Long format (Date, Hour, Value) -> Wide format (Date, H1, H2... H24).
+            *   Columns: `dt_strata` (MM/DD/YY), `dow` (1-7), `pct_hourly_0100`...`pct_hourly_2400`, `pct_hourly_2500` (always 0).
+            *   Step 1: Parse date.
+            *   Step 2: Group by Date.
+            *   Step 3: For each date, create 24 columns. Map Source Hour `h` to Col `h+1`.
+            *   Step 4: Fill NaNs with 0.
+            *   Step 5: Add `pct_hourly_2500` = 0.
+            *   Step 6: Sort/Order? Target seems sorted by date? `01/02/18`, `01/01/18` -> No, it's not sorted chronologically in the sample display (Jan 2 then Jan 1). But usually, we return a DataFrame. Order might not matter, or it might be reverse chronological.
+            *   Let's check the DOW.
+                *   `01/02/18` (Tuesday) -> DOW 2. Correct (ISO: Mon=1, Tue=2).
+                *   `01/01/18` (Monday) -> DOW 1. Correct.
+            *   The value mismatch is the only concern. Given "Infer the transformation", and the schema matches the pivot structure perfectly, the pivot is the intended operation. The values in the target sample might be from a different dataset version or aggregated differently (e.g. sum of multiple zones not shown in schema). However, with only `zone_016` available, we must use it. If the evaluation source has `zone_016` values that match the target when pivoted, this logic holds.
+            *   One detail: The target `pct_hourly_2400` corresponds to Source Hour 23.
+            *   What about Source Hour 0? It maps to `pct_hourly_0100`.
+            *   The source has `1/2/2018 0:11`. Hour 0. Maps to `pct_hourly_0100`.
+            *   In Target `01/02/18`, `pct_hourly_0100` is 0.0.
+            *   In Source `1/2/2018`, `0:11` is 67.9.
+            *   This contradiction (67.9 vs 0.0) is strong.
+            *   Is it possible `zone_016` is NOT the value? No other columns.
+            *   Is it possible the date mapping is different?
+            *   Maybe `dt_strata` is not the calendar date of the row?
+            *   Let's look at `pct_hourly_2500`. It is always 0.
+            *   Let's assume the standard pivot. The discrepancy might be due to the "sample" block being inconsistent or representing a specific subset (e.g., holidays vs work days) where `zone_016` is zeroed out or treated differently?
+            *   Actually, look at `01/01/18` in target. It has high values. `01/02/18` has mostly zeros.
+            *   In the source sample, `1/2/2018` has values. `1/3/2018` has null.
+            *   If the target `01/02/18` row actually corresponds to `1/3/2018` in the source (shifted)? No, DOW 2 is Tuesday. Jan 2, 2018 was a Tuesday. Jan 1, 2018 was a Monday. The dates align.
+            *   Why is `1/2/2018` data (67.9) becoming 0.0 in target?
+            *   Maybe `zone_016` is a *percentage* or *rate* that needs to be converted?
+            *   Or maybe the target `01/02/18` row in the sample is *not* derived from the source `1/2/2018` rows shown, but from other rows not shown? The note says "Source row count describes a training sample only".
+            *   I will proceed with the structural transformation: Pivot `zone_016` by Date and Hour.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    # Format in source: "m/d/Y H:MM" e.g., "1/2/2018 0:11"
+    df = source.copy()
+    df['dt'] = pd.to_datetime(df['date'])
+    
+    # Extract date for grouping and formatting
+    df['date_only'] = df['dt'].dt.date
+    df['dt_strata'] = df['dt'].dt.strftime('%m/%d/%y')
+    df['dow'] = df['dt'].dt.dayofweek + 1  # Monday=1 ... Sunday=7
+    
+    # Extract hour (0-23)
+    df['hour'] = df['dt'].dt.hour
+    
+    # Map hour to target column index (1-24)
+    # Source Hour 0 -> Target Col 1 (pct_hourly_0100)
+    # Source Hour 23 -> Target Col 24 (pct_hourly_2400)
+    df['target_col_idx'] = df['hour'] + 1
+    
+    # Create the target column names
+    target_cols = [f'pct_hourly_{i:02d}00' for i in range(1, 25)]
+    
+    # Pivot the data
+    # We need to aggregate zone_016 by date_only and target_col_idx
+    # Since the target has one row per date, we group by date_only
+    # We'll use pivot_table or groupby + unstack
+    
+    # Filter out nulls in zone_016 if necessary, or let them become NaN then fill 0
+    # The target has 0.0 for missing hours.
+    
+    # Create a long format with explicit column names
+    df['target_col_name'] = df['target_col_idx'].apply(lambda x: f'pct_hourly_{x:02d}00')
+    
+    # Pivot
+    pivot_df = df.pivot_table(
+        index=['date_only', 'dt_strata', 'dow'],
+        columns='target_col_name',
+        values='zone_016',
+        aggfunc='first' # Or mean/sum, 'first' is safe if unique per hour
+    )
+    
+    # Reset index
+    pivot_df = pivot_df.reset_index()
+    
+    # Ensure all 24 columns exist and are in order, fill NaN with 0
+    for col in target_cols:
+        if col not in pivot_df.columns:
+            pivot_df[col] = 0.0
+        else:
+            pivot_df[col] = pivot_df[col].fillna(0.0)
+            
+    # Select and order columns
+    result_cols = ['dt_strata', 'dow'] + target_cols
+    pivot_df = pivot_df[result_cols]
+    
+    # Add pct_hourly_2500 = 0
+    pivot_df['pct_hourly_2500'] = 0
+    
+    # Drop date_only helper
+    pivot_df = pivot_df.drop(columns=['date_only'])
+    
+    # Sort? The sample shows Jan 2 then Jan 1. 
+    # Usually, we preserve input order or sort by date. 
+    # The target sample is not sorted chronologically. 
+    # We will sort by dt_strata descending to match the sample appearance? 
+    # Or just return as is. The prompt doesn't specify order. 
+    # However, to be safe, let's sort by dt_strata descending as seen in sample (01/02 before 01/01).
+    pivot_df = pivot_df.sort_values('dt_strata', ascending=False).reset_index(drop=True)
+    
+    # Ensure dtypes
+    pivot_df['dow'] = pivot_df['dow'].astype(int)
+    pivot_df['pct_hourly_2500'] = pivot_df['pct_hourly_2500'].astype(int)
+    for col in target_cols:
+        pivot_df[col] = pivot_df[col].astype(float)
+        
+    return pivot_df
+```

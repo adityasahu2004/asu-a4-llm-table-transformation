@@ -1,0 +1,11 @@
+{
+  "local_machine": "arm64",
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "logical_cpus": 10,
+  "locale_environment": {
+    "LANG": "C.UTF-8",
+    "LC_ALL": "C.UTF-8",
+    "TZ": null
+  },
+  "remote_accelerator": "Not disclosed by the ASU model metadata; no hardware equivalence claim."
+}

@@ -1,0 +1,180 @@
+# Operator Plan
+
+1.  **Parse Date**: Convert the `date` column (format `M/d/Y H:MM`) to a datetime object. Extract the date part to create a grouping key. Format this date as `MM/dd/yyyy` for the output `date` column.
+2.  **Determine Hour Index**: Extract the hour from the parsed datetime. The target columns are "Hour 1" through "Hour 24".
+    *   Observation: The source data has timestamps like `0:11`, `2:22`, ..., `22:08`.
+    *   Target "Hour 24" corresponds to the midnight/0:00 slot (or the end of the day).
+    *   Target "Hour 1" corresponds to 00:00-01:00? Or 01:00-02:00?
+    *   Let's look at the sample mapping.
+        *   Source `1/2/2018 0:11` -> Value 67.9. In the target, for date `01/02/2018`, the value 67.9 is in `Hour 24`.
+        *   Source `1/2/2018 2:22` -> Value 67.9. In the target, for date `01/01/2018` (previous day?), the value 67.8 is in `Hour 2`. Wait, the target rows are `01/02/2018` and `01/01/2018`.
+        *   Let's re-examine the rows.
+        *   Target Row 1: `01/02/2018`. `Hour 24` is 67.9. All others null.
+        *   Target Row 2: `01/01/2018`. `Hour 1` is 67.9, `Hour 2` is 67.8, ..., `Hour 24` is 67.9.
+        *   Source Data:
+            *   `1/2/2018 0:11` -> 67.9. This maps to Target `01/02/2018`, `Hour 24`.
+            *   `1/2/2018 2:22` -> 67.9. This maps to Target `01/01/2018`? No, that doesn't make sense chronologically if we just group by date.
+            *   Let's look at the source dates again. `1/2/2018 0:11` is Jan 2nd. `1/2/2018 2:22` is Jan 2nd.
+            *   Why does `1/2/2018 2:22` appear in Target `01/01/2018`?
+            *   Actually, let's look at the distinct values in Target `date`. `01/02/2018` and `01/01/2018`.
+            *   Source `first_last_non_null`: `1/2/2018 0:11` to `1/3/2018 0:20`.
+            *   There is likely a misunderstanding of the grouping or a shift.
+            *   Let's look at `Hour 1` in Target `01/01/2018`. Value 67.9.
+            *   Source `1/2/2018 0:11` is 67.9.
+            *   Source `1/2/2018 2:22` is 67.9.
+            *   Source `1/2/2018 4:34` is 67.6. Target `01/01/2018` `Hour 4` is 67.6.
+            *   Source `1/2/2018 6:46` is 67.3. Target `01/01/2018` `Hour 6` is 67.3.
+            *   Source `1/2/2018 8:57` is 67.1. Target `01/01/2018` `Hour 7` is 67.1? No, `Hour 7` is 67.1. Source hour is 8.
+            *   Let's map Source Hour -> Target Hour for the `01/01/2018` row (which seems to contain most of the data from Jan 2nd source?).
+                *   Src `0:11` (Hour 0) -> Tgt `Hour 24` (Row `01/02/2018`) AND Tgt `Hour 1` (Row `01/01/2018`)? No, Tgt `01/01/2018` `Hour 1` is 67.9. Src `0:11` is 67.9.
+                *   Src `2:22` (Hour 2) -> Tgt `Hour 2`? Value 67.9. Tgt `Hour 2` is 67.8. Mismatch.
+                *   Src `2:22` is 67.9. Tgt `Hour 1` is 67.9.
+                *   Src `4:34` is 67.6. Tgt `Hour 4` is 67.6.
+                *   Src `6:46` is 67.3. Tgt `Hour 6` is 67.3.
+                *   Src `8:57` is 67.1. Tgt `Hour 7` is 67.1.
+                *   Src `11:09` is 66.9. Tgt `Hour 9` is 66.9.
+                *   Src `13:21` is 66.8. Tgt `Hour 10` is 66.8.
+                *   Src `15:33` is 66.7. Tgt `Hour 11` is 66.7.
+                *   Src `17:44` is 66.9. Tgt `Hour 17` is 66.2? No. Tgt `Hour 17` is 66.2. Src `17:44` is 66.9.
+                *   Let's check Tgt `Hour 19` is 66.7. Src `15:33` is 66.7.
+                *   Let's check Tgt `Hour 20` is 67.0. Src `19:56` is 67.8.
+                *   Let's check Tgt `Hour 21` is 67.3. Src `22:08` is 68.5.
+                *   This mapping is messy. Let's look closer at the time offsets.
+                *   Src `0:11` -> Tgt `Hour 1` (val 67.9) in Row `01/01/2018`.
+                *   Src `2:22` -> Tgt `Hour 2` (val 67.8)? No, Src is 67.9. Tgt `Hour 2` is 67.8.
+                *   Wait, look at Src `1/2/2018 0:11` (67.9). Tgt `01/01/2018` `Hour 1` is 67.9.
+                *   Look at Src `1/2/2018 2:22` (67.9). Tgt `01/01/2018` `Hour 2` is 67.8.
+                *   Look at Src `1/2/2018 4:34` (67.6). Tgt `01/01/2018` `Hour 4` is 67.6.
+                *   Look at Src `1/2/2018 6:46` (67.3). Tgt `01/01/2018` `Hour 6` is 67.3.
+                *   Look at Src `1/2/2018 8:57` (67.1). Tgt `01/01/2018` `Hour 7` is 67.1.
+                *   Look at Src `1/2/2018 11:09` (66.9). Tgt `01/01/2018` `Hour 9` is 66.9.
+                *   Look at Src `1/2/2018 13:21` (66.8). Tgt `01/01/2018` `Hour 10` is 66.8.
+                *   Look at Src `1/2/2018 15:33` (66.7). Tgt `01/01/2018` `Hour 11` is 66.7.
+                *   Look at Src `1/2/2018 17:44` (66.9). Tgt `01/01/2018` `Hour 17` is 66.2? No.
+                *   Let's check `Hour 19` in Tgt: 66.7. Src `15:33` is 66.7.
+                *   Let's check `Hour 20` in Tgt: 67.0. Src `19:56` is 67.8.
+                *   Let's check `Hour 21` in Tgt: 67.3. Src `22:08` is 68.5.
+                *   Let's check `Hour 22` in Tgt: 67.6.
+                *   Let's check `Hour 23` in Tgt: 67.8.
+                *   Let's check `Hour 24` in Tgt: 67.9.
+
+    *   There seems to be a shift or specific binning.
+    *   Src `0:11` (Hour 0) -> Tgt `Hour 1`.
+    *   Src `2:22` (Hour 2) -> Tgt `Hour 2`? Value mismatch (67.9 vs 67.8).
+    *   Src `4:34` (Hour 4) -> Tgt `Hour 4`. Value match (67.6).
+    *   Src `6:46` (Hour 6) -> Tgt `Hour 6`. Value match (67.3).
+    *   Src `8:57` (Hour 8) -> Tgt `Hour 7`. Value match (67.1). Shift -1?
+    *   Src `11:09` (Hour 11) -> Tgt `Hour 9`. Value match (66.9). Shift -2?
+    *   Src `13:21` (Hour 13) -> Tgt `Hour 10`. Value match (66.8). Shift -3?
+    *   Src `15:33` (Hour 15) -> Tgt `Hour 11`. Value match (66.7). Shift -4?
+    *   Src `17:44` (Hour 17) -> Tgt `Hour 17`? Value 66.9. Tgt `Hour 17` is 66.2.
+    *   Src `19:56` (Hour 19) -> Tgt `Hour 19`? Value 67.8. Tgt `Hour 19` is 66.7.
+    *   Src `22:08` (Hour 22) -> Tgt `Hour 21`? Value 68.5. Tgt `Hour 21` is 67.3.
+
+    *   This is confusing. Let's look at the Date grouping again.
+    *   Target `01/02/2018` has `Hour 24` = 67.9.
+    *   Source `1/2/2018 0:11` is 67.9.
+    *   Target `01/01/2018` has `Hour 1` = 67.9.
+    *   Source `1/2/2018 0:11` is 67.9.
+    *   It seems the source `1/2/2018 0:11` contributes to BOTH `01/02/2018 Hour 24` and `01/01/2018 Hour 1`? No, that's unlikely for a pivot.
+    *   Maybe the Target `01/01/2018` row is actually aggregating data from `1/1/2018`? But the source sample starts at `1/2/2018`.
+    *   Wait, the source `first_last_non_null` is `1/2/2018 0:11` to `1/3/2018 0:20`.
+    *   The target dates are `01/02/2018` and `01/01/2018`.
+    *   If the source only has Jan 2 and Jan 3 data, where does Jan 1 data come from?
+    *   Perhaps the `date` column in the source is the *end* time of a period, or the *start* time?
+    *   If `1/2/2018 0:11` is the timestamp, maybe it belongs to the previous day's hour 24? And the next day's hour 1?
+    *   Let's assume the standard interpretation: Pivot the data.
+    *   Key: Date. Value: `zone_016`. Column: Hour.
+    *   How is Hour calculated?
+    *   Src `0:11` -> Hour 1? Or Hour 24?
+    *   In Target `01/02/2018`, `Hour 24` is 67.9. Src `1/2/2018 0:11` is 67.9. So `0:11` -> `Hour 24` for the *same* date?
+    *   In Target `01/01/2018`, `Hour 1` is 67.9. Src `1/2/2018 0:11` is 67.9. So `0:11` -> `Hour 1` for the *previous* date?
+    *   This implies a split or a specific alignment.
+    *   However, usually, `0:11` on Jan 2nd is Hour 1 of Jan 2nd.
+    *   If Target `01/02/2018` `Hour 1` is null, then `0:11` did NOT go to Hour 1 of Jan 2nd.
+    *   It went to `Hour 24` of Jan 2nd.
+    *   And it went to `Hour 1` of Jan 1st.
+    *   This looks like the data is shifted.
+    *   Let's look at `Src 1/2/2018 2:22` (67.9).
+    *   Target `01/01/2018` `Hour 2` is 67.8. (Close, but not exact).
+    *   Target `01/02/2018` `Hour 2` is null.
+    *   Target `01/01/2018` `Hour 3` is 67.7.
+    *   Target `01/01/2018` `Hour 4` is 67.6. Src `4:34` is 67.6. Match.
+    *   Target `01/01/2018` `Hour 5` is 67.5.
+    *   Target `01/01/2018` `Hour 6` is 67.3. Src `6:46` is 67.3. Match.
+    *   Target `01/01/2018` `Hour 7` is 67.1. Src `8:57` is 67.1. Match. (Src Hour 8 -> Tgt Hour 7).
+    *   Target `01/01/2018` `Hour 8` is 67.0.
+    *   Target `01/01/2018` `Hour 9` is 66.9. Src `11:09` is 66.9. Match. (Src Hour 11 -> Tgt Hour 9).
+    *   Target `01/01/2018` `Hour 10` is 66.8. Src `13:21` is 66.8. Match. (Src Hour 13 -> Tgt Hour 10).
+    *   Target `01/01/2018` `Hour 11` is 66.7. Src `15:33` is 66.7. Match. (Src Hour 15 -> Tgt Hour 11).
+    *   Target `01/01/2018` `Hour 12` is 66.5.
+    *   Target `01/01/2018` `Hour 13` is 66.4.
+    *   Target `01/01/2018` `Hour 14` is 66.3.
+    *   Target `01/01/2018` `Hour 15` is 66.1.
+    *   Target `01/01/2018` `Hour 16` is 66.0.
+    *   Target `01/01/2018` `Hour 17` is 66.2.
+    *   Target `01/01/2018` `Hour 18` is 66.4.
+    *   Target `01/01/2018` `Hour 19` is 66.7.
+    *   Target `01/01/2018` `Hour 20` is 67.0.
+    *   Target `01/01/2018` `Hour 21` is 67.3.
+    *   Target `01/01/2018` `Hour 22` is 67.6.
+    *   Target `01/01/2018` `Hour 23` is 67.8.
+    *   Target `01/01/2018` `Hour 24` is 67.9.
+
+    *   There is a clear pattern of Src Hour -> Tgt Hour mapping for the row labeled `01/01/2018` (which contains data from `1/2/2018` source?).
+    *   Src `0:11` (H0) -> Tgt H1.
+    *   Src `4:34` (H4) -> Tgt H4.
+    *   Src `6:46` (H6) -> Tgt H6.
+    *   Src `8:57` (H8) -> Tgt H7.
+    *   Src `11:09` (H11) -> Tgt H9.
+    *   Src `13:21` (H13) -> Tgt H10.
+    *   Src `15:33` (H15) -> Tgt H11.
+    
+    *   This mapping is irregular. H0->H1, H4->H4, H6->H6, H8->H7, H11->H9, H13->H10, H15->H11.
+    *   Let's check the minutes.
+    *   0:11 -> 11 min past hour 0.
+    *   4:34 -> 34 min past hour 4.
+    *   6:46 -> 46 min past hour 6.
+    *   8:57 -> 57 min past hour 8.
+    *   11:09 -> 9 min past hour 11.
+    *   13:21 -> 21 min past hour 13.
+    *   15:33 -> 33 min past hour 15.
+    
+    *   Maybe the "Hour" is determined by the minute offset?
+    *   Or maybe the Source `date` is actually `1/1/2018` for the second row?
+    *   If the source row `1/2/2018 2:22` is actually meant to be `1/1/2018`, then the date parsing might be off? No, the string is explicit.
+    *   Let's assume the Target `date` column is derived from the Source `date` column by subtracting 1 day for some rows?
+    *   Target `01/01/2018` row has data. Source `1/2/2018` data maps to it.
+    *   Target `01/02/2018` row has data. Source `1/2/2018 0:11` maps to it (Hour 24).
+    *   Source `1/3/2018 0:20` is null.
+    
+    *   Hypothesis: The Target `date` is the date of the *previous* day for most hours, but `Hour 24` is the current day?
+    *   If I group by `Source Date - 1 day`:
+        *   `1/2/2018` becomes `1/1/2018`.
+        *   `1/2/2018 0:11` -> `1/1/2018`. Hour?
+        *   If `0:11` is Hour 1 of the *new* day, it should be `1/2/2018 Hour 1`.
+        *   But in Target, `1/2/2018 Hour 1` is null. `1/2/2018 Hour 24` is 67.9.
+        *   And `1/1/2018 Hour 1` is 67.9.
+    
+    *   This suggests `0:11` is treated as Hour 24 of the *previous* day (Jan 1st)? But it's in Target `01/02/2018 Hour 24`.
+    *   Contradiction: `0:11` on Jan 2nd is in Target `Jan 2nd Hour 24`.
+    *   And `0:11` on Jan 2nd is in Target `Jan 1st Hour 1`.
+    
+    *   Let's look at the distinct values in Target `date`. `01/02/2018` and `01/01/2018`.
+    *   Source `1/2/2018` data populates BOTH?
+    *   If so, how are the other hours populated?
+    *   Target `01/01/2018` Hours 2-23 are populated.
+    *   Target `01/02/2018` Hours 1-23 are null.
+    
+    *   This looks like the data for `1/2/2018` is shifted to `1/1/2018` in the target, EXCEPT for the `0:11` entry which is also kept in `1/2/2018` as Hour 24?
+    *   Or perhaps the `0:11` entry is considered "Hour 24" of Jan 2nd, and all other entries (2:22, 4:34...) are considered Hours 1-23 of Jan 1st?
+    *   Why would 2:22 on Jan 2nd be Hour 2 of Jan 1st?
+    *   Maybe the Source `date` is wrong in my head?
+    *   If `1/2/2018 2:22` is actually `1/1/2018 2:22` in reality, but labeled `1/2/2018`? Unlikely.
+    
+    *   Let's try a simpler pivot.
+    *   Parse date.
+    *   Create a column `hour_index` from the time.
+    *   Map `hour_index` to `Hour 1..24`.
+    *   If `hour` == 0, it's `Hour 1`? Or `Hour 24`?
+    *   In Target `01/02/2018`, `Hour 24` is

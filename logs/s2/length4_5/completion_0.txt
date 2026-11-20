@@ -1,0 +1,59 @@
+Operator plan:
+1. Parse the `date` column from `M/D/YYYY` format to datetime.
+2. Format the datetime to `YYYY-MM-DD 00:00:00` for the target `date` column.
+3. Rename the 24 hourly columns (`Hour 1` to `Hour 24`) to the target 12-hour clock format with AM/PM suffixes. The mapping is:
+   - Hour 1 -> 1:00 AM
+   - Hour 2 -> 2:00 AM
+   - ...
+   - Hour 11 -> 11:00 AM
+   - Hour 12 -> 12:00 AM (Note: Target schema shows `12:00 AM` for Hour 12, which is unusual as 12:00 AM is midnight, but we must follow the target schema exactly. Wait, looking at the target sample:
+     - Source `Hour 12` (index 11 in 0-based, or 12th hour) maps to target column `12:00 AM`.
+     - Source `Hour 13` maps to `1:00 PM`.
+     - Source `Hour 24` maps to `12:00 PM`.
+     Let's verify the mapping carefully from the target schema and sample.
+     Target columns: `1:00 AM`, `2:00 AM`, ..., `11:00 AM`, `12:00 AM`, `1:00 PM`, ..., `11:00 PM`, `12:00 PM`.
+     Source columns: `Hour 1`, `Hour 2`, ..., `Hour 11`, `Hour 12`, `Hour 13`, ..., `Hour 23`, `Hour 24`.
+     
+     Mapping:
+     Hour 1 -> 1:00 AM
+     Hour 2 -> 2:00 AM
+     ...
+     Hour 11 -> 11:00 AM
+     Hour 12 -> 12:00 AM  (This is the target name for the 12th column)
+     Hour 13 -> 1:00 PM
+     ...
+     Hour 23 -> 11:00 PM
+     Hour 24 -> 12:00 PM
+
+4. Construct the new DataFrame with the renamed columns and formatted date.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date and format to target string format
+    dt = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    out = pd.DataFrame(index=source.index)
+    out['date'] = dt.dt.strftime('%Y-%m-%d 00:00:00')
+    
+    # Define the mapping from source hour columns to target column names
+    # Source: Hour 1 to Hour 24
+    # Target: 1:00 AM to 12:00 PM (with specific AM/PM logic)
+    
+    # Hours 1-11 map to 1:00 AM - 11:00 AM
+    for h in range(1, 12):
+        out[f'{h}:00 AM'] = source[f'Hour {h}']
+        
+    # Hour 12 maps to 12:00 AM
+    out['12:00 AM'] = source['Hour 12']
+    
+    # Hours 13-23 map to 1:00 PM - 11:00 PM
+    for h in range(13, 24):
+        pm_hour = h - 12
+        out[f'{pm_hour}:00 PM'] = source[f'Hour {h}']
+        
+    # Hour 24 maps to 12:00 PM
+    out['12:00 PM'] = source['Hour 24']
+    
+    return out.reset_index(drop=True)
+```

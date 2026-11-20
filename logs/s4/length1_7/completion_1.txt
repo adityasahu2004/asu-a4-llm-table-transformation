@@ -1,0 +1,37 @@
+**Operator Plan:**
+1.  **Date Parsing and Formatting**: Parse the source `Date` column (format `%a %m/%d/%Y`) into datetime objects. Format this datetime into the target `cst` string format (`%a %m/%d/%Y`).
+2.  **Column Renaming and Selection**: Select the 24 hourly columns from the source. The source has columns named `1:00` through `23:00` and `24:00:00`. The target requires columns named `1:00` through `24:00`.
+    *   Map source `1:00` -> target `1:00`
+    *   ...
+    *   Map source `23:00` -> target `23:00`
+    *   Map source `24:00:00` -> target `24:00`
+3.  **Construct Output**: Create a new DataFrame with the formatted `cst` column and the renamed hourly columns.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    # Source format: "Thu 10/01/2009" -> %a %m/%d/%Y
+    dates = pd.to_datetime(source['Date'], format='%a %m/%d/%Y')
+    
+    # Format to target cst: "Wed 01/01/2003" -> %a %m/%d/%Y
+    cst_series = dates.dt.strftime('%a %m/%d/%Y')
+    
+    # Build the result dataframe
+    result = pd.DataFrame()
+    result['cst'] = cst_series
+    
+    # Map hourly columns
+    # Source: 1:00 ... 23:00, 24:00:00
+    # Target: 1:00 ... 24:00
+    
+    # Hours 1 to 23
+    for h in range(1, 24):
+        result[f'{h}:00'] = source[f'{h}:00']
+        
+    # Hour 24
+    result['24:00'] = source['24:00:00']
+    
+    return result.reset_index(drop=True)
+```

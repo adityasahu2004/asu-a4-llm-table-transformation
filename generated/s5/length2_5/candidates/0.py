@@ -1,0 +1,46 @@
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse dates
+    dates = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    
+    # Shift dates back by 182 days to match target range
+    shifted_dates = dates - pd.Timedelta(days=182)
+    
+    # Construct output dataframe
+    out = pd.DataFrame(index=source.index)
+    
+    # Format dt_strata as M/D/YYYY (e.g., 1/1/2015)
+    # strftime %m/%d/%Y produces MM/DD/YYYY, but target shows single digit months/days without leading zeros in sample "1/1/2015".
+    # However, looking closely at target sample: "1/1/2015", "1/17/2015", "2/2/2015".
+    # Python strftime %m/%d/%Y gives "01/01/2015".
+    # We need to strip leading zeros.
+    # A robust way is to use dt.strftime and then replace leading zeros, or use a custom formatter.
+    # Let's use strftime and strip leading zeros for month and day.
+    formatted_dates = shifted_dates.dt.strftime('%m/%d/%Y').str.lstrip('0')
+    # Wait, lstrip('0') on "01/01/2015" -> "1/1/2015". On "09/05/2015" -> "9/5/2015".
+    # What about year? "2015". lstrip won't touch it.
+    # This matches the target sample format.
+    out['dt_strata'] = formatted_dates
+    
+    # Calculate dow (Sunday=0, Monday=1, ..., Saturday=6)
+    out['dow'] = shifted_dates.dt.dayofweek + 1 # Monday=0 -> Sunday=6? 
+    # Pandas dayofweek: Monday=0, Sunday=6.
+    # Target distinct values: [4, 5, 6, 0, 1, 2, 3]. This is Sunday=0 standard?
+    # Let's check 1/1/2015. It was a Thursday.
+    # If Sunday=0, Thursday=4.
+    # Pandas dayofweek for Thursday is 3.
+    # So we need (dayofweek + 1) % 7?
+    # Mon(0)->1, Tue(1)->2, Wed(2)->3, Thu(3)->4, Fri(4)->5, Sat(5)->6, Sun(6)->0.
+    # Yes, (dayofweek + 1) % 7 gives Sunday=0.
+    out['dow'] = (shifted_dates.dt.dayofweek + 1) % 7
+    
+    # Rename hourly columns
+    for h in range(1, 25):
+        out[f'pct_hourly_{h:02d}00'] = source[f'Hour {h}']
+        
+    # Add pct_hourly_2500 as NaN
+    out['pct_hourly_2500'] = np.nan
+    
+    return out.reset_index(drop=True)

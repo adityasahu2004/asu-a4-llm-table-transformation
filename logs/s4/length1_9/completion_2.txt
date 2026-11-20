@@ -1,0 +1,150 @@
+Operator plan: Parse the source date strings to datetime; extract calendar date and hour. Pivot the data so each calendar date is a row and hours 1-24 are columns (using mean aggregation to handle potential multiple entries per hour, though samples suggest one per hour). Fill missing hours with 0. Format the date column as "Dow MM/DD/YYYY".
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse dates
+    df = source.copy()
+    df['dt'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract date and hour
+    df['date_key'] = df['dt'].dt.date
+    # Adjust hour: 0-23 in pandas -> we want 1-24 where 0:00-0:59 is hour 24? 
+    # Let's look at target: "1:00" ... "24:00". 
+    # Source sample: "1/2/2018 0:11" -> likely hour 24 of previous day or hour 1 of current?
+    # Usually 0:xx is midnight. In many load profiles, 0:00-0:59 is hour 24 (or hour 0).
+    # Target columns are 1:00 to 24:00.
+    # If source 0:11 maps to 24:00, then hour h in 0-23 maps to h+1, with 24 wrapping? 
+    # Or does 0:11 map to 1:00?
+    # Let's check the target sample values.
+    # Target row 1: "Mon 01/01/2018". Hour 24:00 is 4074.0.
+    # Target row 2: "Tue 01/02/2018". Hour 24:00 is 746.9. Others 0.
+    # Source sample has "1/2/2018 0:20" with null.
+    # Source sample has "1/2/2018 0:11" with 67.9.
+    # If 1/2/2018 0:11 is hour 24 of 1/1/2018, then it contributes to Mon 01/01/2018, 24:00.
+    # If 1/2/2018 0:11 is hour 1 of 1/2/2018, then it contributes to Tue 01/02/2018, 1:00.
+    
+    # Let's assume standard convention: 0:00-0:59 is hour 24 of the previous day? 
+    # Or is 0:00-0:59 hour 1?
+    # If 0:00 is hour 1, then 23:00 is hour 24.
+    # If 0:00 is hour 24, then 1:00 is hour 1.
+    
+    # Let's look at distinct values in target.
+    # Tue 01/02/2018 has 746.9 at 24:00.
+    # Source has 1/2/2018 0:11 -> 67.9. This doesn't match 746.9 directly.
+    # The values in target are much larger (4000+). The source values are ~67.
+    # There is likely a multiplication factor or aggregation across many zones/records not shown in the small sample, 
+    # OR the sample data provided in the prompt is just a subset and the values in target are aggregated from many such rows.
+    # However, the instruction says "Compute the result only from the source DataFrame".
+    # And "Never copy target rows...".
+    # The transformation must be structural.
+    
+    # Let's look at the structure.
+    # Source: 1450 rows. Target: 2 rows.
+    # Source dates: 1/2/2018 to 1/3/2018.
+    # Target dates: Mon 01/01/2018, Tue 01/02/2018.
+    # Note: 1/1/2018 is Monday. 1/2/2018 is Tuesday.
+    # Source starts at 1/2/2018 0:11.
+    # If 0:11 on 1/2 is hour 24 of 1/1, then it goes to Mon 01/01/2018.
+    # If 0:11 on 1/2 is hour 1 of 1/2, then it goes to Tue 01/02/2018.
+    
+    # Let's check the hour mapping logic.
+    # If we use `df['dt'].dt.hour`, 0:11 gives 0.
+    # If we map 0->24, 1->1, 2->2...
+    # Then 0:11 on 1/2/2018 becomes Hour 24 of 1/1/2018.
+    # This aligns with the target having a value for 24:00 on Mon 01/01/2018?
+    # Wait, the target has values for ALL hours for Mon 01/01/2018.
+    # The source only has a few rows in the sample. The full source has 1450 rows.
+    # 1450 rows / 24 hours ≈ 60 days.
+    # The target has 2 rows. This implies the target is a summary or the source sample is just a tiny slice.
+    # BUT the target row count is 2. The source row count is 1450.
+    # If the target is 2 rows, it likely covers 2 days.
+    # The source covers 1/2/2018 to 1/3/2018 in the sample, but likely more in the full data.
+    # Actually, 1450 rows is roughly 60 days of hourly data (24*60 = 1440).
+    # Why does the target have only 2 rows?
+    # Maybe the target is just the first 2 days? Or specific days?
+    # The target distinct values for cst are "Mon 01/01/2018" and "Tue 01/02/2018".
+    # This suggests we should only output these two days?
+    # Or perhaps the evaluation input will have different dates, but the structure is the same.
+    # The prompt says "Infer a general transformation".
+    # If the target only has 2 rows, but source has 1450, there must be a filter or the target sample is just showing the first two rows of a larger target?
+    # "target": { "rows": 2, ... }
+    # This explicitly says the target has 2 rows.
+    # This is strange if the source has 1450 rows (~60 days).
+    # Unless the transformation filters for specific dates?
+    # But we can't hardcode dates.
+    # Maybe the transformation groups by something else?
+    # No, the target column `cst` has distinct values "Mon 01/01/2018" and "Tue 01/02/2018".
+    # These are the first two days of 2018.
+    # Is it possible the source data *only* contains data for these two days in the evaluation?
+    # The note says: "Source row count describes a training sample only, not the evaluation input."
+    # The evaluation input might have only 2 days of data?
+    # If so, the general transformation is: Pivot to daily hourly profile.
+    
+    # Let's assume the general transformation is:
+    # 1. Parse date.
+    # 2. Determine hour bucket (1-24).
+    # 3. Group by date and hour, aggregate (sum? mean?).
+    # 4. Pivot to wide format.
+    # 5. Format date.
+    
+    # Hour mapping:
+    # If 0:xx is hour 24, and 1:xx is hour 1...
+    # Let's try: hour = dt.hour. if hour==0: hour=24, date=date-1 day. else: hour=hour.
+    # This is common in energy data (24:00 is midnight end of day).
+    
+    # Aggregation:
+    # Source has 1450 rows. If these are all for 2 days, that's 725 rows/day.
+    # 725 / 24 ≈ 30 rows/hour.
+    # The values in source are ~67. The values in target are ~4000.
+    # 67 * 30 ≈ 2000. 67 * 60 ≈ 4000.
+    # So likely Sum aggregation.
+    
+    # Let's proceed with:
+    # 1. Parse dt.
+    # 2. If hour == 0, set hour=24 and subtract 1 day from date. Else hour=hour.
+    # 3. Group by (date, hour) and Sum zone_016.
+    # 4. Pivot to have hours 1-24 as columns.
+    # 5. Fill NaN with 0.
+    # 6. Format date as "Dow MM/DD/YYYY".
+    
+    df['hour'] = df['dt'].dt.hour
+    df['date_only'] = df['dt'].dt.date
+    
+    # Adjust midnight to previous day 24:00
+    mask = df['hour'] == 0
+    df.loc[mask, 'hour'] = 24
+    df.loc[mask, 'date_only'] = pd.to_datetime(df.loc[mask, 'date_only']) - pd.Timedelta(days=1)
+    # Convert back to date object if needed, but pandas date objects are fine for grouping
+    # Actually, mixing date objects and datetime objects in a series can be tricky.
+    # Let's keep date_only as datetime.date or just use the adjusted datetime for grouping.
+    
+    # Let's create a clean date column for grouping
+    df['group_date'] = df['dt'].dt.normalize() # Midnight of the day
+    df.loc[mask, 'group_date'] = df.loc[mask, 'group_date'] - pd.Timedelta(hours=24)
+    
+    # Now group by group_date and hour
+    agg_df = df.groupby(['group_date', 'hour'])['zone_016'].sum().reset_index()
+    
+    # Pivot
+    pivot_df = agg_df.pivot_table(index='group_date', columns='hour', values='zone_016', fill_value=0)
+    
+    # Ensure all hours 1-24 are present
+    for h in range(1, 25):
+        if h not in pivot_df.columns:
+            pivot_df[h] = 0
+            
+    # Sort columns
+    pivot_df = pivot_df.sort_index(axis=1)
+    
+    # Format index
+    pivot_df.index = pivot_df.index.strftime('%a %m/%d/%Y')
+    pivot_df.index.name = 'cst'
+    
+    # Rename columns
+    pivot_df.columns = [f'{h}:00' for h in pivot_df.columns]
+    
+    return pivot_df.reset_index()
+```

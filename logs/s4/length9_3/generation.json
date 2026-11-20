@@ -1,0 +1,43 @@
+{
+  "request_hash": "c335235098012de588769c1baf8b22cbfa17828c9db921c6d5a342d68dc94710",
+  "usage": {
+    "completion_tokens": 22034,
+    "prompt_tokens": 41800,
+    "total_tokens": 63834,
+    "completion_tokens_details": null,
+    "prompt_tokens_details": {
+      "audio_tokens": null,
+      "cache_write_tokens": null,
+      "cached_tokens": 41216,
+      "image_tokens": null,
+      "text_tokens": null,
+      "created_cache_tokens": 0,
+      "multimodal_tokens": null
+    },
+    "co2_g": 1.985436,
+    "energy_wh": 5.891503
+  },
+  "latency_seconds": 262.8663315840022,
+  "api_attempts": 2,
+  "cached": true,
+  "candidate_count": 5,
+  "api_timeout_seconds": 3600,
+  "reasoning_effort_header": "none",
+  "interruption": {
+    "reason": "Stale API connection across overnight system sleep; controller restarted.",
+    "prompt_written_utc": "2026-11-19T21:37:52.822458+00:00",
+    "interrupted_utc": "2026-11-20T15:17:52.173162+00:00",
+    "calendar_wait_seconds": 63599.350704193115,
+    "active_wait_seconds": null,
+    "note": "Active request duration could not be recovered; not included in active-time aggregates. No completion/usage was received."
+  },
+  "selected_index": 0,
+  "clusters": {
+    "89b3e39de4c5d50484dde2e1123e43ac486d711f336a5576bccaeaebabf19bf4": [
+      0,
+      2,
+      3,
+      4
+    ]
+  }
+}

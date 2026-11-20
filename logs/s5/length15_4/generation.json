@@ -1,0 +1,74 @@
+{
+  "candidate_count": 6,
+  "selected_index": 0,
+  "baseline_index": 0,
+  "selection_reason": "SC winner retained: no strict constraint improvement",
+  "constraints": {
+    "columns": [
+      "season",
+      "hour",
+      "hvac",
+      "domestic_water_heating",
+      "major_appliances",
+      "lighting",
+      "miscellaneous_plug_loads",
+      "total"
+    ],
+    "relations": []
+  },
+  "policy": {
+    "version": "schema-weekday-v1",
+    "pool": "five few-shot SC samples + one greedy few-shot sample",
+    "constraints": [
+      "exact target schema",
+      "uniquely identified date-to-weekday relation"
+    ],
+    "target_rows": "the same 12-row prompt sample as the baselines",
+    "output_rows": "up to 128 evenly spaced training-output rows",
+    "selection": "strictly lower lexicographic constraint loss; preserve SC winner on ties",
+    "forbidden_inputs": [
+      "test_0.csv",
+      "validator results",
+      "case-specific rules",
+      "target row counts"
+    ]
+  },
+  "usage": {
+    "prompt_tokens": 78680,
+    "completion_tokens": 19988,
+    "total_tokens": 98668
+  },
+  "api_attempts": 6,
+  "marginal_api_attempts": 0,
+  "latency_seconds": 429.3245511259993,
+  "inherited_api_seconds": 429.3245511259993,
+  "clusters": {
+    "29b5e276d6ff9d7d42b8b709a6f36cdd3f597197d062e48cc061fc15b9a09384": [
+      0
+    ],
+    "d80ffed3715e9ae402360313f280fb1c8fb579ce87cfa396a1c39d99a0c6b095": [
+      1
+    ],
+    "0c0d4edf21814d5be2263c8813cfe11d9cbb1457023d5084adde709383951b59": [
+      2
+    ],
+    "651a114b2fec2efce92fb0fad1632d7848bf6c4d1f965ead717954baaae3b6e3": [
+      3
+    ],
+    "537bae06cd8f52d7559fcd9779270a06c7da40f8b6e1b1259b7dd3062fbffe02": [
+      4
+    ]
+  },
+  "cost_basis": "standalone logical pool cost; reused requests have zero marginal API cost",
+  "interruption": {
+    "inherited": [
+      {
+        "reason": "Fresh connection recovery after shared transport drop; no completion was received from the stale attempt.",
+        "calendar_wait_seconds": 6212.531659126282,
+        "active_wait_seconds": null,
+        "note": "Calendar interval is a bound for the logged prompt, not recoverable active latency. Received token usage is unknown. Interrupted attempts count as API requests."
+      }
+    ],
+    "calendar_wait_seconds": 6212.531659126282
+  }
+}

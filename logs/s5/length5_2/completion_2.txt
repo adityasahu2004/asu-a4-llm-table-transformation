@@ -1,0 +1,12 @@
+Operator plan: Parse CST to extract date; format as MM/DD/YYYY; rename the 24 hourly columns to value1 through value24.
+
+```python
+import pandas as pd
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    out = pd.DataFrame(index=source.index)
+    out['date'] = pd.to_datetime(source['CST'], format='%a %m/%d/%Y').dt.strftime('%m/%d/%Y')
+    for h in range(1, 25):
+        src_col = f'{h}:00' if h < 24 else '24:00:00'
+        out[f'value{h}'] = pd.to_numeric(source[src_col], errors='coerce')
+    return out.reset_index(drop=True)
+```

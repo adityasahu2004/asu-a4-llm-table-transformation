@@ -1,0 +1,64 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `Date` column from `MM/DD/YYYY` format to a datetime object.
+2.  **Format Date**: Create the `date` column by formatting the datetime as `YYYY-MM-DD 00:00:00`.
+3.  **Map Hours**: Iterate through hours 1 to 24. For each hour, retrieve the value from the corresponding source column (`Hr 1` through `Hr 24`).
+4.  **Format Hour Labels**: Construct the target column names (`1:00 AM`, `2:00 AM`, ..., `12:00 PM`, `1:00 PM`, ..., `11:00 PM`) based on the hour index. Note the specific ordering in the target schema: 1-11 AM, 12 AM, 1-11 PM, 12 PM.
+    *   Hour 1 -> 1:00 AM
+    *   ...
+    *   Hour 11 -> 11:00 AM
+    *   Hour 12 -> 12:00 AM (Noon)
+    *   Hour 13 -> 1:00 PM
+    *   ...
+    *   Hour 23 -> 11:00 PM
+    *   Hour 24 -> 12:00 PM (Midnight/End of day)
+5.  **Construct DataFrame**: Build the resulting DataFrame with the calculated columns in the exact order specified by the target schema.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    dates = pd.to_datetime(source['Date'], format='%m/%d/%Y')
+    
+    # Create the output dataframe with the formatted date string
+    out = pd.DataFrame(index=source.index)
+    out['date'] = dates.dt.strftime('%Y-%m-%d 00:00:00')
+    
+    # Define the mapping for hour labels
+    # Target order: 1-11 AM, 12 AM, 1-11 PM, 12 PM
+    # Source columns: Hr 1 to Hr 24
+    
+    # Helper to get AM/PM label
+    def get_hour_label(h):
+        if h == 12:
+            return "12:00 AM"
+        elif h == 24:
+            return "12:00 PM"
+        elif h < 12:
+            return f"{h}:00 AM"
+        else:
+            return f"{h-12}:00 PM"
+
+    # Assign columns in the specific target order
+    # Target columns order:
+    # 1:00 AM ... 11:00 AM (Hr 1-11)
+    # 12:00 AM (Hr 12)
+    # 1:00 PM ... 11:00 PM (Hr 13-23)
+    # 12:00 PM (Hr 24)
+    
+    # Hours 1 to 11
+    for h in range(1, 12):
+        out[f"{h}:00 AM"] = source[f"Hr {h}"]
+        
+    # Hour 12
+    out["12:00 AM"] = source["Hr 12"]
+    
+    # Hours 13 to 23
+    for h in range(13, 24):
+        out[f"{h-12}:00 PM"] = source[f"Hr {h}"]
+        
+    # Hour 24
+    out["12:00 PM"] = source["Hr 24"]
+    
+    return out.reset_index(drop=True)
+```

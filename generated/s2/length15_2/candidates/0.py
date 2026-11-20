@@ -1,0 +1,109 @@
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse datetime
+    source = source.copy()
+    source['dt'] = pd.to_datetime(source['local_15min'], format='%m/%d/%Y %H:%M')
+    source['hour'] = source['dt'].dt.hour
+    source['month'] = source['dt'].dt.month
+    
+    # Map month to season
+    def get_season(m):
+        if m in [12, 1, 2]:
+            return 'Winter'
+        elif m in [3, 4, 5]:
+            return 'Spring'
+        elif m in [6, 7, 8]:
+            return 'Summer'
+        else:
+            return 'Fall'
+            
+    source['season'] = source['month'].apply(get_season)
+    
+    # Define category mappings
+    # HVAC: air1, air2, air3, airwindowunit1, furnace1, furnace2, heater1, heater2, heater3, housefan1, jacuzzi1, pool1, pool2, poolpump1, sprinkler1, venthood1
+    hvac_cols = [
+        'air1_sum', 'air2_sum', 'air3_sum', 'airwindowunit1_sum',
+        'furnace1_sum', 'furnace2_sum', 'heater1_sum', 'heater2_sum', 'heater3_sum',
+        'housefan1_sum', 'jacuzzi1_sum', 'pool1_sum', 'pool2_sum', 'poolpump1_sum',
+        'sprinkler1_sum', 'venthood1_sum'
+    ]
+    
+    # Domestic Water Heating: waterheater1, waterheater2
+    dwh_cols = [
+        'waterheater1_sum', 'waterheater2_sum'
+    ]
+    
+    # Major Appliances: clotheswasher1, clotheswasher_dryg1, dishwasher1, drye1, dryg1, freezer1, icemaker1, microwave1, oven1, oven2, refrigerator1, refrigerator2, range1, winecooler1
+    major_appl_cols = [
+        'clotheswasher1_sum', 'clotheswasher_dryg1_sum', 'dishwasher1_sum',
+        'drye1_sum', 'dryg1_sum', 'freezer1_sum', 'icemaker1_sum',
+        'microwave1_sum', 'oven1_sum', 'oven2_sum', 'refrigerator1_sum',
+        'refrigerator2_sum', 'range1_sum', 'winecooler1_sum'
+    ]
+    
+    # Lighting: bathroom1, bathroom2, bedroom1, bedroom2, bedroom3, bedroom4, bedroom5, diningroom1, diningroom2, diningroom1, diningroom2, kitchen1, kitchen2, livingroom1, livingroom2, office1, shed1, utilityroom1, poollight1, security1, outsidelights_plugs1, outsidelights_plugs2
+    # Note: diningroom1 appears twice in my list above, fix. Also check source cols.
+    # Source cols for lighting:
+    # bathroom1_sum, bathroom2_sum, bedroom1_sum, bedroom2_sum, bedroom3_sum, bedroom4_sum, bedroom5_sum
+    # diningroom1_sum, diningroom2_sum
+    # kitchen1_sum, kitchen2_sum
+    # livingroom1_sum, livingroom2_sum
+    # office1_sum
+    # shed1_sum
+    # utilityroom1_sum
+    # poollight1_sum
+    # security1_sum
+    # outsidelights_plugs1_sum, outsidelights_plugs2_sum
+    
+    lighting_cols = [
+        'bathroom1_sum', 'bathroom2_sum', 'bedroom1_sum', 'bedroom2_sum', 'bedroom3_sum',
+        'bedroom4_sum', 'bedroom5_sum', 'diningroom1_sum', 'diningroom2_sum',
+        'kitchen1_sum', 'kitchen2_sum', 'livingroom1_sum', 'livingroom2_sum',
+        'office1_sum', 'shed1_sum', 'utilityroom1_sum', 'poollight1_sum',
+        'security1_sum', 'outsidelights_plugs1_sum', 'outsidelights_plugs2_sum'
+    ]
+    
+    # Miscellaneous Plug Loads: aquarium1, car1, car2, circpump1, disposal1, garage1, garage2, kitchenapp1, kitchenapp2, lights_plugs1, lights_plugs2, lights_plugs3, lights_plugs4, lights_plugs5, lights_plugs6, pump1, sewerump1, sumppump1, wellpump1, battery1
+    # Note: 'sewerump1' is likely 'sewerpump1' in source. 'battery1' is plug load.
+    misc_cols = [
+        'aquarium1_sum', 'car1_sum', 'car2_sum', 'circpump1_sum', 'disposal1_sum',
+        'garage1_sum', 'garage2_sum', 'kitchenapp1_sum', 'kitchenapp2_sum',
+        'lights_plugs1_sum', 'lights_plugs2_sum', 'lights_plugs3_sum', 'lights_plugs4_sum',
+        'lights_plugs5_sum', 'lights_plugs6_sum', 'pump1_sum', 'sewerpump1_sum',
+        'sumppump1_sum', 'wellpump1_sum', 'battery1_sum'
+    ]
+    
+    # Calculate sums for each category per row
+    source['hvac'] = source[hvac_cols].sum(axis=1)
+    source['domestic_water_heating'] = source[dwh_cols].sum(axis=1)
+    source['major_appliances'] = source[major_appl_cols].sum(axis=1)
+    source['lighting'] = source[lighting_cols].sum(axis=1)
+    source['miscellaneous_plug_loads'] = source[misc_cols].sum(axis=1)
+    
+    # Group by season and hour
+    agg_cols = ['hvac', 'domestic_water_heating', 'major_appliances', 'lighting', 'miscellaneous_plug_loads']
+    
+    grouped = source.groupby(['season', 'hour'])[agg_cols].sum().reset_index()
+    
+    # Ensure all 24 hours and 4 seasons are present
+    seasons = ['Winter', 'Spring', 'Summer', 'Fall']
+    hours = range(24)
+    
+    # Create a complete index
+    full_index = pd.MultiIndex.from_product([seasons, hours], names=['season', 'hour'])
+    grouped = grouped.set_index(['season', 'hour']).reindex(full_index, fill_value=0).reset_index()
+    
+    # Calculate total
+    grouped['total'] = grouped[agg_cols].sum(axis=1)
+    
+    # Select and order columns
+    result = grouped[['season', 'hour', 'hvac', 'domestic_water_heating', 'major_appliances', 'lighting', 'miscellaneous_plug_loads', 'total']]
+    
+    # Round to 3 decimal places as per sample
+    result = result.round(3)
+    
+    return result
+
+transform(source)

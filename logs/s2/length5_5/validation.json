@@ -1,0 +1,79 @@
+{
+  "case": "length5_5",
+  "length": 5,
+  "strategy": "s2",
+  "model": "qwen36-27b",
+  "is_demo": false,
+  "parameters": {
+    "output": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment",
+    "model": "qwen36-27b",
+    "base_url": "https://openai.rc.asu.edu/v1",
+    "max_tokens": 6000,
+    "reasoning_effort": "none",
+    "k": 5,
+    "sample_rows": 12,
+    "timeout": 120,
+    "replay_only": true,
+    "strategy": "s2",
+    "python": "3.14.4 (main, Apr  7 2026, 13:13:20) [Clang 21.0.0 (clang-2100.0.123.102)]",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "pandas": "3.1.1",
+    "held_out": [
+      "length1_1",
+      "length1_2",
+      "length1_3",
+      "length2_1",
+      "length3_1"
+    ],
+    "benchmark": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split"
+  },
+  "prompt_path": "logs/s2/length5_5/prompt.json",
+  "completion_path": "logs/s2/length5_5/response.json",
+  "execution": {
+    "status": "execution_error",
+    "returncode": 1,
+    "stdout": "",
+    "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\nTraceback (most recent call last):\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py\", line 21, in <module>\n    output = namespace['transform'](source)\n  File \"transform.py\", line 28, in transform\n    pivoted = df_pivot.pivot(index='date', columns='hour_idx', values='value')\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/frame.py\", line 13948, in pivot\n    return pivot(self, index=index, columns=columns, values=values)\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/reshape/pivot.py\", line 974, in pivot\n    result = cast(\"DataFrame\", indexed.unstack(columns_listlike))  # type: ignore[arg-type]\n                               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/series.py\", line 5013, in unstack\n    return unstack(self, level, fill_value, sort)\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/reshape/reshape.py\", line 626, in unstack\n    unstacker = _Unstacker(\n        obj.index, level=level, constructor=obj._constructor_expanddim, sort=sort\n    )\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/reshape/reshape.py\", line 184, in __init__\n    self._make_selectors()\n    ~~~~~~~~~~~~~~~~~~~~^^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/reshape/reshape.py\", line 265, in _make_selectors\n    raise ValueError(\"Index contains duplicate entries, cannot reshape\")\nValueError: Index contains duplicate entries, cannot reshape\n",
+    "seconds": 0.5642770419981389
+  },
+  "error": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\nTraceback (most recent call last):\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py\", line 21, in <module>\n    output = namespace['transform'](source)\n  File \"transform.py\", line 28, in transform\n    pivoted = df_pivot.pivot(index='date', columns='hour_idx', values='value')\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/frame.py\", line 13948, in pivot\n    return pivot(self, index=index, columns=columns, values=values)\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/reshape/pivot.py\", line 974, in pivot\n    result = cast(\"DataFrame\", indexed.unstack(columns_listlike))  # type: ignore[arg-type]\n                               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/series.py\", line 5013, in unstack\n    return unstack(self, level, fill_value, sort)\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/reshape/reshape.py\", line 626, in unstack\n    unstacker = _Unstacker(\n        obj.index, level=level, constructor=obj._constructor_expanddim, sort=sort\n    )\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/reshape/reshape.py\", line 184, in __init__\n    self._make_selectors()\n    ~~~~~~~~~~~~~~~~~~~~^^\n  File \"/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/.venv/lib/python3.14/site-packages/pandas/core/reshape/reshape.py\", line 265, in _make_selectors\n    raise ValueError(\"Index contains duplicate entries, cannot reshape\")\nValueError: Index contains duplicate entries, cannot reshape\n",
+  "generation": {
+    "request_hash": "47c6a23fffaa3245daa34f6b77b6709bd45b3021a90838761cae1f3e34e13799",
+    "usage": {
+      "completion_tokens": 4213,
+      "prompt_tokens": 41466,
+      "total_tokens": 45679,
+      "completion_tokens_details": null,
+      "prompt_tokens_details": {
+        "audio_tokens": null,
+        "cache_write_tokens": null,
+        "cached_tokens": 36736,
+        "image_tokens": null,
+        "text_tokens": null,
+        "created_cache_tokens": 4480,
+        "multimodal_tokens": null
+      },
+      "co2_g": 2.553011,
+      "energy_wh": 7.575699
+    },
+    "latency_seconds": 149.38228225000057,
+    "api_attempts": 1,
+    "cached": true,
+    "candidate_count": 1,
+    "reasoning_effort_header": "none",
+    "selected_index": 0,
+    "clusters": {}
+  },
+  "autopipeline": {
+    "accuracy": 0.0,
+    "is_correct": false,
+    "similarities": {}
+  },
+  "hard_match": {
+    "accuracy": 0.0,
+    "is_correct": false,
+    "similarities": {}
+  },
+  "wall_seconds": 150.0265081669968,
+  "replay_wall_seconds": 0.5762675410005613
+}

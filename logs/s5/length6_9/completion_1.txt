@@ -1,0 +1,130 @@
+Operator plan:
+1. Parse the `date` column into a datetime object.
+2. Extract the calendar date (YYYY-MM-DD) and the hour component.
+3. Determine the "target hour" for each row. The source data has irregular timestamps (e.g., 0:11, 2:22). The target has 24 columns "Hr 1" to "Hr 24".
+   - Observation: The first row is "1/2/2018 0:11" with value 67.9. In the target, "01/02/2018" has "Hr 1" = 67.9. This suggests the first record of the day maps to Hr 1, the second to Hr 2, etc., OR that the hour component is used.
+   - Let's check the second row: "1/2/2018 2:22" -> value 67.9. Target "01/02/2018" Hr 2 is null. Wait, the target for 01/02/2018 has only Hr 1 filled.
+   - Let's check the second date in target: "01/01/2018".
+     - Source rows for 1/1/2018 are not explicitly shown in the sample data snippet which starts at 1/2/2018. However, the sample data *does* show 1/2/2018 rows.
+     - Let's look at the source sample again. It starts at `1/2/2018 0:11`.
+     - The target has `01/02/2018` and `01/01/2018`.
+     - The source sample provided only contains data for `1/2/2018` and `1/3/2018`.
+     - Wait, the target sample shows `01/02/2018` having mostly nulls, and `01/01/2018` having a full curve.
+     - The source sample shows `1/2/2018` having values like 67.9, 67.9, 67.6...
+     - If the source sample is just a snippet, maybe the `01/01/2018` data in the target comes from source rows dated `1/1/2018` which are not in the provided source sample snippet?
+     - Let's look at the mapping logic from the visible data.
+     - Source `1/2/2018 0:11` (Hour 0) -> Value 67.9. Target `01/02/2018` Hr 1 = 67.9.
+     - Source `1/2/2018 2:22` (Hour 2) -> Value 67.9. Target `01/02/2018` Hr 2 = null.
+     - This implies that for `01/02/2018`, only the first record was kept or mapped? Or perhaps the mapping is based on the *sequence* of records per day?
+     - Let's look at `01/01/2018` in the target. It has 24 values.
+     - If the source has ~24 records per day (every ~2 hours as seen in sample: 0:11, 2:22, 4:34...), then it's likely a pivot where each record corresponds to a specific "Hr X".
+     - The sample source shows 11 records for 1/2/2018 (0:11 to 22:08) and 1 for 1/3/2018.
+     - The target shows `01/02/2018` with only Hr 1 populated. Why?
+     - Maybe the transformation filters for a specific condition? Or maybe the sample target is from a different subset?
+     - Actually, look at the distinct values in target `Hr 1`: `[67.9]`. `Hr 2`: `[null, 67.9]`.
+     - This suggests that for the date `01/01/2018`, Hr 2 is 67.9.
+     - For `01/02/2018`, Hr 2 is null.
+     - Why would `1/2/2018` data be mostly null in the target if it exists in the source?
+     - Hypothesis: The target `01/02/2018` corresponds to a day where only one record was valid or selected?
+     - Alternative Hypothesis: The "Hr" columns are not based on the clock hour, but on the *rank* of the record within the day.
+       - If `1/2/2018 0:11` is the 1st record of the day, it goes to Hr 1.
+       - If `1/2/2018 2:22` is the 2nd record, it goes to Hr 2.
+       - But in the target, `01/02/2018` Hr 2 is null.
+       - This implies that for `01/02/2018`, the 2nd record was either missing or filtered out.
+       - However, the source clearly has a 2nd record for 1/2/2018.
+       - Is it possible the target `01/02/2018` in the sample is *not* from the source `1/2/2018`? No, the dates match.
+       - Is it possible the transformation *drops* rows based on some criteria?
+       - Or is it possible that the target `01/02/2018` row in the sample is just showing one row of a larger dataset, and the nulls are because other dates don't have data there?
+       - The target has 2 rows. Source has 1450 rows.
+       - The target distinct dates are `01/02/2018` and `01/01/2018`.
+       - The source sample starts at `1/2/2018`.
+       - It is highly likely that the source contains data for `1/1/2018` as well (not shown in the snippet).
+       - Why is `01/02/2018` mostly null?
+       - Look at the source `1/2/2018` values: 67.9, 67.9, 67.6, 67.3...
+       - Look at target `01/01/2018` values: 67.9, 67.9, 67.8, 67.7...
+       - These curves look similar.
+       - If the source `1/1/2018` data looks like the `01/01/2018` target row, then the mapping is:
+         - 1st record of the day -> Hr 1
+         - 2nd record of the day -> Hr 2
+         - ...
+         - 24th record of the day -> Hr 24
+       - But why is `01/02/2018` in the target mostly null?
+       - Maybe the source for `1/2/2018` in the *actual* evaluation data is different? Or maybe I am misinterpreting the sample.
+       - Let's look at the source `1/3/2018 0:20` which is null.
+       - If I pivot the source by date and rank, I get the hourly profile.
+       - The target has 2 rows. This implies the transformation might be selecting specific dates?
+       - "Infer a general transformation... The evaluation source contains different rows".
+       - The target schema has `Date` and `Hr 1`...`Hr 24`.
+       - The operation is clearly: Group by Date, assign an index 1-24 to each record within the group (based on time order), and pivot.
+       - The fact that `01/02/2018` in the target sample has nulls for Hr 2-24 suggests that for that specific date in the *evaluation* set (or the specific subset represented by the target sample), there was only 1 record.
+       - However, the source sample *shows* multiple records for 1/2/2018.
+       - Contradiction?
+       - Note: "Source row count describes a training sample only, not the evaluation input."
+       - The target sample is likely from the *evaluation* input or a specific test case.
+       - The source sample is from the *training* input.
+       - The transformation must work generally.
+       - General logic:
+         1. Parse date.
+         2. Extract Date string.
+         3. Sort by Date and Time.
+         4. Assign a rank (1, 2, ...) within each Date.
+         5. Pivot so that Rank becomes columns "Hr 1", "Hr 2", etc.
+         6. Format Date as MM/DD/YYYY.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    df = source.copy()
+    df['parsed_dt'] = pd.to_datetime(df['date'])
+    
+    # Extract calendar date for grouping
+    df['cal_date'] = df['parsed_dt'].dt.date
+    
+    # Sort by calendar date and parsed datetime to ensure correct ordering
+    df = df.sort_values(['cal_date', 'parsed_dt'])
+    
+    # Assign a rank within each date group (1-based)
+    # This assumes roughly 24 records per day, mapping to Hr 1 - Hr 24
+    df['hr_rank'] = df.groupby('cal_date').cumcount() + 1
+    
+    # Filter to only include ranks 1-24 if necessary, or let pivot handle it
+    # The target has columns Hr 1 to Hr 24.
+    
+    # Create the pivot table
+    # Values: zone_016
+    # Index: cal_date
+    # Columns: hr_rank
+    pivot_df = df.pivot_table(index='cal_date', columns='hr_rank', values='zone_016', aggfunc='first')
+    
+    # Rename columns to "Hr 1", "Hr 2", etc.
+    pivot_df.columns = [f'Hr {int(c)}' for c in pivot_df.columns]
+    
+    # Ensure we have columns 1-24, filling missing with NaN
+    expected_cols = [f'Hr {i}' for i in range(1, 25)]
+    for col in expected_cols:
+        if col not in pivot_df.columns:
+            pivot_df[col] = np.nan
+            
+    # Select only the expected columns
+    pivot_df = pivot_df[expected_cols]
+    
+    # Reset index to make Date a column
+    pivot_df = pivot_df.reset_index()
+    
+    # Format the Date column as MM/DD/YYYY
+    pivot_df['Date'] = pd.to_datetime(pivot_df['cal_date']).dt.strftime('%m/%d/%Y')
+    
+    # Drop the temporary cal_date column if it wasn't dropped by reset_index behavior (it is the index now)
+    # reset_index makes 'cal_date' a column. We want 'Date' as the name.
+    # We already created 'Date'. We can drop 'cal_date'.
+    pivot_df = pivot_df.drop(columns=['cal_date'])
+    
+    # Reorder columns: Date first, then Hr 1-24
+    final_cols = ['Date'] + expected_cols
+    pivot_df = pivot_df[final_cols]
+    
+    return pivot_df
+```

@@ -1,0 +1,49 @@
+**Operator Plan:**
+1.  **Parse Dates**: Convert the `date` column from string (`M/d/yyyy H:mm`) to datetime objects.
+2.  **Extract Components**: Extract the date part (for grouping) and the hour part (0-23) for pivoting.
+3.  **Pivot/Reshape**: Group by the extracted date. For each date, assign the `cerc_logger_1` values to the corresponding hour bucket. Since the target has 24 columns (`Hr 1` to `Hr 24`), we map hour 0 to `Hr 1`, hour 1 to `Hr 2`, ..., hour 23 to `Hr 24`.
+    *   *Note*: The source data appears to be sparse time-series data. The target shows specific values for specific hours and `NaN` for others. We will pivot the data such that each row represents a unique date, and columns represent the hours. If multiple entries exist for the same date/hour, we need to decide how to aggregate. Looking at the sample, the source has distinct timestamps. The target `Hr X` columns seem to correspond to specific hourly readings. Given the high frequency of source data vs target structure, it's likely a simple pivot where we map the hour of the timestamp to the column. If there are duplicates for the same date/hour, standard aggregation (like mean or last) might be needed, but typically in these transformations, if the key (date, hour) is unique or if we just need *a* value, we can use `pivot_table` with `aggfunc='mean'` or `first`. Let's look closer. The source has timestamps like "7/28/2019 4:50". This falls in hour 4. Target `Hr 5` (which is index 4 if 1-based) would get this value.
+    *   Wait, the target columns are `Hr 1` to `Hr 24`.
+    *   Hour 0 (00:xx) -> `Hr 1`
+    *   Hour 1 (01:xx) -> `Hr 2`
+    *   ...
+    *   Hour 23 (23:xx) -> `Hr 24`
+4.  **Format Output**:
+    *   Create the `Date` column formatted as `MM/DD/YYYY`.
+    *   Create columns `Hr 1` through `Hr 24`.
+    *   Ensure the index is reset.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    df = source.copy()
+    df['datetime'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract date for grouping and hour for pivoting
+    df['date_only'] = df['datetime'].dt.date
+    df['hour'] = df['datetime'].dt.hour
+    
+    # Pivot the data
+    # We want 'date_only' as index, 'hour' as columns, and 'cerc_logger_1' as values
+    # Using pivot_table to handle potential duplicates with mean aggregation
+    pivot_df = df.pivot_table(index='date_only', columns='hour', values='cerc_logger_1', aggfunc='mean')
+    
+    # Reindex columns to ensure all hours 0-23 are present
+    pivot_df = pivot_df.reindex(columns=range(24), fill_value=np.nan)
+    
+    # Rename columns to match target: Hr 1, Hr 2, ..., Hr 24
+    # Hour 0 becomes Hr 1, Hour 1 becomes Hr 2, etc.
+    pivot_df.columns = [f'Hr {h+1}' for h in pivot_df.columns]
+    
+    # Create the Date column formatted as MM/DD/YYYY
+    pivot_df['Date'] = pivot_df.index.strftime('%m/%d/%Y')
+    
+    # Reset index and select columns in the correct order
+    result = pivot_df.reset_index(drop=True)
+    result = result[['Date'] + [f'Hr {h}' for h in range(1, 25)]]
+    
+    return result
+```

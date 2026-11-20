@@ -1,0 +1,56 @@
+**Operator Plan:**
+
+1.  **Parse Dates:** Convert the `date` column from string format (`M/d/yyyy H:mm`) to datetime objects.
+2.  **Extract Date and Hour:**
+    *   Extract the date part (year, month, day) to group by day.
+    *   Extract the hour part (0-23).
+3.  **Pivot/Reshape:**
+    *   Group by the extracted date.
+    *   For each day, create 24 columns (`Hr 1` to `Hr 24`).
+    *   Map the source `zone_016_cooling_sp` values to the corresponding hour columns.
+    *   Note: The target hours are 1-based (1-24). Source hours are 0-23.
+        *   Source Hour 0 -> Target `Hr 1`
+        *   Source Hour 1 -> Target `Hr 2`
+        *   ...
+        *   Source Hour 23 -> Target `Hr 24`
+    *   If a specific hour is missing for a day in the source data, the target cell should be NaN (as seen in target distinct values containing null).
+4.  **Format Date:** Format the grouped date index back to string `MM/dd/yyyy`.
+5.  **Construct DataFrame:** Create the final DataFrame with columns `Date`, `Hr 1` ... `Hr 24`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    source = source.copy()
+    source['datetime'] = pd.to_datetime(source['date'], format='%m/%d/%Y %H:%M')
+    source['date_only'] = source['datetime'].dt.date
+    source['hour'] = source['datetime'].dt.hour
+    
+    # Pivot the data
+    # We want rows to be dates, columns to be hours 1-24
+    # Source hour 0 corresponds to Hr 1, hour 1 to Hr 2, etc.
+    
+    # Create a pivot table
+    # Index: date_only, Columns: hour (0-23), Values: zone_016_cooling_sp
+    pivot_df = source.pivot_table(index='date_only', columns='hour', values='zone_016_cooling_sp')
+    
+    # Reindex columns to ensure all 24 hours (0-23) are present, filling missing with NaN
+    pivot_df = pivot_df.reindex(columns=range(24), fill_value=np.nan)
+    
+    # Rename columns to Hr 1 ... Hr 24
+    pivot_df.columns = [f'Hr {h+1}' for h in range(24)]
+    
+    # Reset index to make date_only a column
+    result = pivot_df.reset_index()
+    
+    # Format the date column as MM/dd/yyyy
+    result['Date'] = result['date_only'].apply(lambda x: x.strftime('%m/%d/%Y') if pd.notnull(x) else np.nan)
+    
+    # Select and order columns
+    cols = ['Date'] + [f'Hr {h}' for h in range(1, 25)]
+    result = result[cols]
+    
+    return result
+```

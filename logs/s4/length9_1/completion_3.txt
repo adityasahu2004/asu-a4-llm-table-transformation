@@ -1,0 +1,78 @@
+**Operator Plan:**
+1.  **Filter Rows**: Select only rows where `NUMBER_OF_RANGES` is 1. The target schema implies a simplified single-range model (low -999, high 99999), which corresponds to the `NUMBER_OF_RANGES == 1` case in the source (where `LOW_1` is -999 and `HIGH_1` is 99999). Rows with multiple ranges are excluded or aggregated, but given the target row count is slightly higher than source (118274 vs 118273), and the target data shows only the single-range structure, we filter for `NUMBER_OF_RANGES == 1`. *Correction*: The target has *more* rows than the source sample provided in the prompt description? No, the prompt says "Source row count describes a training sample only". However, looking at the distinct values in target `hour` (25) and `season` (4) and `daytype` (2), and the source having 118,273 rows. The source has 14 profile classes. The target seems to be a transformation of the source rows, likely filtering or mapping.
+    *   Let's look at the target `temperature_range`. It is constant `100998.0`. This is `99999 - (-999)`. This confirms we are dealing with the full range.
+    *   The target `low_end` is `-999.0` and `high_end` is `99999.0`. This matches `LOW_1` and `HIGH_1` for rows where `NUMBER_OF_RANGES` is 1.
+    *   Therefore, we filter the source to keep only rows where `NUMBER_OF_RANGES == 1`.
+
+2.  **Derive `season`**: Map `MONTH` to seasons.
+    *   Winter: 12, 1, 2
+    *   Spring: 3, 4, 5
+    *   Summer: 6, 7, 8
+    *   Fall: 9, 10, 11
+    *   *Note*: Standard meteorological seasons are often Dec-Feb (Winter), Mar-May (Spring), Jun-Aug (Summer), Sep-Nov (Fall). Let's verify with sample data if possible. The sample target data doesn't explicitly link to source months easily without more context, but standard mapping is the safest assumption.
+
+3.  **Derive `daytype`**: Determine if the date is a WEEKDAY or WEEKEND.
+    *   We have `YEAR`, `MONTH`, `DAY`. We can construct a datetime object.
+    *   If `dayofweek` < 5 (Mon-Fri), it's WEEKDAY. Else WEEKEND.
+
+4.  **Select `hour`**: Copy `HOUR` column.
+
+5.  **Calculate `temperature_range`**: Constant `100998.0` (derived from `99999 - (-999)`).
+
+6.  **Select `constant`**: Copy `CONSTANT` column.
+
+7.  **Select `coefficient`**: Copy `COEFF_1` column (since it's a single range, coeff 1 is the relevant coefficient).
+
+8.  **Select `low_end`**: Constant `-999.0`.
+
+9.  **Select `high_end`**: Constant `99999.0`.
+
+10. **Reset Index**: The target has a sequential index.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Filter for single range rows which match the target structure (low -999, high 99999)
+    df = source[source['NUMBER_OF_RANGES'] == 1].copy()
+    
+    # Create datetime to determine day of week
+    df['date'] = pd.to_datetime({
+        'year': df['YEAR'].astype(int),
+        'month': df['MONTH'].astype(int),
+        'day': df['DAY'].astype(int)
+    })
+    
+    # Derive daytype
+    # Monday=0 ... Sunday=6
+    df['daytype'] = np.where(df['date'].dt.dayofweek < 5, 'WEEKDAY', 'WEEKEND')
+    
+    # Derive season
+    # Winter: Dec, Jan, Feb (12, 1, 2)
+    # Spring: Mar, Apr, May (3, 4, 5)
+    # Summer: Jun, Jul, Aug (6, 7, 8)
+    # Fall: Sep, Oct, Nov (9, 10, 11)
+    month = df['MONTH'].astype(int)
+    conditions = [
+        month.isin([12, 1, 2]),
+        month.isin([3, 4, 5]),
+        month.isin([6, 7, 8]),
+        month.isin([9, 10, 11])
+    ]
+    choices = ['WINTER', 'SPRING', 'SUMMER', 'FALL']
+    df['season'] = np.select(conditions, choices, default='UNKNOWN')
+    
+    # Construct output columns
+    out = pd.DataFrame()
+    out['season'] = df['season']
+    out['daytype'] = df['daytype']
+    out['hour'] = df['HOUR']
+    out['temperature_range'] = 100998.0
+    out['constant'] = df['CONSTANT']
+    out['coefficient'] = df['COEFF_1']
+    out['low_end'] = -999.0
+    out['high_end'] = 99999.0
+    
+    return out.reset_index(drop=True)
+```

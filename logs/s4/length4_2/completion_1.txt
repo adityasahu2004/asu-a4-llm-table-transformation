@@ -1,0 +1,111 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `date` column from `MM/DD/YYYY` format to a datetime object.
+2.  **Format Date**: Create the new `date` column by formatting the parsed datetime as `YYYY-MM-DD 00:00:00`.
+3.  **Map Hour Columns**: The source has 24 columns named `value1` through `value24`. These correspond to hours 1 through 24 of the day.
+    *   Hours 1-11 map to `1:00 AM` - `11:00 AM`.
+    *   Hour 12 maps to `12:00 PM` (Noon).
+    *   Hour 13 maps to `1:00 PM`.
+    *   Hours 14-23 map to `2:00 PM` - `11:00 PM`.
+    *   Hour 24 maps to `12:00 AM` (Midnight end of day).
+    *   *Correction based on target schema order*: The target schema lists columns in a specific order: `1:00 AM` ... `11:00 AM`, `12:00 AM` (Wait, looking at target sample: `12:00 AM` is after `11:00 AM`? No, let's look closer at the target sample data and column names).
+    *   Target Column Order: `1:00 AM`, `2:00 AM`, ..., `11:00 AM`, `12:00 AM`, `1:00 PM`, ..., `11:00 PM`, `12:00 PM`.
+    *   Let's check the values for `2011-07-02` (Source `7/2/2011` is not in sample, but `7/3/2011` is).
+    *   Let's look at `2011-07-02` in Target. It has `1.3683` for `1:00 AM`.
+    *   Source `7/3/2011` has `value1` = `1.0243`. This doesn't match `2011-07-02`.
+    *   The target rows are shifted or different dates. The prompt says "Source row count describes a training sample only".
+    *   Let's infer the mapping logic from standard conventions and column names.
+    *   `value1` -> `1:00 AM`
+    *   `value2` -> `2:00 AM`
+    *   ...
+    *   `value11` -> `11:00 AM`
+    *   `value12` -> `12:00 PM` (Noon)
+    *   `value13` -> `1:00 PM`
+    *   ...
+    *   `value23` -> `11:00 PM`
+    *   `value24` -> `12:00 AM` (Midnight)
+    *   However, the target column order is: `1:00 AM`...`11:00 AM`, then `12:00 AM`, then `1:00 PM`...`11:00 PM`, then `12:00 PM`.
+    *   Wait, the target schema lists `12:00 AM` *after* `11:00 AM` and *before* `1:00 PM`. And `12:00 PM` is the *last* column.
+    *   Let's re-read the target sample carefully.
+        *   Col 1: `1:00 AM`
+        *   ...
+        *   Col 11: `11:00 AM`
+        *   Col 12: `12:00 AM`
+        *   Col 13: `1:00 PM`
+        *   ...
+        *   Col 24: `11:00 PM`
+        *   Col 25: `12:00 PM`
+    *   This ordering is unusual. `12:00 AM` usually means midnight (start of day). `12:00 PM` is noon.
+    *   If `value1` is 1:00 AM, `value12` is likely 12:00 PM (Noon). `value24` is likely 12:00 AM (Midnight).
+    *   Let's check the values.
+    *   Source `7/3/2011`: `value1`=1.02, `value12`=1.53, `value24`=1.04.
+    *   Target `2011-07-02`: `1:00 AM`=1.36, `12:00 PM`=1.19 (last col), `12:00 AM`=1.43 (12th col).
+    *   The dates don't align directly in the sample provided (Source starts 7/3, Target has 7/2). This implies the transformation might involve a shift or the samples are just disjoint subsets.
+    *   However, the *structure* is the key.
+    *   Standard mapping:
+        *   `value1` (1st hour) -> `1:00 AM`
+        *   `value12` (12th hour) -> `12:00 PM`
+        *   `value24` (24th hour) -> `12:00 AM`
+    *   Target Column `12:00 AM` is at index 11 (0-indexed) in the target columns list? No, let's count.
+        1. 1:00 AM
+        2. 2:00 AM
+        ...
+        11. 11:00 AM
+        12. 12:00 AM
+        13. 1:00 PM
+        ...
+        24. 11:00 PM
+        25. 12:00 PM
+    *   This target order puts `12:00 AM` between AM and PM blocks? And `12:00 PM` at the end?
+    *   If `value12` is Noon (`12:00 PM`), it should map to the last column `12:00 PM`.
+    *   If `value24` is Midnight (`12:00 AM`), it should map to the column named `12:00 AM`.
+    *   Let's assume the standard 24-hour clock mapping where `valueN` corresponds to the Nth hour of the day.
+    *   `value1` -> 1:00 AM
+    *   `value11` -> 11:00 AM
+    *   `value12` -> 12:00 PM
+    *   `value13` -> 1:00 PM
+    *   ...
+    *   `value23` -> 11:00 PM
+    *   `value24` -> 12:00 AM
+    *   We will construct the output DataFrame with the columns in the exact order specified by the target schema.
+
+4.  **Construct Output**:
+    *   Create `date` column.
+    *   Create columns `1:00 AM` through `11:00 AM` from `value1` to `value11`.
+    *   Create column `12:00 AM` from `value24`.
+    *   Create columns `1:00 PM` through `11:00 PM` from `value13` to `value23`.
+    *   Create column `12:00 PM` from `value12`.
+    *   Reset index.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    dt = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    
+    # Format date as required by target: YYYY-MM-DD 00:00:00
+    out = pd.DataFrame()
+    out['date'] = dt.strftime('%Y-%m-%d 00:00:00')
+    
+    # Define the mapping from source value columns to target hour columns
+    # Target order: 1:00 AM ... 11:00 AM, 12:00 AM, 1:00 PM ... 11:00 PM, 12:00 PM
+    
+    # 1:00 AM to 11:00 AM (value1 to value11)
+    for h in range(1, 12):
+        out[f'{h}:00 AM'] = source[f'value{h}']
+        
+    # 12:00 AM (Midnight, end of day) -> value24
+    out['12:00 AM'] = source['value24']
+    
+    # 1:00 PM to 11:00 PM (value13 to value23)
+    for h in range(13, 24):
+        # Convert 13-23 to 1-11 PM
+        pm_h = h - 12
+        out[f'{pm_h}:00 PM'] = source[f'value{h}']
+        
+    # 12:00 PM (Noon) -> value12
+    out['12:00 PM'] = source['value12']
+    
+    # Reset index to match target row count style if necessary, though usually just dropping old index
+    return out.reset_index(drop=True)
+```

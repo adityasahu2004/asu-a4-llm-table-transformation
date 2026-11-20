@@ -1,0 +1,84 @@
+**Operator Plan:**
+1.  **Construct Date/Time**: Combine `YEAR`, `MONTH`, `DAY` into a datetime object to determine the day of the week.
+2.  **Derive `season`**: Map the month to a season string ("WINTER" for Dec-Feb, "SPRING" for Mar-May, "SUMMER" for Jun-Aug, "FALL" for Sep-Nov).
+3.  **Derive `daytype`**: Check if the day of the week is Saturday (5) or Sunday (6) to assign "WEEKEND", otherwise "WEEKDAY".
+4.  **Extract `hour`**: Copy the `HOUR` column.
+5.  **Calculate `temperature_range`**: Compute `99999.0 - (-999.0) = 100998.0` as a constant column.
+6.  **Extract `constant`**: Copy the `CONSTANT` column.
+7.  **Extract `coefficient`**: Copy the `COEFF_1` column (based on the target sample showing the first coefficient value and the schema structure where `COEFF_1` is the primary coefficient). *Note: The target sample shows specific values that match `COEFF_1` from the source sample rows when aligned by index/logic, but since the source has multiple coefficients and the target has only one, and `COEFF_1` is the most prominent non-null column, we select `COEFF_1`.* Looking closely at the sample data:
+    *   Source Row 0: `CONSTANT`=444.09..., `COEFF_1`=-5.38... Target Row 0: `constant`=36.18..., `coefficient`=-0.25... -> Wait, the values don't match directly.
+    *   Let's re-examine the target sample. The target sample rows seem to be a subset or transformation.
+    *   Actually, looking at the target schema, `coefficient` has 2305 distinct values, same as `constant`. `CONSTANT` in source has 2304 distinct. `COEFF_1` has 2304 distinct.
+    *   Let's look at the target sample values again.
+        *   Target Row 0: `constant`=36.18491546, `coefficient`=-0.25655314.
+        *   Source doesn't have these exact values in the first few rows.
+        *   However, the transformation instructions say "Compute the result only from the source DataFrame".
+        *   The target column `coefficient` likely corresponds to `COEFF_1` because it's the first coefficient. The distinct counts are identical (2304 in source `CONSTANT` and `COEFF_1`, 2305 in target `constant` and `coefficient` - the +1 is likely due to NaN handling or a single different value in the full dataset).
+        *   Let's assume `coefficient` maps to `COEFF_1`.
+8.  **Extract `low_end`**: Copy `LOW_1` (which is constant -999.0).
+9.  **Extract `high_end`**: Copy `HIGH_1`? No, `high_end` in target is constant 99999.0. `HIGH_1` in source varies. However, `HIGH_1` has 1517 distinct values. The target `high_end` has 1 distinct value. The target `low_end` has 1 distinct value (-999.0).
+    *   Wait, the target `high_end` is *always* 99999.0? The schema says `distinct: 1`, `distinct_values: [99999.0]`.
+    *   The target `low_end` is *always* -999.0? The schema says `distinct: 1`, `distinct_values: [-999.0]`.
+    *   This implies `low_end` and `high_end` are constants derived from the min/max possible ranges or specifically `LOW_1` and a fixed max?
+    *   Looking at source `LOW_1`, it is constant -999.0.
+    *   Looking at source `HIGH_1`, it varies.
+    *   But the target `high_end` is constant 99999.0.
+    *   Perhaps the target represents a "flat" profile or the max range?
+    *   Given the target schema constraints (distinct=1), we must assign constants `-999.0` and `99999.0` to `low_end` and `high_end` respectively.
+
+**Refined Plan:**
+1.  Parse date from `YEAR`, `MONTH`, `DAY`.
+2.  Assign `season` based on month.
+3.  Assign `daytype` based on day of week.
+4.  `hour` = `HOUR`.
+5.  `temperature_range` = 100998.0 (constant).
+6.  `constant` = `CONSTANT`.
+7.  `coefficient` = `COEFF_1`.
+8.  `low_end` = -999.0 (constant).
+9.  `high_end` = 99999.0 (constant).
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Create a date object to determine day of week
+    # Using pd.to_datetime on year, month, day
+    dates = pd.to_datetime({
+        'year': source['YEAR'].astype(int),
+        'month': source['MONTH'].astype(int),
+        'day': source['DAY'].astype(int)
+    })
+    
+    # Determine Season
+    months = dates.dt.month
+    season = np.select(
+        [
+            months.isin([12, 1, 2]),
+            months.isin([3, 4, 5]),
+            months.isin([6, 7, 8]),
+            months.isin([9, 10, 11])
+        ],
+        ['WINTER', 'SPRING', 'SUMMER', 'FALL'],
+        default='UNKNOWN'
+    )
+    
+    # Determine Daytype
+    # 5 is Saturday, 6 is Sunday
+    day_of_week = dates.dt.dayofweek # Monday=0, Sunday=6
+    daytype = np.where(day_of_week >= 5, 'WEEKEND', 'WEEKDAY')
+    
+    # Construct Output
+    out = pd.DataFrame({
+        'season': season,
+        'daytype': daytype,
+        'hour': source['HOUR'],
+        'temperature_range': 100998.0,
+        'constant': source['CONSTANT'],
+        'coefficient': source['COEFF_1'],
+        'low_end': -999.0,
+        'high_end': 99999.0
+    })
+    
+    return out
+```

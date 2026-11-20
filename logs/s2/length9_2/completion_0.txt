@@ -1,0 +1,128 @@
+**Operator Plan:**
+
+1.  **Derive `season`**: Map the `MONTH` column to seasons.
+    *   Winter: 12, 1, 2
+    *   Spring: 3, 4, 5
+    *   Summer: 6, 7, 8
+    *   Fall: 9, 10, 11
+2.  **Derive `daytype`**: Determine if the date is a weekday or weekend.
+    *   Construct a datetime object from `YEAR`, `MONTH`, and `DAY`.
+    *   Check if the day of the week is Saturday (5) or Sunday (6). If so, "WEEKEND", else "WEEKDAY".
+3.  **Map `hour`**: Copy the `HOUR` column directly.
+4.  **Map `temperature_range`**: The target shows a constant value of `100998.0`. This corresponds to `99999.0 - (-999.0)`, which are the global min/max bounds seen in the source `LOW_1` and `HIGH_1`/`HIGH_4` columns. We assign this constant.
+5.  **Map `constant`**: Copy the `CONSTANT` column.
+6.  **Map `coefficient`**: The target `coefficient` values do not match any single source coefficient column directly (e.g., source `COEFF_1` is `-5.38...` for the first row, target is `-0.25...`). However, looking at the source data, `LOSS_FACTOR` is present. Let's look closer.
+    *   Row 1 Source: `CONSTANT`=444.09, `COEFF_1`=-5.38, `COEFF_2`=0.83. Target: `constant`=36.18, `coefficient`=-0.25.
+    *   Row 2 Source: `CONSTANT`=198.53, `COEFF_1`=-0.71. Target: `constant`=168.69, `coefficient`=-1.68.
+    *   There is a significant transformation happening here. Let's look at `LOSS_FACTOR`.
+    *   Row 1: `LOSS_FACTOR`=1.0536. `444.09 / 1.0536` ≈ 421. Not 36.
+    *   Let's check if `constant` and `coefficient` are derived from the ranges.
+    *   Actually, let's look at the distinct counts. Source `CONSTANT` has 2304 distinct values. Target `constant` has 2305. Source `COEFF_1` has 2304. Target `coefficient` has 2305.
+    *   The target `constant` and `coefficient` seem to be a single unified series derived from the multiple coefficient columns (`COEFF_1` through `COEFF_5`) and potentially `CONSTANT`, likely flattened or selected based on the active range.
+    *   However, without explicit logic for which coefficient applies to which range in the target schema (which collapses all ranges into one `low_end`/`high_end`), and given the `temperature_range` is constant, it implies a simplification.
+    *   Let's re-examine the first row.
+        *   Source: `LOW_1`=-999, `HIGH_1`=22.25, `LOW_2`=22.25, `HIGH_2`=99999. `CONSTANT`=444.09, `COEFF_1`=-5.38, `COEFF_2`=0.83.
+        *   Target: `constant`=36.18, `coefficient`=-0.25.
+    *   Let's look at the last row (TR3).
+        *   Source: `LOW_1`=-999, `HIGH_1`=11.54, `LOW_2`=11.54, `HIGH_2`=17.99, `LOW_3`=17.99, `HIGH_3`=99999. `CONSTANT`=6.54, `COEFF_1`=-0.0007, `COEFF_2`=-0.208, `COEFF_3`=-0.100.
+        *   Target: `constant`=412.91, `coefficient`=-4.29.
+    *   This transformation is complex and likely involves applying the piecewise linear function defined by the ranges to a specific temperature or aggregating them. However, notice the target `low_end` is always -999 and `high_end` is always 99999. This suggests the target represents a *single* linear approximation over the entire range, or the values provided in the sample target are just illustrative of the *schema* and not necessarily mathematically consistent with the source sample rows provided (which is common in these "infer schema" tasks where the sample data might be from a different partition or the transformation is a lookup).
+    *   Wait, look at the distinct counts again.
+        *   Source `CONSTANT`: 2304 distinct.
+        *   Target `constant`: 2305 distinct.
+        *   Source `COEFF_1`: 2304 distinct.
+        *   Target `coefficient`: 2305 distinct.
+    *   The number of rows is 105,132.
+    *   If we assume the target `constant` and `coefficient` are simply the source `CONSTANT` and `COEFF_1` (or a specific one), the values don't match.
+    *   Let's look at `LOSS_FACTOR`.
+        *   Row 1: 1.0536.
+        *   Row 2: 1.0268.
+    *   Is it possible `constant` = `CONSTANT` * `LOSS_FACTOR`?
+        *   444.09 * 1.0536 = 467. No.
+        *   444.09 / 1.0536 = 421. No.
+    *   Is it possible the target sample data provided in the prompt is *not* aligned with the source sample data provided?
+        *   Source Sample Row 1: MP1, Jan 1, Hour 100.
+        *   Target Sample Row 1: SPRING, WEEKDAY, Hour 100.
+        *   Jan 1, 2015 was a Thursday (Weekday). Season Winter.
+        *   Target says SPRING.
+        *   **Crucial Insight**: The target sample data does **not** correspond to the source sample data rows. The source sample has 12 rows. The target sample has 12 rows. But the dates don't match the seasons.
+            *   Source Row 1: Jan 1 (Winter). Target Row 1: Spring.
+            *   Source Row 2: Feb 3 (Winter). Target Row 2: Spring.
+            *   Source Row 3: Mar 8 (Spring). Target Row 3: Spring.
+            *   Source Row 4: Apr 10 (Spring). Target Row 4: Summer.
+        *   This implies the target sample is just *example* data for the schema, or the mapping is different.
+        *   However, usually in these tasks, we must infer the *logic* from the schema and general patterns.
+        *   Let's look at the `hour` column. Source `HOUR` has values like 100, 500, 900. Target `hour` has 100, 500, 900. This matches.
+        *   Let's look at `temperature_range`. Constant 100998.0.
+        *   Let's look at `low_end` and `high_end`. Constant -999.0 and 99999.0.
+        *   Let's look at `constant` and `coefficient`.
+        *   If the sample data is not aligned, we cannot reverse-engineer the math for `constant` and `coefficient` from the specific values. We must look for a structural mapping.
+        *   The source has `CONSTANT` and `COEFF_1`...`COEFF_5`. The target has `constant` and `coefficient`.
+        *   Given the target `low_end` and `high_end` are the global bounds, it is highly probable that the target represents a **simplified single-range model**.
+        *   Often, `COEFF_1` is the primary coefficient. `CONSTANT` is the primary constant.
+        *   Let's assume the transformation is:
+            *   `constant` = `CONSTANT`
+            *   `coefficient` = `COEFF_1`
+            *   Why? Because they are the first in the series. The distinct counts (2304 vs 2305) are very close. The extra distinct value might be NaN handling or a default.
+            *   Let's check if `COEFF_1` matches the target `coefficient` distinct count. Source `COEFF_1` has 2304 distinct. Target `coefficient` has 2305.
+            *   Source `CONSTANT` has 2304 distinct. Target `constant` has 2305.
+            *   This strong correlation in distinct counts suggests `constant` comes from `CONSTANT` and `coefficient` comes from `COEFF_1`. The slight difference (2304 vs 2305) might be due to NaNs being filled or a specific edge case, but structurally, this is the most likely mapping.
+            *   The values in the target sample are likely from a different dataset or processed differently (e.g., normalized), but without that info, we map the columns structurally.
+            *   Wait, look at `LOSS_FACTOR`. It has 3 distinct values.
+            *   Let's try: `constant` = `CONSTANT` * `LOSS_FACTOR`? No, distinct counts would likely increase or stay similar.
+            *   Let's stick to the simplest structural mapping: `constant` <- `CONSTANT`, `coefficient` <- `COEFF_1`.
+
+7.  **Map `low_end`**: Constant -999.0.
+8.  **Map `high_end`**: Constant 99999.0.
+
+**Refined Plan:**
+1.  Parse Date from YEAR, MONTH, DAY.
+2.  Calculate Season.
+3.  Calculate DayType.
+4.  Select `HOUR`.
+5.  Set `temperature_range` = 100998.0.
+6.  Set `constant` = `CONSTANT`.
+7.  Set `coefficient` = `COEFF_1`.
+8.  Set `low_end` = -999.0.
+9.  Set `high_end` = 99999.0.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Create a datetime object to determine day of week
+    # YEAR, MONTH, DAY are floats, convert to int for date construction
+    dates = pd.to_datetime(
+        year=source['YEAR'].astype(int),
+        month=source['MONTH'].astype(int),
+        day=source['DAY'].astype(int)
+    )
+    
+    # Determine Season
+    # Winter: 12, 1, 2; Spring: 3, 4, 5; Summer: 6, 7, 8; Fall: 9, 10, 11
+    month = source['MONTH'].astype(int)
+    season = pd.Series(np.where(
+        month.isin([12, 1, 2]), 'WINTER',
+        np.where(month.isin([3, 4, 5]), 'SPRING',
+                 np.where(month.isin([6, 7, 8]), 'SUMMER', 'FALL'))
+    ), index=source.index)
+    
+    # Determine DayType
+    # 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun
+    dayofweek = dates.dt.dayofweek
+    daytype = pd.Series(np.where(dayofweek >= 5, 'WEEKEND', 'WEEKDAY'), index=source.index)
+    
+    # Construct Output
+    out = pd.DataFrame()
+    out['season'] = season
+    out['daytype'] = daytype
+    out['hour'] = source['HOUR']
+    out['temperature_range'] = 100998.0
+    out['constant'] = source['CONSTANT']
+    out['coefficient'] = source['COEFF_1']
+    out['low_end'] = -999.0
+    out['high_end'] = 99999.0
+    
+    return out
+```

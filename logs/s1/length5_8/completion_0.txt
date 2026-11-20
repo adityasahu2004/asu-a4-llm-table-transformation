@@ -1,0 +1,284 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `date` column from string format (`%m/%d/%Y`) to datetime objects.
+2.  **Shift Dates**: The target dates are exactly 6 months prior to the source dates (e.g., Source `7/3/2015` -> Target `2015-01-01` is not a simple shift, let's look closer).
+    *   Source: `7/3/2015` -> Target: `2015-01-01`? No, wait.
+    *   Let's check the first row: Source `7/3/2015`. Target `2015-01-01`. Difference is ~6 months.
+    *   Let's check the last row: Source `12/31/2015`. Target `2015-07-02`. Difference is ~6 months.
+    *   Let's check the second row: Source `7/19/2015`. Target `2015-01-17`. Difference is exactly 6 months (July 19 - 6 months = Jan 19? No, Jan 17 is 2 days off).
+    *   Let's look at the day of month.
+        *   Source `7/3` -> Target `1/1`.
+        *   Source `7/19` -> Target `1/17`.
+        *   Source `8/4` -> Target `2/3`.
+        *   Source `8/21` -> Target `2/19`.
+        *   Source `9/6` -> Target `3/8`.
+        *   Source `9/23` -> Target `3/24`.
+        *   Source `10/9` -> Target `4/10`.
+        *   Source `10/26` -> Target `4/26`.
+        *   Source `11/11` -> Target `5/13`.
+        *   Source `11/28` -> Target `5/29`.
+        *   Source `12/14` -> Target `6/15`.
+        *   Source `12/31` -> Target `7/2`.
+    *   It looks like the target date is `Source Date - 6 months`.
+        *   `7/3/2015` - 6 months = `1/3/2015`. Target is `1/1/2015`.
+        *   `7/19/2015` - 6 months = `1/19/2015`. Target is `1/17/2015`.
+        *   `8/4/2015` - 6 months = `2/4/2015`. Target is `2/3/2015`.
+        *   `8/21/2015` - 6 months = `2/21/2015`. Target is `2/19/2015`.
+        *   `9/6/2015` - 6 months = `3/6/2015`. Target is `3/8/2015`.
+        *   `9/23/2015` - 6 months = `3/23/2015`. Target is `3/24/2015`.
+        *   `10/9/2015` - 6 months = `4/9/2015`. Target is `4/10/2015`.
+        *   `10/26/2015` - 6 months = `4/26/2015`. Target is `4/26/2015`. (Match)
+        *   `11/11/2015` - 6 months = `5/11/2015`. Target is `5/13/2015`.
+        *   `11/28/2015` - 6 months = `5/28/2015`. Target is `5/29/2015`.
+        *   `12/14/2015` - 6 months = `6/14/2015`. Target is `6/15/2015`.
+        *   `12/31/2015` - 6 months = `6/31/2015` (invalid) -> `7/1/2015`? Target is `7/2/2015`.
+
+    Let's re-examine the relationship.
+    Source `7/3/2015` is a Friday. Target `2015-01-01` is a Thursday.
+    Source `7/19/2015` is a Sunday. Target `2015-01-17` is a Saturday.
+    Source `8/4/2015` is a Tuesday. Target `2015-02-03` is a Tuesday.
+    Source `8/21/2015` is a Friday. Target `2015-02-19` is a Thursday.
+    
+    Actually, let's look at the values. The values in the target rows correspond to the values in the source rows.
+    Row 0 Source: `7/3/2015`, values `[0.0002398657, ..., 0.0001199328, 0.0, ...]`
+    Row 0 Target: `2015-01-01`, values `[0.0002398657, ..., 0.0001199328, 0.0, ...]`
+    The values are identical. The transformation is purely on the `date` column and column renaming.
+    
+    Let's look at the date mapping again.
+    Source `7/3/2015` -> Target `2015-01-01`.
+    Source `7/19/2015` -> Target `2015-01-17`.
+    Source `8/4/2015` -> Target `2015-02-03`.
+    Source `8/21/2015` -> Target `2015-02-19`.
+    Source `9/6/2015` -> Target `2015-03-08`.
+    Source `9/23/2015` -> Target `2015-03-24`.
+    Source `10/9/2015` -> Target `2015-04-10`.
+    Source `10/26/2015` -> Target `2015-04-26`.
+    Source `11/11/2015` -> Target `2015-05-13`.
+    Source `11/28/2015` -> Target `2015-05-29`.
+    Source `12/14/2015` -> Target `2015-06-15`.
+    Source `12/31/2015` -> Target `2015-07-02`.
+
+    Let's calculate `Target = Source - 6 months`.
+    `7/3` - 6m = `1/3`. Target `1/1`. Diff -2 days.
+    `7/19` - 6m = `1/19`. Target `1/17`. Diff -2 days.
+    `8/4` - 6m = `2/4`. Target `2/3`. Diff -1 day.
+    `8/21` - 6m = `2/21`. Target `2/19`. Diff -2 days.
+    `9/6` - 6m = `3/6`. Target `3/8`. Diff +2 days.
+    `9/23` - 6m = `3/23`. Target `3/24`. Diff +1 day.
+    `10/9` - 6m = `4/9`. Target `4/10`. Diff +1 day.
+    `10/26` - 6m = `4/26`. Target `4/26`. Diff 0 days.
+    `11/11` - 6m = `5/11`. Target `5/13`. Diff +2 days.
+    `11/28` - 6m = `5/28`. Target `5/29`. Diff +1 day.
+    `12/14` - 6m = `6/14`. Target `6/15`. Diff +1 day.
+    `12/31` - 6m = `6/31`->`7/1`. Target `7/2`. Diff +1 day.
+
+    This doesn't look like a simple arithmetic shift. Let's look at the day of the week.
+    `7/3/2015` (Fri) -> `1/1/2015` (Thu).
+    `7/19/2015` (Sun) -> `1/17/2015` (Sat).
+    `8/4/2015` (Tue) -> `2/3/2015` (Tue).
+    `8/21/2015` (Fri) -> `2/19/2015` (Thu).
+    `9/6/2015` (Sun) -> `3/8/2015` (Sun).
+    `9/23/2015` (Wed) -> `3/24/2015` (Thu).
+    `10/9/2015` (Fri) -> `4/10/2015` (Fri).
+    `10/26/2015` (Mon) -> `4/26/2015` (Mon).
+    `11/11/2015` (Wed) -> `5/13/2015` (Wed).
+    `11/28/2015` (Sat) -> `5/29/2015` (Fri).
+    `12/14/2015` (Mon) -> `6/15/2015` (Mon).
+    `12/31/2015` (Thu) -> `7/2/2015` (Thu).
+
+    It seems the target date is the **same day of the week** as the source date, but shifted back by approximately 6 months.
+    Specifically, it looks like `Target = Source - 6 months`, then adjusted to the nearest previous or same day of the week? Or maybe it's just `Source - 6 months` and then rounded to the nearest weekday? No, `1/1` is a Thursday. `1/3` is a Saturday.
+    
+    Let's try: `Target = Source - 6 months`. Then find the date in that month that has the same day-of-week as the source?
+    Source `7/3` (Fri). `1/3` is Sat. Fri in Jan 2015 is `1/2` or `1/9`. Target is `1/1` (Thu). This hypothesis fails.
+
+    Let's look at the difference in days.
+    `7/3` to `1/1`: 183 days.
+    `7/19` to `1/17`: 183 days.
+    `8/4` to `2/3`: 182 days.
+    `8/21` to `2/19`: 183 days.
+    `9/6` to `3/8`: 181 days.
+    `9/23` to `3/24`: 182 days.
+    `10/9` to `4/10`: 182 days.
+    `10/26` to `4/26`: 182 days.
+    `11/11` to `5/13`: 183 days.
+    `11/28` to `5/29`: 182 days.
+    `12/14` to `6/15`: 183 days.
+    `12/31` to `7/2`: 183 days.
+
+    The difference is consistently 181-183 days. This is exactly 6 months (approx 182.5 days).
+    It seems the transformation is simply: **Subtract 6 months from the date**.
+    However, pandas `pd.DateOffset(months=-6)` handles month-end logic.
+    `7/3` - 6m = `1/3`. Target `1/1`.
+    `7/19` - 6m = `1/19`. Target `1/17`.
+    
+    Wait, look at the target dates again.
+    `2015-01-01`
+    `2015-01-17`
+    `2015-02-03`
+    `2015-02-19`
+    `2015-03-08`
+    `2015-03-24`
+    `2015-04-10`
+    `2015-04-26`
+    `2015-05-13`
+    `2015-05-29`
+    `2015-06-15`
+    `2015-07-02`
+
+    These dates are all **Saturdays**?
+    `1/1/2015` is Thursday.
+    `1/17/2015` is Saturday.
+    `2/3/2015` is Tuesday.
+    
+    Let's check the source dates' day of week again.
+    `7/3/2015` Friday.
+    `7/19/2015` Sunday.
+    `8/4/2015` Tuesday.
+    `8/21/2015` Friday.
+    `9/6/2015` Sunday.
+    `9/23/2015` Wednesday.
+    `10/9/2015` Friday.
+    `10/26/2015` Monday.
+    `11/11/2015` Wednesday.
+    `11/28/2015` Saturday.
+    `12/14/2015` Monday.
+    `12/31/2015` Thursday.
+
+    Target Day of Week:
+    `1/1/2015` Thursday.
+    `1/17/2015` Saturday.
+    `2/3/2015` Tuesday.
+    `2/19/2015` Thursday.
+    `3/8/2015` Sunday.
+    `3/24/2015` Thursday.
+    `4/10/2015` Friday.
+    `4/26/2015` Monday.
+    `5/13/2015` Wednesday.
+    `5/29/2015` Friday.
+    `6/15/2015` Monday.
+    `7/2/2015` Thursday.
+
+    There is no consistent day-of-week mapping.
+
+    Let's look at the difference in days again.
+    `7/3` -> `1/1`: 183 days.
+    `7/19` -> `1/17`: 183 days.
+    `8/4` -> `2/3`: 182 days.
+    `8/21` -> `2/19`: 183 days.
+    `9/6` -> `3/8`: 181 days.
+    `9/23` -> `3/24`: 182 days.
+    `10/9` -> `4/10`: 182 days.
+    `10/26` -> `4/26`: 182 days.
+    `11/11` -> `5/13`: 183 days.
+    `11/28` -> `5/29`: 182 days.
+    `12/14` -> `6/15`: 183 days.
+    `12/31` -> `7/2`: 183 days.
+
+    The difference is either 181, 182, or 183 days.
+    Average is ~182.5.
+    This is exactly 6 months.
+    Why the variation?
+    `7/3` (31 days in July, 30 in June, 31 in May, 30 in April, 31 in March, 28 in Feb, 31 in Jan).
+    From `1/1` to `7/3`:
+    Jan: 31, Feb: 28, Mar: 31, Apr: 30, May: 31, Jun: 30, Jul: 3.
+    Sum: 31+28+31+30+31+30+3 = 184 days.
+    So `7/3` - 183 days = `1/1`.
+    
+    From `1/17` to `7/19`:
+    Jan: 31-17=14, Feb: 28, Mar: 31, Apr: 30, May: 31, Jun: 30, Jul: 19.
+    Sum: 14+28+31+30+31+30+19 = 183 days.
+    
+    From `2/3` to `8/4`:
+    Feb: 28-3=25, Mar: 31, Apr: 30, May: 31, Jun: 30, Jul: 31, Aug: 4.
+    Sum: 25+31+30+31+30+31+4 = 182 days.
+
+    It seems the transformation is simply **subtracting 6 months** using a calendar-aware offset, but the specific day adjustment suggests it might be `pd.DateOffset(months=-6)` which preserves the day of the month if possible, or rolls to the end of the month.
+    `7/3` - 6m = `1/3`. Target `1/1`.
+    `7/19` - 6m = `1/19`. Target `1/17`.
+    
+    Let's check if the target dates are the **first day of the month** or something? No.
+    
+    Let's look at the source data again. The source dates are `7/3`, `7/19`, `8/4`, `8/21`...
+    These are roughly bi-weekly.
+    The target dates are `1/1`, `1/17`, `2/3`, `2/19`...
+    These are also roughly bi-weekly.
+    
+    Is it possible the target date is `Source Date - 6 months` and then **rounded to the nearest Saturday**?
+    `1/3` (Sat) -> `1/3`. Target `1/1` (Thu). No.
+    
+    Is it possible the target date is `Source Date - 6 months` and then **adjusted to the previous Monday**?
+    `1/3` (Sat) -> `1/1` (Thu). No.
+    
+    Let's look at the difference between `Source - 6 months` and `Target`.
+    `1/3` vs `1/1`: -2 days.
+    `1/19` vs `1/17`: -2 days.
+    `2/4` vs `2/3`: -1 day.
+    `2/21` vs `2/19`: -2 days.
+    `3/6` vs `3/8`: +2 days.
+    `3/23` vs `3/24`: +1 day.
+    `4/9` vs `4/10`: +1 day.
+    `4/26` vs `4/26`: 0 days.
+    `5/11` vs `5/13`: +2 days.
+    `5/28` vs `5/29`: +1 day.
+    `6/14` vs `6/15`: +1 day.
+    `7/1` vs `7/2`: +1 day.
+
+    This looks like `Target = Source - 6 months` + `Adjustment`.
+    The adjustment seems to depend on the day of the week.
+    `1/3` (Sat) -> `1/1` (Thu). Shift -2.
+    `1/19` (Sat) -> `1/17` (Thu). Shift -2.
+    `2/4` (Wed) -> `2/3` (Tue). Shift -1.
+    `2/21` (Sat) -> `2/19` (Thu). Shift -2.
+    `3/6` (Fri) -> `3/8` (Sun). Shift +2.
+    `3/23` (Mon) -> `3/24` (Tue). Shift +1.
+    `4/9` (Thu) -> `4/10` (Fri). Shift +1.
+    `4/26` (Sun) -> `4/26` (Sun). Shift 0.
+    `5/11` (Mon) -> `5/13` (Wed). Shift +2.
+    `5/28` (Thu) -> `5/29` (Fri). Shift +1.
+    `6/14` (Sun) -> `6/15` (Mon). Shift +1.
+    `7/1` (Wed) -> `7/2` (Thu). Shift +1.
+
+    This is getting complicated. Let's look at the target dates again.
+    `2015-01-01`
+    `2015-01-17`
+    `2015-02-03`
+    `2015-02-19`
+    `2015-03-08`
+    `2015-03-24`
+    `2015-04-10`
+    `2015-04-26`
+    `2015-05-13`
+    `2015-05-29`
+    `2015-06-15`
+    `2015-07-02`
+
+    These dates are all **16 or 17 days apart**.
+    `1/1` to `1/17`: 16 days.
+    `1/17` to `2/3`: 17 days.
+    `2/3` to `2/19`: 16 days.
+    `2/19` to `3/8`: 17 days.
+    `3/8` to `3/24`: 16 days.
+    `3/24` to `4/10`: 17 days.
+    `4/10` to `4/26`: 16 days.
+    `4/26` to `5/13`: 17 days.
+    `5/13` to `5/29`: 16 days.
+    `5/29` to `6/15`: 17 days.
+    `6/15` to `7/2`: 17 days.
+
+    The source dates are also 16 or 17 days apart.
+    `7/3` to `7/19`: 16 days.
+    `7/19` to `8/4`: 16 days.
+    `8/4` to `8/21`: 17 days.
+    `8/21` to `9/6`: 16 days.
+    `9/6` to `9/23`: 17 days.
+    `9/23` to `10/9`: 16 days.
+    `10/9` to `10/26`: 17 days.
+    `10/26` to `11/11`: 16 days.
+    `11/11` to `11/28`: 17 days.
+    `11/28` to `12/14`: 16 days.
+    `12/14` to `12/31`: 17 days.
+
+    The sequence of intervals is identical.
+    Source: 16, 16, 17, 16, 17, 16, 17, 16, 17, 16, 17.
+    Target: 16, 17, 16, 17, 16, 17, 16, 

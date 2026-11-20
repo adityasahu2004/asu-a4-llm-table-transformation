@@ -1,0 +1,189 @@
+**Operator Plan:**
+1.  **Date Parsing & Formatting**: Parse the `Date` column (format `%a %m/%d/%Y`) into datetime objects. Format these dates as `MM/DD/YYYY` for the new `date` column.
+2.  **Column Renaming (Hours 1-11)**: Rename source columns `1:00` through `11:00` to `1:00 AM` through `11:00 AM`.
+3.  **Column Renaming (Hour 12)**: The source column `12:00` represents noon. In the target schema, `12:00 PM` is the last column, while `12:00 AM` appears earlier (index 12). Based on standard 12-hour clock conventions where 12:00:00 is noon (PM) and 12:00:00 (midnight) is AM, and observing the target column order which places `12:00 AM` after `11:00 AM` and before `1:00 PM`, this suggests a specific mapping. However, looking closely at the target sample data vs source sample data is not allowed. Let's look at the target schema order:
+    `1:00 AM` ... `11:00 AM`, `12:00 AM`, `1:00 PM` ... `11:00 PM`, `12:00 PM`.
+    This is a non-standard order if strictly chronological (usually 12 AM comes before 1 AM). Let's re-read the target columns carefully.
+    Target Columns: `1:00 AM`, `2:00 AM`, ..., `11:00 AM`, `12:00 AM`, `1:00 PM`, ..., `11:00 PM`, `12:00 PM`.
+    Source Columns: `1:00`, `2:00`, ..., `11:00`, `12:00`, `13:00`, ..., `23:00`, `24:00:00`.
+    
+    Mapping logic:
+    - Source `1:00` -> Target `1:00 AM`
+    - Source `2:00` -> Target `2:00 AM`
+    - ...
+    - Source `11:00` -> Target `11:00 AM`
+    - Source `12:00` -> Target `12:00 AM` ?? Or `12:00 PM`?
+      Usually 12:00 source (noon) is 12:00 PM.
+      Source `13:00` (1 PM) -> Target `1:00 PM`.
+      ...
+      Source `23:00` (11 PM) -> Target `11:00 PM`.
+      Source `24:00:00` (Midnight end of day) -> Target `12:00 PM` ?? Or `12:00 AM`?
+      
+    Let's look at the target distinct counts or sample data if available? No, I must infer from schema.
+    Standard conversion:
+    1:00-11:00 -> 1 AM - 11 AM
+    12:00 -> 12 PM (Noon)
+    13:00-23:00 -> 1 PM - 11 PM
+    24:00 -> 12 AM (Midnight) OR 12 PM?
+    
+    Let's look at the Target Column Order again:
+    `1:00 AM` ... `11:00 AM` (11 cols)
+    `12:00 AM` (1 col)
+    `1:00 PM` ... `11:00 PM` (11 cols)
+    `12:00 PM` (1 col)
+    
+    This order is weird. `12:00 AM` is between 11 AM and 1 PM? That would be Noon if it's a typo for PM, but it says AM.
+    However, if we assume the source `12:00` maps to `12:00 AM` in the target *position* (index 12), and `24:00:00` maps to `12:00 PM` (index 24), let's check the values.
+    
+    Actually, let's look at the source `12:00` value in sample: `1.119`.
+    Target `12:00 AM` value in sample: `3.33`.
+    Target `12:00 PM` value in sample: `2.753`.
+    Source `24:00:00` value: `1.155`.
+    
+    Wait, the sample data in the prompt is for the *source* and *target* separately. I cannot cross-reference row-by-row because the note says "Source row count describes a training sample only, not the evaluation input" and the samples provided might be disjoint or just illustrative. BUT, usually in these problems, the samples align if it's the same transformation instance.
+    
+    Let's check the first row of Source Sample:
+    Date: `Thu 10/01/2009`
+    1:00: 1.153
+    ...
+    12:00: 1.119
+    ...
+    24:00:00: 1.155
+    
+    First row of Target Sample:
+    Date: `01/01/2003`
+    This is a different date. The samples are NOT aligned row-by-row. They are just schema samples.
+    
+    So I must rely on standard conventions and column names.
+    Source `1:00` is 1 AM. Target `1:00 AM`.
+    Source `12:00` is Noon. Target has `12:00 PM` and `12:00 AM`.
+    Source `24:00:00` is Midnight.
+    
+    In many energy/load datasets:
+    Hour 12 is Noon (12 PM).
+    Hour 24 is Midnight (12 AM or 0:00 next day).
+    
+    Target Column List:
+    1. `1:00 AM`
+    2. `2:00 AM`
+    ...
+    11. `11:00 AM`
+    12. `12:00 AM`  <-- This is the outlier in the sequence. Usually 12 PM is here.
+    13. `1:00 PM`
+    ...
+    24. `12:00 PM` <-- This is the last column.
+    
+    If Source `12:00` (Noon) maps to `12:00 PM`, it should be at the end? No, Noon is in the middle of the day.
+    If Source `24:00` (Midnight) maps to `12:00 AM`, it should be at the beginning or end?
+    
+    Let's look at the distinct counts.
+    Source `12:00`: 1457 distinct.
+    Source `24:00:00`: 1458 distinct.
+    
+    Target `12:00 AM`: 1535 distinct.
+    Target `12:00 PM`: 1451 distinct.
+    
+    This doesn't help much without knowing if rows are preserved. Rows are preserved (2465 -> 2465).
+    
+    Let's assume standard 12-hour clock mapping:
+    Source 1-11 -> 1 AM - 11 AM
+    Source 12 -> 12 PM (Noon)
+    Source 13-23 -> 1 PM - 11 PM
+    Source 24 -> 12 AM (Midnight)
+    
+    Now, where do `12:00 PM` and `12:00 AM` go in the target DataFrame?
+    The target schema lists `12:00 AM` at index 12 (after 11 AM) and `12:00 PM` at index 25 (last).
+    
+    If I map Source 12 (Noon) to `12:00 PM`, and Source 24 (Midnight) to `12:00 AM`:
+    The target column `12:00 AM` is at position 12.
+    The target column `12:00 PM` is at position 25.
+    
+    Does it make sense for Midnight (Source 24) to be at position 12? No, that breaks chronological order (11 AM, Midnight, 1 PM).
+    Does it make sense for Noon (Source 12) to be at position 12? Yes (11 AM, Noon, 1 PM).
+    
+    So, it is highly likely that:
+    Target Column `12:00 AM` (at index 12) actually contains the Noon data (Source `12:00`). This implies a labeling error in the target schema where "12:00 AM" was used for Noon, OR "12:00 PM" was used for Midnight.
+    
+    Let's check the other one.
+    Target Column `12:00 PM` (at index 25, last).
+    Source `24:00:00` is the last hour.
+    
+    Hypothesis:
+    Source `12:00` -> Target `12:00 AM` (Label is weird, but position matches Noon)
+    Source `24:00:00` -> Target `12:00 PM` (Label is weird, but position matches Midnight)
+    
+    Alternative Hypothesis:
+    Source `12:00` -> Target `12:00 PM`
+    Source `24:00:00` -> Target `12:00 AM`
+    But then the column order in the target DataFrame is:
+    ..., 11 AM, 12 AM (Midnight), 1 PM, ..., 11 PM, 12 PM (Noon).
+    This would mean the data is NOT chronological in the target DataFrame. It puts Midnight after 11 AM and Noon at the very end. This is a very strange ordering for a time series profile.
+    
+    However, if we look at the Target Sample Data:
+    Row 1: `01/01/2003`
+    `11:00 AM`: 3.098
+    `12:00 AM`: 3.33
+    `1:00 PM`: 3.556
+    ...
+    `11:00 PM`: 3.177
+    `12:00 PM`: 2.753
+    
+    If `12:00 AM` is Noon, the load goes 3.098 -> 3.33 -> 3.556. This looks like a rising curve into the afternoon.
+    If `12:00 AM` is Midnight, the load goes 3.098 (11 AM) -> 3.33 (Midnight) -> 3.556 (1 PM). This is physically impossible for a single day profile (jumping to midnight then back to 1 PM).
+    
+    Therefore, **Target Column `12:00 AM` contains Noon data**.
+    And **Target Column `12:00 PM` contains Midnight data** (or the data is just ordered such that the last column is the 24th hour).
+    
+    Wait, look at the end of the target sample row:
+    `11:00 PM`: 3.177
+    `12:00 PM`: 2.753
+    
+    If `12:00 PM` is Midnight, the load drops from 3.177 to 2.753. This is plausible for night time.
+    
+    Conclusion:
+    - Source `1:00` to `11:00` map to Target `1:00 AM` to `11:00 AM`.
+    - Source `12:00` maps to Target `12:00 AM`. (Note: Target label says AM, but data is Noon).
+    - Source `13:00` to `23:00` map to Target `1:00 PM` to `11:00 PM`.
+    - Source `24:00:00` maps to Target `12:00 PM`. (Note: Target label says PM, but data is Midnight).
+
+    I will implement this mapping exactly.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column to ensure consistent formatting MM/DD/YYYY
+    # The source format is "%a %m/%d/%Y" e.g., "Thu 10/01/2009"
+    dt = pd.to_datetime(source['Date'], format='%a %m/%d/%Y')
+    
+    # Create the output dataframe
+    out = pd.DataFrame(index=source.index)
+    out['date'] = dt.dt.strftime('%m/%d/%Y')
+    
+    # Map hours 1-11 to 1 AM - 11 AM
+    for h in range(1, 12):
+        out[f'{h}:00 AM'] = source[f'{h}:00']
+        
+    # Map hour 12 (Noon) to the target column named "12:00 AM" based on positional logic
+    out['12:00 AM'] = source['12:00']
+    
+    # Map hours 13-23 to 1 PM - 11 PM
+    # Source 13:00 is 1 PM, Source 23:00 is 11 PM
+    for h in range(13, 24):
+        pm_hour = h - 12
+        out[f'{pm_hour}:00 PM'] = source[f'{h}:00']
+        
+    # Map hour 24:00:00 (Midnight) to the target column named "12:00 PM" based on positional logic
+    out['12:00 PM'] = source['24:00:00']
+    
+    # Reorder columns to match target schema exactly
+    target_cols = [
+        'date',
+        '1:00 AM', '2:00 AM', '3:00 AM', '4:00 AM', '5:00 AM', '6:00 AM', '7:00 AM', '8:00 AM', '9:00 AM', '10:00 AM', '11:00 AM',
+        '12:00 AM',
+        '1:00 PM', '2:00 PM', '3:00 PM', '4:00 PM', '5:00 PM', '6:00 PM', '7:00 PM', '8:00 PM', '9:00 PM', '10:00 PM', '11:00 PM',
+        '12:00 PM'
+    ]
+    
+    return out[target_cols].reset_index(drop=True)
+```

@@ -1,0 +1,117 @@
+Operator plan:
+1. Map `Time Period` (month names) to seasons: Dec/Jan/Feb -> Winter, Mar/Apr/May -> Spring, Jun/Jul/Aug -> Summer, Sep/Oct/Nov -> Fall.
+2. Filter the source data to keep only rows where `End Use` is one of the specific end-uses that map to the target columns with non-zero values in the sample: "HVAC" (mapped to `hvac`), "Water Heater" (mapped to `water_heating`), "Refrigerator" (mapped to `refrigerator`), and "Dishwasher" (mapped to `dishwasher`). Note: The sample target shows 0s for other columns like `clothes_washer`, `clothes_dryer`, etc., implying either they are not present in the source or their values are zeroed out. Looking at the source distinct values for `End Use`, we see "Freezer", "Clothes Dryer - Electric", "Clothes Washer", "Primary TV...", "Primary Desktop...", "Misc Metered", "Pool Pump", "Lighting", "Remaining Load". The target columns `hvac`, `water_heating`, `refrigerator`, `dishwasher` have distinct values > 1, while others have distinct value 1 (all 0). This suggests that only specific source end-uses contribute to the non-zero target columns.
+   - Let's check the mapping.
+   - Target `hvac`: Source likely "HVAC" or similar. Source distinct values for End Use are not fully listed, but "Remaining Load" is there. Usually, in these datasets, "HVAC" is a specific end use. Let's assume standard mappings.
+   - Target `water_heating`: Source "Water Heater".
+   - Target `refrigerator`: Source "Refrigerator" or "Freezer"? Sample source has "Freezer". Target has `refrigerator`.
+   - Target `dishwasher`: Source "Dishwasher".
+   - The other target columns (`clothes_washer`, `clothes_dryer`, `cooking_range`, `pool_spa_pumps`, `interior_lighting`, `exterior_lighting`, `lighting`, `plug`, `pool_spa_heater`) are all 0 in the sample. This implies that either the source doesn't have these end uses, or they are filtered out/zeroed. Given the source sample has "Clothes Dryer - Electric", "Clothes Washer", "Pool Pump", "Lighting", but the target has 0s for these, it's possible the transformation aggregates only specific end uses or the provided sample target rows just happen to be 0 for those. However, the distinct count for `hvac`, `water_heating`, `refrigerator`, `dishwasher` is 96 (same as rows), meaning they vary. The others are constant 0.
+   - Wait, the target has 96 rows. 4 seasons * 24 hours = 96. This is an aggregation.
+   - The aggregation is likely a sum or mean of `Average Demand Per Home With This End Use [kW]` grouped by Season and Hour.
+   - Since the target columns for non-HVAC/Water/Refrigerator/Dishwasher are all 0, and the source has data for them (e.g., "Clothes Dryer"), it's possible the transformation *only* includes specific end uses in the pivot, or sets others to 0.
+   - Let's look at the source `End Use` distinct values again: "Kitchen", "Laundry", "Miscellaneous", "Lighting", "Remaining Load" are categories. The `End Use` column has 15 distinct values.
+   - Common end uses: HVAC, Water Heater, Refrigerator, Dishwasher, Clothes Washer, Clothes Dryer, Cooking Range, Pool Pump, Lighting, Plug Loads.
+   - If the target columns for Washer, Dryer, etc. are 0, maybe the source data for those end uses is NaN or 0? Or maybe the mapping is strict.
+   - Let's assume the standard mapping:
+     - `hvac` <- "HVAC"
+     - `water_heating` <- "Water Heater"
+     - `refrigerator` <- "Refrigerator" (or "Freezer"?)
+     - `dishwasher` <- "Dishwasher"
+   - The other columns are initialized to 0.
+   - The aggregation function: The values in the target (e.g., 2105.7569) are quite large for kW per home. They might be sums across homes? But the column is "Average Demand Per Home". If we sum averages, it doesn't make physical sense unless it's a profile for a cluster. However, if we look at the distinct count of 96 for `hvac`, it varies by season/hour.
+   - Let's try aggregating by Season and Hour. What aggregation? Sum? Mean?
+   - If I sum the "Average Demand" for a specific end use across all rows for that season/hour, I get a total demand for that end use in that season/hour.
+   - Let's check the number of rows. 258,420 source rows. 96 target rows.
+   - Group by Season and Hour.
+   - For each target column, filter the source for the corresponding End Use, then aggregate.
+   - Which aggregation? The values are floats.
+   - Let's assume `sum` of the `Average Demand Per Home With This End Use [kW]` column.
+   - Why sum? If there are multiple entries for the same End Use, Season, Hour (e.g., different Day Types or Home Bins), summing them might reconstruct a total profile.
+   - Let's verify the "Freezer" vs "Refrigerator". Source has "Freezer". Target has "refrigerator". It's likely "Freezer" maps to "refrigerator" or there is a "Refrigerator" end use not shown in the small sample but present in the 15 distinct values. Given "Freezer" is in the sample, and "Refrigerator" is a common end use, I will map "Refrigerator" and "Freezer" to `refrigerator` if needed, but usually "Refrigerator" is the key. I'll check if "Refrigerator" is in the 15 distinct values. The sample shows "Freezer". I will assume "Refrigerator" is the end use name for the target `refrigerator` column, and if "Freezer" is separate, it might be ignored or mapped. Given the target `refrigerator` has 96 distinct values, it's populated.
+   - I will map:
+     - "HVAC" -> `hvac`
+     - "Water Heater" -> `water_heating`
+     - "Refrigerator" -> `refrigerator`
+     - "Dishwasher" -> `dishwasher`
+   - All other target columns are 0.
+   - Aggregation: Sum of `Average Demand Per Home With This End Use [kW]`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Map Time Period to Season
+    month_to_season = {
+        'January': 'Winter', 'February': 'Winter', 'December': 'Winter',
+        'March': 'Spring', 'April': 'Spring', 'May': 'Spring',
+        'June': 'Summer', 'July': 'Summer', 'August': 'Summer',
+        'September': 'Fall', 'October': 'Fall', 'November': 'Fall'
+    }
+    
+    # Create a copy and add season
+    df = source.copy()
+    df['season'] = df['Time Period'].map(month_to_season)
+    
+    # Define the mapping from End Use to Target Column
+    # Based on the target columns having non-zero distinct values, we focus on these.
+    # The other columns in the target are all 0 in the sample, so we initialize them to 0.
+    end_use_mapping = {
+        'HVAC': 'hvac',
+        'Water Heater': 'water_heating',
+        'Refrigerator': 'refrigerator',
+        'Dishwasher': 'dishwasher'
+    }
+    
+    # Filter for relevant end uses
+    relevant_end_uses = list(end_use_mapping.keys())
+    df_filtered = df[df['End Use'].isin(relevant_end_uses)].copy()
+    
+    # Map End Use to target column name
+    df_filtered['target_col'] = df_filtered['End Use'].map(end_use_mapping)
+    
+    # Group by season, hour, and target_col and sum the demand
+    # Note: Hour Ending is 1-24.
+    agg_df = df_filtered.groupby(['season', 'Hour Ending', 'target_col'])['Average Demand Per Home With This End Use [kW]'].sum().reset_index()
+    
+    # Pivot to get columns for each end use
+    pivot_df = agg_df.pivot_table(index=['season', 'Hour Ending'], columns='target_col', values='Average Demand Per Home With This End Use [kW]', fill_value=0).reset_index()
+    
+    # Rename columns to match target exactly
+    # The pivot columns will be the target_col names.
+    # We need to ensure all target columns are present, even if 0.
+    
+    target_cols = [
+        'hvac', 'water_heating', 'refrigerator', 'clothes_washer', 'clothes_dryer',
+        'dishwasher', 'cooking_range', 'pool_spa_pumps', 'interior_lighting',
+        'exterior_lighting', 'lighting', 'plug', 'pool_spa_heater'
+    ]
+    
+    # Ensure all target columns exist
+    for col in target_cols:
+        if col not in pivot_df.columns:
+            pivot_df[col] = 0
+            
+    # Rename Hour Ending to hour
+    pivot_df = pivot_df.rename(columns={'Hour Ending': 'hour'})
+    
+    # Select and order columns
+    final_cols = ['season', 'hour'] + target_cols
+    result = pivot_df[final_cols]
+    
+    # Ensure dtypes match target
+    # hour is int64
+    result['hour'] = result['hour'].astype('int64')
+    # clothes_washer, clothes_dryer, cooking_range, pool_spa_pumps, interior_lighting, exterior_lighting, lighting, plug, pool_spa_heater are int64 (0)
+    int_cols = ['clothes_washer', 'clothes_dryer', 'cooking_range', 'pool_spa_pumps', 'interior_lighting', 'exterior_lighting', 'lighting', 'plug', 'pool_spa_heater']
+    for col in int_cols:
+        result[col] = result[col].astype('int64')
+        
+    # hvac, water_heating, refrigerator, dishwasher are float64
+    float_cols = ['hvac', 'water_heating', 'refrigerator', 'dishwasher']
+    for col in float_cols:
+        result[col] = result[col].astype('float64')
+        
+    return result
+```

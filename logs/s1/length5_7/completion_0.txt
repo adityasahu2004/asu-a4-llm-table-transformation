@@ -1,0 +1,112 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `Date` column from string format (`%m/%d/%Y`) to pandas datetime objects.
+2.  **Generate Full Date Range**:
+    *   The source data contains sparse dates (approx. every 2 weeks).
+    *   The target data contains a dense daily range.
+    *   Determine the start and end dates of the source data.
+    *   Create a complete daily date range (`pd.date_range`) covering the source period.
+    *   *Observation*: The target sample starts at `2013-01-01` while the source starts at `2013-07-03`. However, the target sample *ends* at `2013-07-02`. This suggests the target might be a different year or the sample is misleading regarding the absolute start. Let's look closer.
+    *   Source: `7/3/2013` to `12/31/2013`.
+    *   Target Sample: `2013-01-01` to `2013-07-02`.
+    *   Wait, the target sample dates are *before* the source sample dates. This implies the transformation is not just reindexing the *same* data, but potentially the source provided in the prompt is just a *sample* of a larger dataset, or the target corresponds to a different time period.
+    *   However, looking at the values:
+        *   Source `7/3/2013` (Row 0): `1`=0.56, `2`=0.51...
+        *   Target `2013-07-02` (Last row of sample): `value1`=0.66, `value2`=0.61...
+        *   These values do not match directly.
+    *   Let's re-read the prompt constraints: "Infer a general transformation... The evaluation source contains different rows".
+    *   Let's look at the structure. Source has columns `1` to `24`. Target has `value1` to `value24`.
+    *   The target has 183 rows. Source has 182 rows.
+    *   The target dates are daily. The source dates are bi-weekly.
+    *   This looks like an **interpolation** or **resampling** task. We need to expand the sparse source data into a daily frequency.
+    *   Since the target sample dates (`Jan 2013` - `July 2013`) do not overlap with the source sample dates (`July 2013` - `Dec 2013`), I cannot verify the interpolation method by matching values directly from the provided samples.
+    *   However, standard practice for this type of "sparse to dense" time series transformation with numeric columns is **linear interpolation** (`method='linear'`) or **time-based interpolation**. Given the smooth curves in the data (hourly load profiles likely), linear interpolation between the bi-weekly snapshots is the most logical deterministic step.
+    *   *Correction*: The target sample shows `2013-01-01` to `2013-07-02`. The source sample shows `2013-07-03` to `2013-12-31`. It is highly probable that the *full* source dataset (not just the sample) covers the entire year, or the target is derived from a source that covers the target period. The instruction says "Compute the result only from the source DataFrame". If the source DataFrame passed to the function contains dates for Jan-June, the code must handle them. If it only contains July-Dec, it can't produce Jan-June.
+    *   Assumption: The `source` DataFrame passed to `transform` will contain the necessary date range to cover the target output. The sample provided is just a subset. The transformation logic is: **Resample/Interpolate** the source data to a daily frequency.
+    *   Steps:
+        1.  Set `Date` as index.
+        2.  Sort index.
+        3.  Create a daily date range from the min to max date of the source.
+        4.  Reindex the DataFrame to this daily range.
+        5.  Interpolate the numeric columns (`1`-`24`) using linear interpolation.
+        6.  Rename columns `1`-`24` to `value1`-`value24`.
+        7.  Format the index (date) to string `YYYY-MM-DD 00:00:00`.
+        8.  Reset index to make `date` a column.
+
+3.  **Refinement on Interpolation**:
+    *   The source has 182 rows. The target has 183 rows.
+    *   If the source covers a specific period, say 182 days, and we interpolate to daily, we get 182 rows.
+    *   Why 183? Maybe the range is inclusive of both ends and the source was sparse?
+    *   Let's check the date range of the target sample: `2013-01-01` to `2013-07-02`.
+        *   Jan (31) + Feb (28) + Mar (31) + Apr (30) + May (31) + Jun (30) + Jul (2) = 183 days.
+    *   So the target is a daily series for a specific period.
+    *   The source sample is `7/3/2013` to `12/31/2013`.
+    *   It is likely that the *evaluation* source will contain the data for the period corresponding to the target. The code must be generic: "Take source, interpolate to daily frequency".
+
+4.  **Column Renaming**:
+    *   Source: `1`, `2`, ..., `24` (strings or ints in name).
+    *   Target: `value1`, `value2`, ..., `value24`.
+
+5.  **Date Formatting**:
+    *   Target `date` column is string: `YYYY-MM-DD 00:00:00`.
+
+6.  **Implementation Details**:
+    *   Use `pd.date_range(start=df.index.min(), end=df.index.max(), freq='D')`.
+    *   `df.reindex(new_index).interpolate(method='linear')`.
+    *   Handle potential NaNs at the very start/end if the source doesn't align perfectly, though `interpolate` handles internal gaps. If the source starts at `7/3` and we ask for `7/1`, we get NaNs. The target sample starts at `1/1`. If the source has data for `1/1`, it works. If not, we might need `ffill` or `bfill` or just rely on the source covering the range. Given "Compute result only from source", we assume source covers the required range.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    """
+    Transforms sparse bi-weekly time series data into a dense daily time series
+    by linear interpolation.
+    """
+    # 1. Parse dates and set as index
+    df = source.copy()
+    df['Date'] = pd.to_datetime(df['Date'], format='%m/%d/%Y')
+    df = df.set_index('Date')
+    
+    # 2. Sort by date to ensure correct interpolation order
+    df = df.sort_index()
+    
+    # 3. Identify numeric columns to interpolate (columns 1-24)
+    # The source columns are named '1', '2', ..., '24'
+    numeric_cols = [str(i) for i in range(1, 25)]
+    
+    # 4. Create a daily date range covering the source data
+    # We use the min and max dates from the source to define the range.
+    # This assumes the source data covers the period required for the target.
+    start_date = df.index.min()
+    end_date = df.index.max()
+    
+    # Create daily frequency index
+    daily_index = pd.date_range(start=start_date, end=end_date, freq='D')
+    
+    # 5. Reindex to daily frequency
+    df_daily = df.reindex(daily_index)
+    
+    # 6. Interpolate numeric columns linearly
+    # This fills in the gaps between the bi-weekly observations
+    df_daily[numeric_cols] = df_daily[numeric_cols].interpolate(method='linear')
+    
+    # 7. Rename columns to match target schema
+    rename_map = {str(i): f'value{i}' for i in range(1, 25)}
+    df_daily = df_daily.rename(columns=rename_map)
+    
+    # 8. Format the date index to string and reset index
+    df_daily.index = df_daily.index.strftime('%Y-%m-%d 00:00:00')
+    df_daily = df_daily.reset_index()
+    
+    # 9. Rename the index column to 'date'
+    df_daily = df_daily.rename(columns={'Date': 'date'})
+    
+    # 10. Ensure column order matches target
+    # Target columns: date, value1, ..., value24
+    cols = ['date'] + [f'value{i}' for i in range(1, 25)]
+    df_daily = df_daily[cols]
+    
+    return df_daily
+```

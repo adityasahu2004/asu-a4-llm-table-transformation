@@ -1,0 +1,171 @@
+{
+  "case": "length3_4",
+  "length": 3,
+  "strategy": "s4",
+  "model": "qwen36-27b",
+  "is_demo": false,
+  "parameters": {
+    "output": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment",
+    "model": "qwen36-27b",
+    "base_url": "https://openai.rc.asu.edu/v1",
+    "max_tokens": 6000,
+    "reasoning_effort": "none",
+    "k": 5,
+    "sample_rows": 12,
+    "timeout": 120,
+    "api_timeout": 3600,
+    "replay_only": true,
+    "strategy": "s4",
+    "python": "3.14.4 (main, Apr  7 2026, 13:13:20) [Clang 21.0.0 (clang-2100.0.123.102)]",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "pandas": "3.1.1",
+    "held_out": [
+      "length1_1",
+      "length1_2",
+      "length1_3",
+      "length2_1",
+      "length3_1"
+    ],
+    "benchmark": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split"
+  },
+  "prompt_path": "logs/s4/length3_4/prompt.json",
+  "completion_path": "logs/s4/length3_4/response.json",
+  "execution": {
+    "status": "ok",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+    "seconds": 0.572714707996056,
+    "shape": [
+      53,
+      25
+    ],
+    "fingerprint": "0b02ceed54a27d39f610555c8a57d43f9de22c438c75b05f0fded087200a401a"
+  },
+  "autopipeline": {
+    "accuracy": 1.0,
+    "is_correct": true,
+    "similarities": {},
+    "info": [
+      "date",
+      "Hour 1",
+      "Hour 1",
+      "Hour 1",
+      "Hour 1",
+      "Hour 1",
+      "Hour 1",
+      "Hour 1",
+      "Hour 1",
+      "Hour 1",
+      "Hour 11",
+      "Hour 11",
+      "Hour 11",
+      "Hour 11",
+      "Hour 11",
+      "Hour 11",
+      "Hour 11",
+      "Hour 11",
+      "Hour 11",
+      "Hour 11",
+      "Hour 11",
+      "Hour 11",
+      "Hour 1",
+      "Hour 1",
+      "Hour 1"
+    ]
+  },
+  "hard_match": {
+    "accuracy": 0.9969811320754717,
+    "is_correct": false,
+    "similarities": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      0.9811320754716981,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      0.9811320754716981,
+      1.0,
+      0.9622641509433962
+    ],
+    "info": [
+      "date",
+      "Hour 1",
+      "Hour 2",
+      "Hour 3",
+      "Hour 4",
+      "Hour 5",
+      "Hour 6",
+      "Hour 7",
+      "Hour 8",
+      "Hour 9",
+      "Hour 11",
+      "Hour 12",
+      "Hour 13",
+      "Hour 14",
+      "Hour 15",
+      "Hour 16",
+      "Hour 17",
+      "Hour 18",
+      "Hour 19",
+      "Hour 20",
+      "Hour 21",
+      "Hour 23"
+    ]
+  },
+  "hard_match_provenance": "course-provided hard_match.py and utils.py",
+  "exact_schema": true,
+  "generation": {
+    "request_hash": "b23fbc3f42e1e286b18a9865d8861a72c41bd6b77a3e8518f8ffc571e837e1f5",
+    "usage": {
+      "completion_tokens": 6195,
+      "prompt_tokens": 41514,
+      "total_tokens": 47709,
+      "completion_tokens_details": null,
+      "prompt_tokens_details": {
+        "audio_tokens": null,
+        "cache_write_tokens": null,
+        "cached_tokens": 41216,
+        "image_tokens": null,
+        "text_tokens": null,
+        "created_cache_tokens": 0,
+        "multimodal_tokens": null
+      },
+      "co2_g": 1.953258,
+      "energy_wh": 5.796017
+    },
+    "latency_seconds": 76.22496704199875,
+    "api_attempts": 1,
+    "cached": true,
+    "candidate_count": 5,
+    "api_timeout_seconds": 600,
+    "reasoning_effort_header": "none",
+    "selected_index": 1,
+    "clusters": {
+      "a87c453a71bb0fbfb36d142e266747ec2bf05317650a5125fdc1f633fa1effe5": [
+        1
+      ],
+      "3da4c0cc4676e8f07badada6d7d1670da618073aeacdd877e6abef76331b075b": [
+        3
+      ]
+    }
+  },
+  "wall_seconds": 79.80623658300101,
+  "replay_wall_seconds": 3.5308652090025134
+}

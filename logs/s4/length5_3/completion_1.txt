@@ -1,0 +1,63 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `date` column from string format (`%m/%d/%Y %H:%M`) to datetime.
+2.  **Extract Components**: Create a `date_str` column formatted as `MM/DD/YYYY` and an `hour` column (0-23) from the parsed datetime.
+3.  **Reshape (Pivot)**: Pivot the dataframe so that:
+    *   The index is `date_str`.
+    *   The columns are derived from the `hour` values, mapped to names `value1` through `value24` (Hour 0 -> value1, ..., Hour 23 -> value24).
+    *   The values are taken from `cerc_logger_1`.
+4.  **Clean Up**: Reset the index to make `date` a regular column, rename it to `date` (matching target), and ensure column order matches the target specification.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse the date string
+    # Format observed: "7/28/2019 4:50" -> %m/%d/%Y %H:%M or %m/%d/%Y %-I:%M? 
+    # "4:50" is ambiguous for AM/PM but %H:%M works for 24h if <10. 
+    # However, 9:30 is also there. Let's assume standard 24h or just parse carefully.
+    # The sample shows "4:50", "9:30", "18:50". This looks like 24-hour clock without leading zero for single digits.
+    # pd.to_datetime handles this reasonably well with mixed formats or specific format strings.
+    # Format: %m/%d/%Y %H:%M might fail if %H expects 2 digits. 
+    # Let's try generic parsing first or specific format %m/%d/%Y %-I:%M if 12h, but 18:50 implies 24h.
+    # Python's strptime %-H is not standard on all platforms. 
+    # pd.to_datetime is robust.
+    
+    df = source.copy()
+    df['parsed_dt'] = pd.to_datetime(df['date'], format='mixed', dayfirst=False)
+    
+    # 2. Extract date string and hour
+    df['date'] = df['parsed_dt'].dt.strftime('%m/%d/%Y')
+    df['hour'] = df['parsed_dt'].dt.hour
+    
+    # 3. Map hour to value column name (1-indexed)
+    df['hour_label'] = df['hour'].apply(lambda h: f'value{h+1}')
+    
+    # 4. Pivot
+    # Index: date, Columns: hour_label, Values: cerc_logger_1
+    pivoted = df.pivot_table(
+        index='date', 
+        columns='hour_label', 
+        values='cerc_logger_1', 
+        aggfunc='first' # Assuming unique timestamp per hour per day, or just take one
+    )
+    
+    # 5. Reset index and clean up
+    result = pivoted.reset_index()
+    
+    # Ensure columns are in order value1 to value24
+    expected_cols = [f'value{i}' for i in range(1, 25)]
+    
+    # Select only existing columns from expected list to handle missing hours gracefully
+    # The target schema implies 24 columns. If some are missing in source for a day, they become NaN.
+    # We should ensure all 24 columns exist in the output dataframe.
+    for col in expected_cols:
+        if col not in result.columns:
+            result[col] = np.nan
+            
+    # Reorder columns: date, value1, ..., value24
+    final_cols = ['date'] + expected_cols
+    result = result[final_cols]
+    
+    return result
+```

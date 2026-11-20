@@ -1,0 +1,45 @@
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date and format
+    dt = pd.to_datetime(source['DT_STRATA'], format='%m/%d/%Y')
+    out = pd.DataFrame(index=source.index)
+    out['date'] = dt.dt.strftime('%m/%d/%Y')
+    
+    # Define mapping from source column suffix to target column name
+    # Source: PCT_HOURLY_0100 ... PCT_HOURLY_2400
+    # Target: 1:00 AM ... 11:00 AM, 12:00 AM, 1:00 PM ... 11:00 PM, 12:00 PM
+    
+    mapping = {}
+    for h in range(1, 25):
+        src_col = f'PCT_HOURLY_{h:02d}00'
+        if h == 12:
+            tgt_col = '12:00 AM'
+        elif h == 24:
+            tgt_col = '12:00 PM'
+        elif h < 12:
+            tgt_col = f'{h}:00 AM'
+        else:
+            tgt_col = f'{h-12}:00 PM'
+        mapping[src_col] = tgt_col
+        
+    # Apply mapping
+    out = out.rename(columns={}) # Ensure empty rename doesn't fail if empty, though we assign below
+    
+    for src_col, tgt_col in mapping.items():
+        out[tgt_col] = source[src_col]
+        
+    # Reorder columns to match target schema exactly
+    target_cols = ['date']
+    # AM hours 1-11
+    for h in range(1, 12):
+        target_cols.append(f'{h}:00 AM')
+    # 12:00 AM
+    target_cols.append('12:00 AM')
+    # PM hours 1-11
+    for h in range(1, 12):
+        target_cols.append(f'{h}:00 PM')
+    # 12:00 PM
+    target_cols.append('12:00 PM')
+    
+    return out[target_cols].reset_index(drop=True)

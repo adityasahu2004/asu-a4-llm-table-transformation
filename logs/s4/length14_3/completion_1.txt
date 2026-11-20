@@ -1,0 +1,381 @@
+Operator plan:
+1. Parse the `timestamp` column to extract `month` and `hour`.
+2. Filter out rows with sentinel values (32767.0) in key columns to ensure clean aggregation, or simply treat them as valid data if the aggregation logic implies summing. Given the target values are large sums, we likely sum all rows. However, 32767 is a common "bad data" or "overflow" sentinel in energy monitoring (e.g., WattsUp devices). Looking at the target `Total` values (e.g., ~23 million for Jan 19:00), and source values (~1000-4000 per row), summing ~5000-10000 rows per bin makes sense. If we include 32767s, the sums would be skewed. Let's look at the sample target data. The `Total` column in target seems to be the sum of `TOTAL BLDG WHS`. Let's verify.
+   Target `Total` for Jan 19:00 is 23,224,878.
+   Source `TOTAL BLDG WHS` values are around 100-4000.
+   If we assume ~6000 rows per month-hour bin (31 sites * ~200 days * 24 hours / 12 months ≈ 1200? No. 1.3M rows / 12 months / 24 hours ≈ 4500 rows).
+   4500 rows * ~1000 W = 4.5 million. The target is 23 million. This suggests either more rows or higher averages.
+   Let's check the aggregation keys. The target has `month` and `hour`. It does not have `site`. So we are aggregating across all sites.
+   
+   The columns in the target are:
+   - `HVAC`: Likely sum of `AC COMPRESSOR WHS` + `AIR HANDLER WHS` + `Minisplit WHS`? Or just `AC COMPRESSOR`?
+   - `domestic_water_heating`: Likely `WATER HEATER WHS`.
+   - `major_appliances`: Likely `DRYER` + `RANGE` + `DISH WASHER` + `Fridges`?
+   - `lighting`: 0.
+   - `miscellaneous_plug_loads`: Float.
+   - `Total`: Sum of `TOTAL BLDG WHS`.
+
+   Let's refine the category mappings based on standard energy breakdowns:
+   - **HVAC**: `AC COMPRESSOR WHS [emon ch3,4]` + `AIR HANDLER WHS [emon ch5,6]` + `Minisplit WHS (2-CTs) [xpod chA-7,8]`
+   - **domestic_water_heating**: `WATER HEATER WHS [emon ch7,8]`
+   - **major_appliances**: `DRYER WHS (1-CT) [emon ch9]` + `RANGE WHS (1-CT) [emon ch10]` + `DISH WASHER WHS [emon ch11]` + `Primary Fridge WHS [emon ch12]` + `2nd Fridge WHS [emon ch13]` + `Dryer WHS (2-CTs) [xpod chA-9,10]`
+   - **lighting**: 0 (as per target distinct values)
+   - **miscellaneous_plug_loads**: This is tricky. It's a float. It might be `SPARE1` + `SPARE2` + `SPARE3` + `SPARE4` + `Calculated Unmeasured loads`? Or perhaps `TOTAL` - (HVAC + DHW + Major + Lighting).
+     Let's look at the dtypes. `miscellaneous_plug_loads` is float64. Others are int64.
+     `Calculated Unmeasured loads (Whr)` is float64.
+     `Calculated Energy Use (Whr)` is float64.
+     
+     Let's try to derive `miscellaneous_plug_loads` as `Calculated Unmeasured loads (Whr)`.
+     
+   - **Total**: Sum of `TOTAL BLDG WHS [emon ch1,2]`.
+
+   We need to handle the 32767 sentinel. If we sum 32767s, the numbers will be huge. The target `Total` for Jan 19:00 is ~23M.
+   If there are ~4500 rows, and average usage is ~1000W, sum is 4.5M.
+   If we include 32767s, even a few hundred would add millions.
+   However, the target `HVAC` is ~172M. This is much larger than `Total`?
+   Wait, `HVAC` (172M) > `Total` (23M)? That's impossible if HVAC is a subset of Total.
+   Let's re-read the target sample.
+   Row 1: Month 1, Hour 19. HVAC: 172,992,524. Total: 23,224,878.
+   This implies `Total` is NOT the sum of the components, or `Total` refers to something else, or my mapping is wrong.
+   Actually, look at the `Total` column in the target. It's `int64`.
+   Look at `HVAC`. It's `int64`.
+   
+   Is it possible `Total` is `Calculated Energy Use (Whr)`?
+   Or is `Total` the sum of `TOTAL BLDG WHS`?
+   
+   Let's look at the magnitudes.
+   Source `TOTAL BLDG WHS` is ~100-4000.
+   Source `AC COMPRESSOR` is ~0-3000.
+   
+   If `HVAC` sum is 172M, and `Total` sum is 23M, then `HVAC` cannot be a part of `Total` in the same unit, OR `Total` is not the building total.
+   
+   Alternative hypothesis:
+   The columns in the target are not sums of the source columns directly.
+   Maybe `Total` is `Calculated Energy Use (Whr)`?
+   Source `Calculated Energy Use (Whr)` is ~100-4000. Sum ~4.5M. Still not 23M.
+   
+   Let's look at `miscellaneous_plug_loads`. 110,685,071.2.
+   
+   Let's reconsider the `Total` column.
+   Maybe `Total` is the sum of `Wattsup Energy Ent.Ctr (WHS)`?
+   Source `Wattsup Energy Ent.Ctr (WHS)` is ~0-6000. Sum ~4.5M.
+   
+   What if the aggregation is not just sum?
+   
+   Let's look at the distinct values of `Total` in target: 288. One for each month-hour bin.
+   
+   Let's check the source column `TOTAL BLDG WHS [emon ch1,2]`.
+   
+   Is it possible the target `Total` is actually the sum of `TOTAL BLDG WHS` but the sample data provided in the prompt is just a small subset and the evaluation data has different characteristics? No, the transformation must be general.
+   
+   Let's look at the numbers again.
+   HVAC: 172,992,524
+   Total: 23,224,878
+   
+   This is very strange. HVAC > Total.
+   Unless `Total` is not the sum of all loads.
+   Maybe `Total` is `Calculated Unmeasured loads`?
+   Source `Calculated Unmeasured loads` is ~100-4000. Sum ~4.5M.
+   
+   Maybe the units are different?
+   
+   Let's look at `miscellaneous_plug_loads`. 110M.
+   
+   Let's try to map the source columns to target columns based on names and typical energy audit structures:
+   
+   Target: `HVAC`
+   Source candidates: `AC COMPRESSOR WHS`, `AIR HANDLER WHS`, `Minisplit WHS`.
+   
+   Target: `domestic_water_heating`
+   Source candidates: `WATER HEATER WHS`.
+   
+   Target: `major_appliances`
+   Source candidates: `DRYER`, `RANGE`, `DISH WASHER`, `Fridges`.
+   
+   Target: `lighting`
+   Source candidates: None explicitly named "Lighting". Often included in "Unmeasured" or "Misc". Target says 0.
+   
+   Target: `miscellaneous_plug_loads`
+   Source candidates: `SPARE1`, `SPARE2`, `SPARE3`, `SPARE4`, `Calculated Unmeasured loads`.
+   
+   Target: `Total`
+   Source candidates: `TOTAL BLDG WHS`, `Calculated Energy Use`.
+   
+   Why is HVAC > Total?
+   Perhaps `Total` is not the sum of the components.
+   Perhaps `Total` is `Wattsup Energy Ent.Ctr (WHS)`?
+   
+   Let's look at the `Total` value again: 23,224,878.
+   Let's look at `HVAC`: 172,992,524.
+   
+   Is it possible `HVAC` is `TOTAL BLDG WHS`?
+   If `HVAC` = Sum(`TOTAL BLDG WHS`), then 172M.
+   Then what is `Total`?
+   
+   Let's check the column order in Target:
+   month, hour, HVAC, domestic_water_heating, major_appliances, lighting, miscellaneous_plug_loads, Total.
+   
+   If `HVAC` is actually the `TOTAL BLDG WHS` sum, then the name is misleading.
+   But `HVAC` is usually Air Conditioning + Heating.
+   
+   Let's look at the source data sample.
+   Row 1: Site 19, 2015-11-14 02:00. Total Bldg: 386. AC: 0. Air Handler: 16. Water Heater: 7. Dryer: 3. Range: 6. Dish: 0. Fridge: 58. 2nd Fridge: 32767 (bad). Spare1: 64. Spare2: 0. Spare3: 32767 (bad). Pool: 32767 (bad). Spare4: 0. Minisplit: 32767 (bad). Dryer 2CT: 0. Unmeasured: 175. Calculated Energy: 386.
+   
+   Note: `Calculated Energy Use` (386) == `TOTAL BLDG WHS` (386).
+   So `TOTAL BLDG WHS` is the sum of the components (excluding bad data?).
+   
+   If we sum `TOTAL BLDG WHS` over all sites for Jan 19:00, we get `Total`?
+   If `Total` is 23M, and `HVAC` is 172M, then `HVAC` cannot be a subset.
+   
+   Could `HVAC` be `AC COMPRESSOR` + `AIR HANDLER` + `Minisplit`?
+   In the sample, AC=0, Air Handler=16, Minisplit=32767.
+   If we exclude 32767, AC+AH+Mini is small.
+   
+   What if the target `HVAC` column is actually the sum of `TOTAL BLDG WHS`?
+   And `Total` is something else?
+   
+   Let's look at `miscellaneous_plug_loads`. 110M.
+   
+   There is a possibility that the column names in the target are shuffled or mapped differently than expected.
+   
+   Let's try to find a linear combination.
+   
+   Another possibility: The `Total` column in the target is `Calculated Unmeasured loads`?
+   Sum of Unmeasured (175 in sample) over 4500 rows = 787,500. Not 23M.
+   
+   Let's look at the `Total` value 23,224,878.
+   And `HVAC` 172,992,524.
+   
+   Is it possible `HVAC` is `TOTAL BLDG WHS`?
+   And `Total` is `Wattsup Energy Ent.Ctr`?
+   
+   Let's assume the standard mapping:
+   HVAC = AC + Air Handler + Minisplit
+   DHW = Water Heater
+   Major = Dryer + Range + Dish + Fridges
+   Misc = Unmeasured + Spares?
+   Total = Total Bldg
+   
+   If this mapping is correct, then HVAC <= Total.
+   But in the sample target, HVAC > Total.
+   
+   This implies either:
+   1. The sample target data provided in the prompt is from a different dataset or has different column meanings.
+   2. The column `Total` in the target is NOT the building total.
+   3. The column `HVAC` in the target is NOT the HVAC sum.
+   
+   Let's look at the `Total` column in the target again. `distinct: 288`.
+   
+   What if `Total` is the sum of `Calculated Unmeasured loads`?
+   
+   Let's look at the `miscellaneous_plug_loads`. 110M.
+   
+   What if `miscellaneous_plug_loads` is `TOTAL BLDG WHS`?
+   
+   Let's try to match magnitudes.
+   Source `TOTAL BLDG WHS` ~ 1000.
+   Source `AC COMPRESSOR` ~ 1000.
+   
+   If we sum 4500 rows:
+   Sum(Total Bldg) ~ 4.5M.
+   Sum(AC) ~ 1M.
+   
+   Target values are 10-100M.
+   This implies the number of rows is higher, or the values are higher.
+   Source rows: 1.3M.
+   1.3M / 288 bins = 4500 rows/bin.
+   
+   If the average `TOTAL BLDG WHS` is 5000, sum is 22.5M.
+   In the sample, `TOTAL BLDG WHS` is 386, 2069, 1155, 4347, 863, 539, 32767, 6984, 32767, 32767, 1395, 32767.
+   Many are 32767. If we exclude 32767, the average is lower.
+   If we INCLUDE 32767, the average is higher.
+   (386+2069+1155+4347+863+539+32767+6984+32767+32767+1395+32767)/12 = 11.5M / 12 = ~9600? No.
+   Sum = 115,796. Count = 12. Avg = 9649.
+   4500 * 9649 = 43M.
+   
+   Target `Total` is 23M.
+   Target `HVAC` is 172M.
+   
+   This is still inconsistent with HVAC being a subset of Total.
+   
+   Unless... `HVAC` is `TOTAL BLDG WHS`?
+   And `Total` is `Calculated Unmeasured loads`?
+   Sum(Unmeasured) ~ 4500 * 200 = 900k. Not 23M.
+   
+   What if `Total` is `Wattsup Energy Ent.Ctr`?
+   Sum(Wattsup) ~ 4500 * 200 = 900k.
+   
+   What if `Total` is `Wattsup Cumulative`? No, cumulative grows.
+   
+   Let's look at the `Total` column in the target. `dtype: int64`.
+   
+   Is it possible `Total` is the sum of `TOTAL BLDG WHS` but only for valid rows (excluding 32767)?
+   If we exclude 32767, the average is lower.
+   
+   Let's look at `HVAC` again. 172M.
+   If `HVAC` = Sum(`AC COMPRESSOR` + `AIR HANDLER` + `Minisplit`).
+   In sample: AC=0, AH=16, Mini=32767.
+   If we include 32767, Mini contributes heavily.
+   Avg Mini ~ 9000 (if 32767 is included).
+   Sum(Mini) ~ 4500 * 9000 = 40M.
+   Sum(AC) ~ 4500 * 1000 = 4.5M.
+   Sum(AH) ~ 4500 * 100 = 0.45M.
+   Total HVAC ~ 45M.
+   
+   Target HVAC is 172M.
+   
+   This suggests the number of rows is higher, or the values are higher.
+   
+   Wait, the source has 1.3M rows.
+   1.3M / 288 = 4513 rows/bin.
+   
+   If the average `TOTAL BLDG WHS` is 5000, sum is 22.5M.
+   This matches Target `Total` (23M).
+   
+   So `Total` = Sum(`TOTAL BLDG WHS`).
+   
+   Then what is `HVAC` (172M)?
+   It must be larger than `Total`.
+   This is physically impossible if HVAC is a subset.
+   
+   Unless `HVAC` is NOT a subset.
+   Or `Total` is NOT the building total.
+   
+   What if `Total` is `Calculated Unmeasured loads`?
+   No, 23M is too high for unmeasured.
+   
+   What if `HVAC` is `TOTAL BLDG WHS`?
+   And `Total` is `Calculated Unmeasured loads`?
+   
+   Let's check the target column names again.
+   `HVAC`, `domestic_water_heating`, `major_appliances`, `lighting`, `miscellaneous_plug_loads`, `Total`.
+   
+   In many energy datasets, `Total` is the metered total.
+   
+   Is it possible the target sample data is corrupted or from a different schema?
+   
+   Let's assume the standard mapping:
+   `Total` = Sum(`TOTAL BLDG WHS`)
+   `HVAC` = Sum(`AC COMPRESSOR` + `AIR HANDLER` + `Minisplit`)
+   `domestic_water_heating` = Sum(`WATER HEATER`)
+   `major_appliances` = Sum(`DRYER` + `RANGE` + `DISH WASHER` + `FRIDGES`)
+   `lighting` = 0
+   `miscellaneous_plug_loads` = Sum(`Calculated Unmeasured loads`)
+   
+   If this mapping is used, `HVAC` should be < `Total`.
+   But in the sample, `HVAC` > `Total`.
+   
+   This implies the sample target data does not follow the physical constraint.
+   However, I must infer the transformation from the schema.
+   
+   Let's look at the `miscellaneous_plug_loads` value: 110M.
+   If `miscellaneous_plug_loads` = Sum(`Calculated Unmeasured loads`), and Unmeasured is ~200, sum is 900k.
+   If Unmeasured is ~20,000, sum is 90M.
+   
+   In the sample, Unmeasured is 175, 59, 429, 197, 273, 186, 32767, 203, 32767, 32767, 92, 32767.
+   Avg ~ 5000 (including 32767).
+   Sum ~ 4500 * 5000 = 22.5M.
+   
+   Target `miscellaneous_plug_loads` is 110M.
+   
+   This is 5x higher.
+   
+   What if `miscellaneous_plug_loads` = Sum(`SPARE1` + `SPARE2` + `SPARE3` + `SPARE4` + `Unmeasured`)?
+   
+   Let's try to match the `Total` column.
+   Target `Total` = 23M.
+   Source `TOTAL BLDG WHS` Sum = 23M (if avg 5000).
+   
+   So `Total` = Sum(`TOTAL BLDG WHS`).
+   
+   Then `HVAC` = 172M.
+   This is 7x `Total`.
+   
+   This is very strange.
+   
+   Let's look at the `Total` column in the target again.
+   `distinct: 288`.
+   
+   Is it possible `Total` is the sum of `Wattsup Energy Ent.Ctr`?
+   
+   Let's assume the mapping is:
+   `Total` = Sum(`TOTAL BLDG WHS`)
+   `HVAC` = Sum(`AC COMPRESSOR` + `AIR HANDLER` + `Minisplit`)
+   
+   If the sample target data is inconsistent with physics, I will still follow the schema mapping.
+   
+   One more check: `miscellaneous_plug_loads` is float64.
+   `Calculated Unmeasured loads` is float64.
+   `Calculated Energy Use` is float64.
+   
+   I will map:
+   `HVAC` = Sum(`AC COMPRESSOR WHS [emon ch3,4]` + `AIR HANDLER WHS [emon ch5,6]` + `Minisplit WHS (2-CTs) [xpod chA-7,8]`)
+   `domestic_water_heating` = Sum(`WATER HEATER WHS [emon ch7,8]`)
+   `major_appliances` = Sum(`DRYER WHS (1-CT) [emon ch9]` + `RANGE WHS (1-CT) [emon ch10]` + `DISH WASHER WHS [emon ch11]` + `Primary Fridge WHS [emon ch12]` + `2nd Fridge WHS [emon ch13]` + `Dryer WHS (2-CTs) [xpod chA-9,10]`)
+   `lighting` = 0
+   `miscellaneous_plug_loads` = Sum(`Calculated Unmeasured loads (Whr)`)
+   `Total` = Sum(`TOTAL BLDG WHS [emon ch1,2]`)
+
+   I will filter out rows where `TOTAL BLDG WHS` is 32767?
+   If I include 32767, the sums will be huge.
+   The target values are large, but consistent with including 32767 if the count is high.
+   
+   I will not filter, as the instructions say "Compute the result only from the source DataFrame" and "Preserve NaNs unless...". 32767 is not NaN.
+   
+   Final plan:
+   1. Parse timestamp.
+   2. Group by month, hour.
+   3. Sum the specified columns.
+   4. Set lighting to 0.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse timestamp
+    ts = pd.to_datetime(source['timestamp'])
+    source = source.copy()
+    source['month'] = ts.dt.month
+    source['hour'] = ts.dt.hour
+    
+    # Define aggregation columns
+    # HVAC: AC Compressor + Air Handler + Minisplit
+    hvac_cols = [
+        'AC COMPRESSOR WHS [emon ch3,4]',
+        'AIR HANDLER WHS [emon ch5,6]',
+        'Minisplit WHS (2-CTs) [xpod chA-7,8]'
+    ]
+    
+    # Domestic Water Heating
+    dwh_cols = [
+        'WATER HEATER WHS [emon ch7,8]'
+    ]
+    
+    # Major Appliances
+    major_cols = [
+        'DRYER WHS (1-CT) [emon ch9]',
+        'RANGE WHS (1-CT) [emon ch10]',
+        'DISH WASHER WHS [emon ch11]',
+        'Primary Fridge WHS [emon ch12]',
+        '2nd Fridge WHS [emon ch13]',
+        'Dryer WHS (2-CTs) [xpod chA-9,10]'
+    ]
+    
+    # Miscellaneous Plug Loads
+    misc_cols = [
+        'Calculated Unmeasured loads (Whr)'
+    ]
+    
+    # Total
+    total_cols = [
+        'TOTAL BLDG WHS [emon ch1,2]'
+    ]
+    
+    # Group and sum
+    grouped = source.groupby(['month', 'hour'])
+    
+    agg_dict = {
+        'HVAC': (lambda x: x[hvac_cols].sum(axis=1).sum()),
+        'domestic_water_heating': (lambda x: x[dwh_cols].sum(axis=1).sum()),
+        'major_appliances': (lambda x: x[major_cols].sum(axis=1).sum()),
+        'miscellaneous_plug_loads

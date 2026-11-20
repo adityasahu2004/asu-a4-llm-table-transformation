@@ -1,0 +1,100 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `Date` column (format `%m/%d/%Y`) to a datetime object.
+2.  **Format Date**: Convert the datetime to a string in ISO format (`YYYY-MM-DD 00:00:00`) for the new `date` column.
+3.  **Rename Columns**: Map the source hourly columns (`Hr 1` through `Hr 24`) to the target column names (`1:00 AM` through `12:00 PM`).
+    *   Hours 1-11 map to `1:00 AM` - `11:00 AM`.
+    *   Hour 12 maps to `12:00 AM` (based on target sample order and distinct values matching source `Hr 12`). *Correction*: Looking closely at the target sample, the column order is `1:00 AM` ... `11:00 AM`, then `12:00 AM`, then `1:00 PM` ... `12:00 PM`.
+    *   Let's verify the mapping logic from the target schema/sample:
+        *   Source `Hr 1` -> Target `1:00 AM`
+        *   Source `Hr 2` -> Target `2:00 AM`
+        *   ...
+        *   Source `Hr 11` -> Target `11:00 AM`
+        *   Source `Hr 12` -> Target `12:00 AM` (This is unusual, typically 12 is noon, but the target column name is explicitly `12:00 AM`. Wait, let's look at the target sample data vs source data.
+        *   Source Row 1: `Hr 1`=2.43, `Hr 12`=2.41.
+        *   Target Row 1: `1:00 AM`=0.91, `12:00 AM`=0.93.
+        *   Wait, the values in the target sample are *different* from the source sample values. This implies a transformation or a different dataset slice. However, the instruction says "Infer a general transformation". The row counts are identical (2190). The distinct counts for `date` are identical (365).
+        *   Let's look at the column mapping again.
+        *   Target `1:00 AM` distinct: 2166. Source `Hr 1` distinct: 1127.
+        *   Target `1:00 PM` distinct: 2174. Source `Hr 13` distinct: 1092.
+        *   The distinct counts in the target are roughly double the source. This suggests the target might be aggregating or the source sample provided is just a subset, but the row counts are identical.
+        *   Actually, looking at the target schema, `12:00 AM` is listed after `11:00 AM`. `12:00 PM` is listed last.
+        *   Standard 12-hour clock mapping:
+            *   1 -> 1 AM
+            *   2 -> 2 AM
+            *   ...
+            *   11 -> 11 AM
+            *   12 -> 12 PM (Noon)
+            *   13 -> 1 PM
+            *   ...
+            *   24 -> 12 AM (Midnight)
+        *   However, the target column names are: `1:00 AM` ... `11:00 AM`, `12:00 AM`, `1:00 PM` ... `11:00 PM`, `12:00 PM`.
+        *   This specific ordering in the target schema (`12:00 AM` appearing before `1:00 PM`) suggests:
+            *   `Hr 1` -> `1:00 AM`
+            *   ...
+            *   `Hr 11` -> `11:00 AM`
+            *   `Hr 12` -> `12:00 AM` ?? No, usually 12 is noon. But if `12:00 PM` is the last column, then `12:00 AM` must be `Hr 12`? Or is `Hr 12` mapped to `12:00 PM` and `Hr 24` mapped to `12:00 AM`?
+            *   Let's check the position. Target columns: `1:00 AM` (pos 0) ... `11:00 AM` (pos 10), `12:00 AM` (pos 11), `1:00 PM` (pos 12) ... `11:00 PM` (pos 23), `12:00 PM` (pos 24).
+            *   This implies:
+                *   Pos 0-10: Hours 1-11 -> AM
+                *   Pos 11: Hour 12 -> `12:00 AM`? This is semantically weird (12 AM is midnight), but structurally it fits the sequence if we assume a direct positional rename or a specific convention where 12 AM follows 11 AM in the list.
+                *   Pos 12-23: Hours 13-24 -> PM?
+                *   Pos 24: `12:00 PM`.
+            *   Let's re-read the target column list carefully.
+            *   `1:00 AM` ... `11:00 AM`
+            *   `12:00 AM`
+            *   `1:00 PM` ... `11:00 PM`
+            *   `12:00 PM`
+            *   This looks like a standard 12-hour cycle but with `12:00 AM` and `12:00 PM` swapped in position relative to standard time flow (where 12 AM starts the day, 12 PM is noon).
+            *   Standard flow: 12 AM, 1 AM ... 11 AM, 12 PM, 1 PM ... 11 PM.
+            *   Target flow: 1 AM ... 11 AM, 12 AM, 1 PM ... 11 PM, 12 PM.
+            *   This corresponds to Source Hours:
+                *   1 -> 1 AM
+                *   ...
+                *   11 -> 11 AM
+                *   12 -> 12 AM (Position 11)
+                *   13 -> 1 PM
+                *   ...
+                *   23 -> 11 PM
+                *   24 -> 12 PM (Position 24)
+            *   This mapping preserves the source hour index 1-24 to the target column sequence.
+
+4.  **Construct DataFrame**: Create the new DataFrame with the `date` column and the renamed hourly columns.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date from MM/DD/YYYY format
+    dt = pd.to_datetime(source['Date'], format='%m/%d/%Y')
+    
+    # Format date to YYYY-MM-DD 00:00:00
+    out = pd.DataFrame()
+    out['date'] = dt.dt.strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Define the mapping from Source Hour columns to Target Names
+    # Source: Hr 1 ... Hr 24
+    # Target Sequence: 1:00 AM ... 11:00 AM, 12:00 AM, 1:00 PM ... 11:00 PM, 12:00 PM
+    
+    target_cols = []
+    for h in range(1, 25):
+        if h == 12:
+            target_cols.append('12:00 AM')
+        elif h == 24:
+            target_cols.append('12:00 PM')
+        else:
+            # 1-11 -> AM
+            # 13-23 -> PM (13->1, 14->2, etc.)
+            if h < 12:
+                target_cols.append(f'{h}:00 AM')
+            else:
+                target_cols.append(f'{h-12}:00 PM')
+                
+    # Rename source columns to target names
+    # Source columns are 'Hr 1', 'Hr 2', ... 'Hr 24'
+    source_hour_cols = [f'Hr {h}' for h in range(1, 25)]
+    
+    for src_col, tgt_col in zip(source_hour_cols, target_cols):
+        out[tgt_col] = source[src_col]
+        
+    return out.reset_index(drop=True)
+```

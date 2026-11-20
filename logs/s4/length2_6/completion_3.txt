@@ -1,0 +1,37 @@
+**Operator Plan:**
+
+1.  **Parse Date**: Parse the `Date` column (format `%m/%d/%Y`) into a datetime object.
+2.  **Format Date**: Convert the parsed date to the target string format `MM/DD/YYYY` for the `dt_strata` column.
+3.  **Calculate Day of Week**: Compute the day of the week (0=Monday, 6=Sunday) from the parsed date for the `dow` column.
+4.  **Map Hourly Columns**: Iterate through hours 1 to 24. For each hour `h`, map the source column `Hr {h}` to the target column `pct_hourly_{h:02d}00`.
+5.  **Add Zero Column**: Add a constant column `pct_hourly_2500` with value `0`.
+6.  **Construct Result**: Return the new DataFrame with the specified columns.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    dates = pd.to_datetime(source['Date'], format='%m/%d/%Y')
+    
+    # Initialize result dataframe
+    result = pd.DataFrame(index=source.index)
+    
+    # Create dt_strata column formatted as MM/DD/YYYY
+    result['dt_strata'] = dates.dt.strftime('%m/%d/%Y')
+    
+    # Create dow column (0=Monday, 6=Sunday)
+    result['dow'] = dates.dt.dayofweek
+    
+    # Map hourly columns Hr 1...Hr 24 to pct_hourly_0100...pct_hourly_2400
+    for h in range(1, 25):
+        src_col = f'Hr {h}'
+        tgt_col = f'pct_hourly_{h:02d}00'
+        result[tgt_col] = source[src_col]
+        
+    # Add the constant 25th hour column
+    result['pct_hourly_2500'] = 0
+    
+    return result.reset_index(drop=True)
+```

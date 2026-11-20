@@ -1,0 +1,88 @@
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse timestamp
+    ts = pd.to_datetime(source['timestamp'])
+    
+    # Extract hour
+    hour = ts.dt.hour
+    
+    # Determine season
+    # Spring: Mar, Apr, May (3,4,5)
+    # Summer: Jun, Jul, Aug (6,7,8)
+    # Fall: Sep, Oct, Nov (9,10,11)
+    # Winter: Dec, Jan, Feb (12,1,2)
+    month = ts.dt.month
+    season = pd.Series(np.where(
+        month.isin([3, 4, 5]), 'Spring',
+        np.where(
+            month.isin([6, 7, 8]), 'Summer',
+            np.where(
+                month.isin([9, 10, 11]), 'Fall', 'Winter'
+            )
+        )
+    ), index=source.index)
+
+    # Helper to safely get column as numeric, replacing NaNs with 0 if necessary for summing, 
+    # but keeping original values if direct mapping. 
+    # Note: Source data has 32767 as a sentinel for missing data. We preserve this value as per target sample.
+    def get_col(name):
+        return source[name]
+
+    # Calculate HVAC
+    hvac_ac = get_col('AC COMPRESSOR WHS [emon ch3,4]')
+    hvac_air = get_col('AIR HANDLER WHS [emon ch5,6]')
+    hvac_mini = get_col('Minisplit WHS (2-CTs) [xpod chA-7,8]')
+    hvac = (hvac_ac + hvac_air + hvac_mini).astype(int)
+
+    # Water Heating
+    water_heating = get_col('WATER HEATER WHS [emon ch7,8]').astype(int)
+
+    # Refrigerator
+    fridge1 = get_col('Primary Fridge WHS [emon ch12]')
+    fridge2 = get_col('2nd Fridge WHS [emon ch13]')
+    refrigerator = (fridge1 + fridge2).astype(int)
+
+    # Clothes Dryer
+    dryer1 = get_col('DRYER WHS (1-CT) [emon ch9]')
+    dryer2 = get_col('Dryer WHS (2-CTs) [xpod chA-9,10]')
+    clothes_dryer = (dryer1 + dryer2).astype(int)
+
+    # Dishwasher
+    dishwasher = get_col('DISH WASHER WHS [emon ch11]').astype(int)
+
+    # Cooking Range
+    cooking_range = get_col('RANGE WHS (1-CT) [emon ch10]').astype(int)
+
+    # Pool Spa Pumps
+    pool_spa_pumps = get_col('POOL PUMP WHS (2-CTs) [xpod chA-3,4]').astype(int)
+
+    # Zero columns
+    clothes_washer = 0
+    interior_lighting = 0
+    exterior_lighting = 0
+    lighting = 0
+    plug = 0
+    pool_spa_heater = 0
+
+    # Construct DataFrame
+    out = pd.DataFrame({
+        'season': season,
+        'hour': hour,
+        'hvac': hvac,
+        'water_heating': water_heating,
+        'refrigerator': refrigerator,
+        'clothes_washer': clothes_washer,
+        'clothes_dryer': clothes_dryer,
+        'dishwasher': dishwasher,
+        'cooking_range': cooking_range,
+        'pool_spa_pumps': pool_spa_pumps,
+        'interior_lighting': interior_lighting,
+        'exterior_lighting': exterior_lighting,
+        'lighting': lighting,
+        'plug': plug,
+        'pool_spa_heater': pool_spa_heater
+    })
+
+    return out

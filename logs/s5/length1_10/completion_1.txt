@@ -1,0 +1,122 @@
+Operator plan:
+1. Parse `date` into a datetime object.
+2. Extract the date part and format it as `cst` ("Dow MM/DD/YYYY").
+3. Extract the hour part from the timestamp to determine which hourly bucket the reading belongs to.
+4. Create a DataFrame with one row per unique date, initialized with 0.0 for all 24 hourly columns.
+5. For each row in the source, map the `zone_016_cooling_sp` value to the corresponding hourly column in the target row for that date. If a date has multiple readings (unlikely given distinct dates in source but possible in general), the last one or sum might be needed, but given the target values are either 0 or 876, and source values are 73 or 84, there's a scaling factor.
+   - Source values: 73.0, 84.0.
+   - Target values: 0.0, 876.0, 657.0.
+   - Let's check the mapping.
+   - 73 * 12 = 876.
+   - 84 * 12 = 1008. Wait, 876 is in the target.
+   - Let's look at the sample data again.
+   - Source `zone_016_cooling_sp` is 73.0 or 84.0.
+   - Target `1:00` etc are 876.0 or 0.0 (and one 657.0).
+   - 876 / 73 = 12.
+   - 657 / 73 = 9.
+   - 657 / 84 = 7.82...
+   - It seems the value is multiplied by 12 if it's 73? Or maybe the target represents "hours in a month" (876 is not standard).
+   - Actually, let's look at the distinct values in target: 876.0 and 0.0. And one 657.0.
+   - 876 is 36.5 days * 24 hours? No.
+   - Let's look at the source dates. They are irregular timestamps.
+   - The target has 53 rows. The source has 15117 rows.
+   - The target dates are "Sun 09/30/2018", "Mon 09/17/2018", etc. These are weekly dates?
+   - 53 weeks in a year.
+   - The source dates range from 11/6/2018 to 1/18/2019.
+   - The target dates range from Sun 09/30/2018 to Fri 10/05/2018. This is a small window.
+   - Wait, the target sample shows dates in September and October 2018.
+   - The source sample shows dates in November 2018 and January 2019.
+   - This implies the transformation involves resampling or aggregating source data into weekly buckets, then formatting the date.
+   - However, the problem statement says "Compute the result only from the source DataFrame". And "Infer a general transformation".
+   - The target has 53 rows. This strongly suggests a weekly aggregation over a year.
+   - But the source only has 15117 rows spanning a few months.
+   - Let's re-read the target distinct values. `cst` has 53 distinct values.
+   - The target columns are hourly 1:00 to 24:00.
+   - The values are 876.0 or 0.0.
+   - 876 = 73 * 12.
+   - 657 = 73 * 9? Or 84 * 7.8?
+   - If the source value is 73, and it's mapped to 876, the multiplier is 12.
+   - If the source value is 84, what is it mapped to?
+   - In the source sample, we have 73.0 and 84.0.
+   - In the target sample, we have 876.0 and 0.0 and 657.0.
+   - 657 / 73 = 9.
+   - 657 / 84 = 7.82.
+   - It's likely the value is multiplied by the number of hours in a day? No, 24.
+   - Multiplied by 12?
+   - Let's assume the transformation is:
+     1. Parse source date.
+     2. Determine the week number or specific date bucket.
+     3. Aggregate source values into hourly buckets.
+     4. Multiply by some factor.
+   - This is complex. Let's look for a simpler pattern.
+   - Maybe the source `zone_016_cooling_sp` is a setpoint.
+   - The target values 876 and 0 suggest a binary state (on/off) scaled by 876?
+   - 876 is the number of hours in 36.5 days.
+   - 53 rows = 53 weeks.
+   - This looks like a "weekly profile" generation.
+   - Given the complexity and the mismatch in date ranges between source sample and target sample, I will assume the transformation creates a weekly index for the year of the source data, and fills hourly columns based on aggregated source data.
+   - However, without explicit aggregation logic, I'll provide a basic structure that parses the date and formats it, and attempts to map the values.
+   - Actually, looking at the target `cst` format: "Dow MM/DD/YYYY".
+   - The target has 24 hourly columns.
+   - The source has 15117 rows.
+   - The target has 53 rows.
+   - This is a significant reduction.
+   - I will infer that the source data is resampled to weekly frequency, and the `zone_016_cooling_sp` is aggregated (e.g., mean or max) and then multiplied by 12 to get the target values (73*12=876).
+   - The 657 value might be an exception or a different aggregation.
+   - Given the constraints, I will provide a solution that:
+     1. Parses the source date.
+     2. Creates a weekly index.
+     3. Aggregates the source data into hourly buckets for each week.
+     4. Scales the values by 12.
+     5. Formats the date as required.
+
+   Note: The exact aggregation logic (mean, max, sum) and the handling of the 657 value are ambiguous. I will use a placeholder aggregation (mean) and scaling factor 12.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the source date
+    source['dt'] = pd.to_datetime(source['date'], format='%m/%d/%Y %H:%M')
+    
+    # Create a weekly resample index
+    # Assuming the target covers the same year as the source data
+    # We create a range of weeks covering the source date range
+    start_date = source['dt'].min().normalize()
+    end_date = source['dt'].max().normalize()
+    
+    # Generate weekly dates
+    weekly_dates = pd.date_range(start=start_date, end=end_date, freq='W-SUN')
+    
+    # Initialize the target DataFrame
+    target = pd.DataFrame(index=weekly_dates)
+    target['cst'] = target.index.strftime('%a %m/%d/%Y')
+    
+    # Initialize hourly columns with 0
+    for h in range(1, 25):
+        target[f'{h}:00'] = 0.0
+        
+    # For each week, aggregate the source data
+    for week_date in weekly_dates:
+        # Get the start and end of the week
+        week_start = week_date
+        week_end = week_date + pd.Timedelta(days=7)
+        
+        # Filter source data for this week
+        week_data = source[(source['dt'] >= week_start) & (source['dt'] < week_end)]
+        
+        if week_data.empty:
+            continue
+            
+        # For each hour, calculate the average setpoint and multiply by 12
+        for h in range(1, 25):
+            # Extract the hour from the timestamp
+            hour_data = week_data[week_data['dt'].dt.hour == h-1]
+            if not hour_data.empty:
+                mean_val = hour_data['zone_016_cooling_sp'].mean()
+                # Apply scaling factor
+                target.loc[week_date, f'{h}:00'] = mean_val * 12
+                
+    return target.reset_index(drop=True)
+```

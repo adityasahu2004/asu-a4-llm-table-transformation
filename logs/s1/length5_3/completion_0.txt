@@ -1,0 +1,147 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `date` column from string format (`M/D/YYYY H:MM`) to pandas datetime objects.
+2.  **Extract Date Components**: Create columns for `year`, `month`, and `day` from the parsed datetime.
+3.  **Map Day to Value Column**: Map the `day` of the month (1-31) to the corresponding target column name (`value1` to `value24`). Note that the target only has 24 value columns. Days 25-31 will likely result in NaNs or be excluded if not present in the target structure, but looking at the target schema, it has `value1` through `value24`. This suggests a mapping where Day 1 -> `value1`, ..., Day 24 -> `value24`. Days 25-31 do not have corresponding columns in the target, so values for those days will be lost or result in NaNs if we pivot. However, looking at the target sample, we see dates like "05/08/2019" (8th day) having values in `value1` through `value24`. Wait, the target rows are unique dates (521 distinct dates). The source has many rows per date (74848 rows vs 521 target rows).
+    *   Let's re-examine the target structure. The target has one row per *date* (YYYY-MM-DD). The columns `value1` to `value24` seem to represent the values for the 1st through 24th day of the month? No, that doesn't make sense because the row date is specific (e.g., "05/08/2019").
+    *   Let's look at the target sample data again.
+        *   Row: `05/08/2019`. Values: `value1`=24.25, `value2`=24.25, ..., `value24`=24.25.
+        *   Row: `07/13/2019`. Values: `value1`=22.187, ...
+    *   This implies that for a given date (e.g., May 8, 2019), the `value1`...`value24` columns contain data. But what data?
+    *   Let's look at the source. Source has `date` (with time) and `cerc_logger_1`.
+    *   Hypothesis: The target is a pivot table where the index is the *date* (YYYY-MM-DD), and the columns `value1`...`value24` represent something else.
+    *   Alternative Hypothesis: The target columns `value1`...`value24` correspond to the *hour* of the day? There are 24 hours (0-23). If we map Hour 0 -> `value1`, Hour 1 -> `value2`, ..., Hour 23 -> `value24`, then each row in the target (unique date) would have up to 24 values, one for each hour of that day.
+    *   Let's check the source sample.
+        *   `7/28/2019 4:50` -> Hour 4.
+        *   `9/13/2019 9:30` -> Hour 9.
+    *   Let's check the target sample for `05/08/2019`. It has values for all 24 columns. This fits the "Hour of Day" hypothesis perfectly. Each day has 24 hours. The target aggregates or pivots the source data such that for each calendar date, we have the sensor reading for each hour of that day.
+    *   Since there might be multiple readings per hour or missing hours, we need to decide on an aggregation. The target has `nulls` in some columns. This suggests that if a reading for a specific hour on a specific day is missing, it's NaN. If there are multiple readings for the same hour/day, we likely take the mean or the single value. Given the distinct counts in target columns are low (60-70 distinct values across 521 rows), and source has 1279 distinct values, it's likely a direct mapping or simple aggregation. Let's assume we take the value for that hour. If multiple exist, `mean` is a safe default for sensor data, or perhaps the data is already unique per hour. Let's look at the source distinct count: 1279. Target distinct counts per column: ~60-70. This is consistent with hourly data over ~2 years (24 * 365 * 2 ≈ 17520 possible slots, but we only have 74k rows total, so ~4 readings per day on average? No, 74848 / 521 ≈ 143 readings per day? That's too many for hourly.
+    *   Wait, 521 distinct dates in target. 74848 source rows. 74848 / 521 ≈ 143. This is not hourly.
+    *   Let's re-read the target columns. `value1` to `value24`.
+    *   Maybe the target is not "Hour of Day".
+    *   Let's look at the target date format: `MM/DD/YYYY`.
+    *   Let's look at the source date format: `M/D/YYYY H:MM`.
+    *   Is it possible the target is pivoting by *Day of Month*?
+        *   If I pivot by Day of Month (1-31), I would get columns `1` to `31`. But target has `value1` to `value24`.
+        *   Maybe it's only days 1-24?
+        *   If I group by Year and Month, and pivot by Day, I get one row per Month. But target has 521 rows. 521 is roughly 2 years * 260? No. 521 is close to the number of weeks in 10 years? Or days in 1.4 years?
+        *   Source dates range from 2019 to 2021. That's about 2 years. 2 * 365 = 730 days. Target has 521 rows. This is less than the total number of days.
+    *   Let's look at the target sample dates:
+        *   `05/08/2019`
+        *   `07/13/2019`
+        *   `07/09/2018` (Wait, source starts in 2019? Source sample shows 2019-2021. But target sample shows 2018. The note says "Source row count describes a training sample only". The evaluation input might have different dates. The schema says source distinct dates are 74848. Target distinct dates are 521.
+    *   Let's reconsider the "Hour" hypothesis.
+        *   If the target is one row per *Day*, and columns are *Hours*, then we expect 24 columns. We have 24 columns (`value1`-`value24`).
+        *   Why are there 521 rows? Maybe the data is sparse, or only certain days are included? Or maybe the 521 rows are just a sample of the target? The schema says "rows: 521". This is the full target size.
+        *   If the source has 74,848 rows and covers ~2 years (730 days), that's ~100 readings per day.
+        *   If we pivot by Hour, we need to aggregate the ~100 readings per day into 24 hourly buckets.
+        *   This seems the most plausible structural transformation: **Pivot from Long to Wide**.
+        *   Index: Date (YYYY-MM-DD).
+        *   Columns: Hour of Day (0-23) mapped to `value1`-`value24`.
+        *   Values: `cerc_logger_1`.
+        *   Aggregation: Since there are many readings per day, we likely need to aggregate. `mean` is standard.
+
+    *   Let's verify the column mapping.
+        *   Hour 0 -> `value1`
+        *   Hour 1 -> `value2`
+        *   ...
+        *   Hour 23 -> `value24`
+
+    *   Let's check the target date format. `MM/DD/YYYY`.
+    *   Let's check the target nulls. `value1` has 29 nulls. `value24` has 30 nulls. This implies some days are missing data for specific hours.
+
+    *   **Refined Plan**:
+        1.  Parse `date` to datetime.
+        2.  Extract `date_only` (floor to day) and `hour` (0-23).
+        3.  Map `hour` to column names: `hour + 1` -> `value{hour+1}`.
+        4.  Group by `date_only` and the new column name.
+        5.  Aggregate `cerc_logger_1` (likely `mean`).
+        6.  Pivot/Unstack to get `date_only` as index and `value1`...`value24` as columns.
+        7.  Reset index.
+        8.  Format `date_only` to `MM/DD/YYYY`.
+        9.  Ensure column order is `date`, `value1`, ..., `value24`.
+
+    *   One detail: The target sample shows `07/09/2018`. The source sample starts in 2019. This confirms the evaluation data will have different dates. The logic must be general.
+
+    *   Aggregation function: The problem doesn't specify. `mean` is the most robust assumption for sensor data with multiple readings per time bucket. `first` or `last` might be biased. Given the distinct values in target columns are ~60-70, and source has 1279, `mean` reduces distinctness slightly but keeps it in a similar range.
+
+    *   Let's double check if `value1` corresponds to Hour 0 or Hour 1.
+        *   Standard 24-hour clock: 0-23.
+        *   If `value1` is Hour 0 (midnight), `value24` is Hour 23 (11 PM).
+        *   This is a standard mapping.
+
+    *   Steps:
+        1.  `df['datetime'] = pd.to_datetime(df['date'])`
+        2.  `df['date_str'] = df['datetime'].dt.date` (or floor to day)
+        3.  `df['hour'] = df['datetime'].dt.hour`
+        4.  `df['value_col'] = 'value' + (df['hour'] + 1).astype(str)`
+        5.  `df_pivot = df.groupby(['date_str', 'value_col'])['cerc_logger_1'].mean().unstack(fill_value=np.nan)`
+        6.  Ensure all 24 columns exist.
+        7.  Reset index.
+        8.  Rename `date_str` to `date`.
+        9.  Format `date` to `MM/DD/YYYY`.
+        10. Sort columns.
+
+    *   Wait, `unstack` might not create all 24 columns if some hours are missing for all days. We should ensure columns `value1` to `value24` are present.
+
+    *   Let's check the target sample values again.
+        *   `05/08/2019`: `value1`=24.25.
+        *   Source: `7/28/2019 4:50` -> 24.562.
+        *   This doesn't help match specific values without the full source data for that day.
+
+    *   One potential issue: `pd.to_datetime` might be slow on 74k rows? No, it's fine.
+
+    *   Final check on column names: `value1` to `value24`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Create a copy to avoid modifying the original
+    df = source.copy()
+    
+    # Parse the date column
+    # Format in source: M/D/YYYY H:MM
+    df['datetime'] = pd.to_datetime(df['date'])
+    
+    # Extract the date part (floor to day)
+    df['date_only'] = df['datetime'].dt.floor('D')
+    
+    # Extract the hour (0-23)
+    df['hour'] = df['datetime'].dt.hour
+    
+    # Map hour to target column names: value1 (hour 0) to value24 (hour 23)
+    df['value_col'] = 'value' + (df['hour'] + 1).astype(str)
+    
+    # Group by date and value column, and aggregate the sensor value
+    # Using mean as a robust aggregation for multiple readings per hour
+    df_pivot = df.groupby(['date_only', 'value_col'])['cerc_logger_1'].mean()
+    
+    # Unstack to create columns for each value_col
+    df_pivot = df_pivot.unstack(level='value_col')
+    
+    # Ensure all 24 value columns are present, filling missing with NaN
+    expected_cols = [f'value{i}' for i in range(1, 25)]
+    for col in expected_cols:
+        if col not in df_pivot.columns:
+            df_pivot[col] = np.nan
+            
+    # Select and order the columns
+    df_pivot = df_pivot[expected_cols]
+    
+    # Reset index to make date_only a column
+    df_pivot = df_pivot.reset_index()
+    
+    # Rename date_only to date
+    df_pivot = df_pivot.rename(columns={'date_only': 'date'})
+    
+    # Format the date column to MM/DD/YYYY
+    df_pivot['date'] = df_pivot['date'].dt.strftime('%m/%d/%Y')
+    
+    # Reorder columns to match target: date, value1, ..., value24
+    final_cols = ['date'] + expected_cols
+    result = df_pivot[final_cols]
+    
+    return result
+```

@@ -1,0 +1,82 @@
+### Operator Plan
+
+1.  **Parse Dates**: Convert the `date` column from string format (`%m/%d/%Y %H:%M`) to pandas datetime objects.
+2.  **Extract Components**: Extract the `Hour` (0-23) and `Month` (1-12) from the parsed datetime.
+3.  **Map Month Names**: Map the numeric month values to their full English names (e.g., 1 -> "January").
+4.  **Aggregate**: Group the data by `Hour` and `Month` (name). Calculate the mean of `cerc_logger_1` for each group.
+5.  **Pivot**: Reshape the aggregated data into a wide format where:
+    *   The index is `Hour`.
+    *   The columns are the Month names.
+    *   The values are the calculated means.
+6.  **Format Output**:
+    *   Reset the index to make `Hour` a column.
+    *   Ensure the `Hour` column is of integer type.
+    *   Ensure all month columns are present (filling with NaN if a specific hour/month combination is missing, though the target suggests dense data, standard pivot behavior handles missing combos with NaN).
+    *   Reorder columns to match the target specification: `Hour` followed by months in calendar order (January to December).
+
+### Assumptions
+*   The aggregation function is the arithmetic mean, as is standard for this type of "average profile" transformation unless specified otherwise.
+*   The target `Hour` values in the sample (0, 2, 4... 23) suggest that not all hours might be present in the *sample* output shown, or the sample is just a subset. However, the target schema says `distinct: 24` for Hour, implying all 24 hours (0-23) should be present in the final result. The sample data provided in the prompt only shows a subset of rows (12 rows), but the schema indicates 24 distinct hours. I will ensure all 24 hours are represented if possible, or simply rely on the pivot result. Given the target schema has 24 rows and 24 distinct hours, the result should contain all hours 0-23.
+*   The month names must match exactly: "January", "February", etc.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    """
+    Transforms the source dataframe by aggregating cerc_logger_1 values
+    by Hour and Month, then pivoting to a wide format.
+    """
+    # 1. Parse the date column
+    # Format observed: "7/28/2019 4:50" -> %m/%d/%Y %H:%M
+    df = source.copy()
+    df['datetime'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # 2. Extract Hour and Month
+    df['Hour'] = df['datetime'].dt.hour
+    df['MonthNum'] = df['datetime'].dt.month
+    
+    # 3. Map Month numbers to names
+    month_map = {
+        1: 'January', 2: 'February', 3: 'March', 4: 'April',
+        5: 'May', 6: 'June', 7: 'July', 8: 'August',
+        9: 'September', 10: 'October', 11: 'November', 12: 'December'
+    }
+    df['MonthName'] = df['MonthNum'].map(month_map)
+    
+    # 4. Aggregate by Hour and MonthName
+    # Calculate the mean of cerc_logger_1
+    agg_df = df.groupby(['Hour', 'MonthName'])['cerc_logger_1'].mean().reset_index()
+    
+    # 5. Pivot the table
+    # Index: Hour, Columns: MonthName, Values: cerc_logger_1
+    pivot_df = agg_df.pivot(index='Hour', columns='MonthName', values='cerc_logger_1')
+    
+    # 6. Format the output
+    # Reset index to bring Hour back as a column
+    result = pivot_df.reset_index()
+    
+    # Ensure Hour is integer
+    result['Hour'] = result['Hour'].astype('int64')
+    
+    # Define the expected column order
+    expected_months = [
+        'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'
+    ]
+    
+    # Ensure all month columns exist (in case some are missing from data)
+    for month in expected_months:
+        if month not in result.columns:
+            result[month] = np.nan
+            
+    # Select and order columns
+    final_columns = ['Hour'] + expected_months
+    result = result[final_columns]
+    
+    # Sort by Hour to ensure deterministic order
+    result = result.sort_values('Hour').reset_index(drop=True)
+    
+    return result
+```

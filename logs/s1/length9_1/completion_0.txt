@@ -1,0 +1,209 @@
+### Operator Plan
+
+1.  **Date/Time Parsing**:
+    *   Construct a datetime object from `YEAR`, `MONTH`, `DAY` to determine the day of the week and season.
+    *   `season`: Map months to seasons (Dec-Feb: WINTER, Mar-May: SPRING, Jun-Aug: SUMMER, Sep-Nov: FALL).
+    *   `daytype`: Determine if the day is a WEEKDAY (Mon-Fri) or WEEKEND (Sat-Sun).
+    *   `hour`: Keep the `HOUR` column as is (note: source has 25 distinct values, likely 0-23 plus a special value or 24, target preserves this).
+
+2.  **Range Selection Logic**:
+    *   The source data contains up to 4 ranges defined by `LOW_1`/`HIGH_1`, `LOW_2`/`HIGH_2`, etc., along with corresponding coefficients `COEFF_1`...`COEFF_4` and a `CONSTANT`.
+    *   The target has a single `temperature_range` of `100998.0` (which is `99999.0 - (-999.0)`), `low_end` of `-999.0`, and `high_end` of `99999.0`.
+    *   This suggests that for every row in the target, we are selecting the *first* valid range (Range 1) which spans from -999 to 99999.
+    *   Looking at the source sample:
+        *   `LOW_1` is always `-999.0`.
+        *   `HIGH_1` varies but often is `99999.0` or a specific value.
+        *   However, the target `high_end` is *always* `99999.0` and `low_end` is *always* `-999.0`.
+        *   The target `temperature_range` is `100998.0`.
+        *   The target `constant` and `coefficient` values in the sample do not directly match the `CONSTANT` and `COEFF_1` from the source sample rows provided in the prompt's `source.sample`.
+        *   *Correction/Refinement*: Let's look closer at the target sample data vs source sample data.
+            *   Source Row 0: `MP1`, Hour 1400, Constant 381.43, Coeff1 -1.66.
+            *   Target Row 0: Spring, Weekday, Hour 100, Constant 27.14, Coeff -0.16.
+            *   These do not match directly. The target rows seem to be a *different* set of data or aggregated/transformed differently.
+            *   Wait, the prompt says "Infer the transformation... The evaluation source contains different rows".
+            *   Let's look at the structure. The target has 118,274 rows, source has 118,273. The difference is 1 row.
+            *   The target columns `low_end` and `high_end` are constant. `temperature_range` is constant.
+            *   This implies the transformation might be expanding or pivoting the data, or simply selecting specific columns and renaming them, but the values in the target sample (`constant`, `coefficient`) are different from the source sample.
+            *   *Hypothesis*: The target is not a direct row-by-row mapping of the provided source sample. The provided source sample is just a snippet. The transformation logic must be derived from the schema.
+            *   Let's look at `NUMBER_OF_RANGES`. It has values 1, 2, 3, 4.
+            *   If `NUMBER_OF_RANGES` is 1, we use Range 1. If 2, we might have two rows?
+            *   Source rows: 118,273. Target rows: 118,274.
+            *   If we explode the ranges, the row count would increase significantly (since many rows have 2, 3, or 4 ranges).
+            *   However, the target `low_end` and `high_end` are *constant* for all rows. This is a strong signal.
+            *   Let's re-read the target distinct values. `low_end`: -999.0. `high_end`: 99999.0. `temperature_range`: 100998.0.
+            *   This looks like a "default" or "global" range.
+            *   Why would the row count increase by 1?
+            *   Maybe the transformation is: **Select only the first range (Range 1) for every row, and standardize the bounds to -999 and 99999?**
+            *   If we just select Range 1, the row count should stay the same (118,273). The target has 118,274.
+            *   Is there a header row or an index row added? Or perhaps a specific aggregation?
+            *   Let's look at the `hour` column in target. Distinct 25. Source `HOUR` distinct 25.
+            *   Let's look at `season` and `daytype`. These are derived from date.
+            *   Let's look at `constant` and `coefficient`.
+            *   In the source, `CONSTANT` and `COEFF_1` are present for all rows.
+            *   In the target, `constant` and `coefficient` are present.
+            *   If the transformation is simply:
+                1.  Derive `season` and `daytype` from date.
+                2.  Keep `HOUR`.
+                3.  Set `low_end` = -999, `high_end` = 99999, `temperature_range` = 100998.
+                4.  Map `CONSTANT` -> `constant`, `COEFF_1` -> `coefficient`.
+            *   This would preserve the row count (118,273). The target has 118,274.
+            *   Where does the extra row come from?
+            *   Maybe the source has a row that is duplicated or split?
+            *   Or maybe the "1" difference is a red herring or due to a specific edge case (e.g., a NaN row being filled, or an index reset adding a row? Unlikely).
+            *   Let's check the distinct values of `CONSTANT` in source (2553) vs target (2641). The target has *more* distinct constants. This implies the target is NOT just a subset or rename of the source rows.
+            *   Wait, if `NUMBER_OF_RANGES` > 1, maybe we *do* explode the rows?
+            *   If we explode, we get many more rows.
+            *   But the target `low_end`/`high_end` are constant.
+            *   Let's look at the source `HIGH_1`. It has 1409 distinct values.
+            *   If we explode, we would have different `high_end` values.
+            *   The fact that target `high_end` is constant suggests we are *not* using the specific range bounds from the source, but rather a fixed global range.
+            *   Why would `constant` and `coefficient` change?
+            *   Perhaps the `CONSTANT` and `COEFF` in the target are *not* from `CONSTANT` and `COEFF_1`?
+            *   Let's look at the target sample again.
+                *   Target Row 0: Constant 27.14, Coeff -0.16.
+                *   Source Row 0: Constant 381.43, Coeff -1.66.
+            *   These are different.
+            *   Is it possible the target is a *different* dataset entirely, and I need to find the mapping?
+            *   No, the task is to transform the source to the target.
+            *   Let's look at the `LOSS_FACTOR`. Source has 3 distinct values. Target doesn't have it.
+            *   Let's look at `PROFILE_CLASS`. Source has 14. Target doesn't have it.
+            *   Maybe the target is an aggregation?
+            *   If it's an aggregation, row count would decrease. It increased.
+            *   Let's reconsider the "Explode" hypothesis.
+            *   If we explode `NUMBER_OF_RANGES`, we get multiple rows per source row.
+            *   Row 1: Range 1. Row 2: Range 2. etc.
+            *   If we explode, we would have `low_end` and `high_end` varying.
+            *   BUT, the target `low_end` and `high_end` are constant.
+            *   This is a contradiction unless:
+                1.  The target `low_end`/`high_end` are *not* from the source ranges, but fixed constants.
+                2.  The `constant` and `coefficient` in the target *are* from the source ranges.
+            *   If we explode, we get more rows.
+            *   Source: 118,273 rows.
+            *   Target: 118,274 rows.
+            *   This is a very small increase.
+            *   If most rows have `NUMBER_OF_RANGES` = 1, and only a few have >1, the row count wouldn't explode.
+            *   Let's check the nulls.
+                *   `COEFF_2` has 50,391 nulls. Total rows 118,273. Non-nulls ~67,882.
+                *   `COEFF_3` has 104,727 nulls. Non-nulls ~13,546.
+                *   `COEFF_4` has 117,758 nulls. Non-nulls ~515.
+            *   If we explode, we would have:
+                *   118,273 rows for Range 1.
+                *   ~67,882 rows for Range 2.
+                *   ~13,546 rows for Range 3.
+                *   ~515 rows for Range 4.
+                *   Total ~200,000 rows.
+            *   Target has 118,274 rows. This is almost exactly the source row count.
+            *   This strongly suggests we are **NOT** exploding. We are keeping 1 row per source row.
+            *   So why the +1 row? And why the different `constant`/`coefficient` values in the sample?
+            *   *Crucial Insight*: The sample data provided in the JSON is just a *sample*. The values in the target sample might correspond to *different* source rows than the ones shown in the source sample. I cannot match them by value. I must match by *schema* and *logic*.
+            *   Logic:
+                1.  The target has `season`, `daytype`, `hour`. These are derived from source date/time.
+                2.  The target has `low_end`, `high_end`, `temperature_range`. These are constant in the target.
+                3.  The target has `constant`, `coefficient`. These likely map to `CONSTANT` and `COEFF_1` (the first range's coefficients).
+                4.  Why +1 row?
+                    *   Maybe the source has a row with `NUMBER_OF_RANGES` = 0? (Distinct values are 1,2,3,4). No.
+                    *   Maybe the transformation adds a "total" or "average" row?
+                    *   Maybe the index is reset and a row is appended?
+                    *   Let's look at the distinct values of `HOUR` in target: 25. Source: 25.
+                    *   Let's look at `season`: 4 distinct. `daytype`: 2 distinct.
+                    *   If the row count is essentially the same, the transformation is likely a **row-wise mapping**.
+                    *   The +1 row might be an artifact of the specific evaluation data (e.g., a header row in the source that was parsed as data, or a specific edge case). Or, more likely, **I should ignore the +1 row discrepancy as a potential noise in the problem statement or a specific edge case (like a NaN row being handled) and focus on the column transformations.**
+                    *   Actually, let's look at `LOW_1`. It is always -999. `HIGH_1` varies.
+                    *   Target `high_end` is always 99999.
+                    *   This implies we are *ignoring* the specific `HIGH_1` value and using a global max.
+                    *   Why? Maybe the model uses a fixed temperature range for all predictions.
+            *   So the plan is:
+                1.  Create `season` from `MONTH`.
+                2.  Create `daytype` from `DAY` of week (requires `YEAR`, `MONTH`, `DAY`).
+                3.  Keep `HOUR` as `hour`.
+                4.  Set `low_end` = -999.0.
+                5.  Set `high_end` = 99999.0.
+                6.  Set `temperature_range` = 100998.0.
+                7.  Map `CONSTANT` to `constant`.
+                8.  Map `COEFF_1` to `coefficient`.
+                9.  Drop other columns.
+                10. Sort? The target sample is sorted by `hour` descending?
+                    *   Target Sample Hours: 100, 2400, 2300, 2200, 2000, 1900, 1800, 1700, 1600, 1400, 1300, 1300.
+                    *   It looks sorted by `hour` descending.
+                    *   Source Sample Hours: 1400, 1300, 1100, 1000, 900, 800, 600, 500, 400, 300, 200, 2400.
+                    *   The source is not sorted by hour.
+                    *   The target *is* sorted by hour descending.
+                    *   I should sort the result by `hour` descending.
+
+            *   What about the +1 row?
+                *   If I just map 1-to-1, I get 118,273 rows.
+                *   If the target has 118,274, maybe there's a row with `HOUR` = 0 or 24 that is added?
+                *   Or maybe `HOUR` 2400 is treated as 24?
+                *   Let's assume the standard 1-to-1 mapping + sort is the core logic. The +1 row might be due to a specific row in the evaluation set that splits or a header. Given the constraints, I will perform the 1-to-1 mapping. If the evaluation expects a specific extra row, it's likely an edge case not inferable from the schema alone (e.g., "add a row for hour 0 if missing"). However, `HOUR` has 25 distinct values. 0-23 is 24 values. 2400 is likely the 25th.
+                *   Let's check if `HOUR` 0 exists. Source distinct 25. If 1-23 and 2400, that's 24. If 0-23 and 2400, that's 25.
+                *   I will stick to the 1-to-1 mapping.
+
+3.  **Implementation Details**:
+    *   Use `pd.to_datetime` to get day of week.
+    *   Map months to seasons.
+    *   Select and rename columns.
+    *   Add constant columns.
+    *   Sort by `hour` descending.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Create a datetime object to determine day of week and season
+    # Note: YEAR, MONTH, DAY are floats, convert to int for datetime construction
+    source = source.copy()
+    source['YEAR'] = source['YEAR'].astype(int)
+    source['MONTH'] = source['MONTH'].astype(int)
+    source['DAY'] = source['DAY'].astype(int)
+    
+    # Create datetime
+    source['datetime'] = pd.to_datetime(source[['YEAR', 'MONTH', 'DAY']])
+    
+    # 2. Derive 'season'
+    # Winter: Dec (12), Jan (1), Feb (2)
+    # Spring: Mar (3), Apr (4), May (5)
+    # Summer: Jun (6), Jul (7), Aug (8)
+    # Fall: Sep (9), Oct (10), Nov (11)
+    def get_season(month):
+        if month in [12, 1, 2]:
+            return 'WINTER'
+        elif month in [3, 4, 5]:
+            return 'SPRING'
+        elif month in [6, 7, 8]:
+            return 'SUMMER'
+        else:
+            return 'FALL'
+            
+    source['season'] = source['MONTH'].apply(get_season)
+    
+    # 3. Derive 'daytype'
+    # weekday() returns 0 (Mon) to 6 (Sun)
+    # WEEKDAY: 0-4, WEEKEND: 5-6
+    source['daytype'] = source['datetime'].dt.dayofweek.apply(lambda x: 'WEEKEND' if x >= 5 else 'WEEKDAY')
+    
+    # 4. Select and rename columns
+    # Target columns: season, daytype, hour, temperature_range, constant, coefficient, low_end, high_end
+    
+    result = pd.DataFrame()
+    result['season'] = source['season']
+    result['daytype'] = source['daytype']
+    result['hour'] = source['HOUR']
+    
+    # Constant columns based on target distinct values
+    result['temperature_range'] = 100998.0
+    result['low_end'] = -999.0
+    result['high_end'] = 99999.0
+    
+    # Map CONSTANT and COEFF_1
+    result['constant'] = source['CONSTANT']
+    result['coefficient'] = source['COEFF_1']
+    
+    # 5. Sort by hour descending, as observed in target sample
+    result = result.sort_values(by='hour', ascending=False).reset_index(drop=True)
+    
+    # Ensure correct column order
+    result = result[['season', 'daytype', 'hour', 'temperature_range', 'constant', 'coefficient', 'low_end', 'high_end']]
+    
+    return result
+```

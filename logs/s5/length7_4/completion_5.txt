@@ -1,0 +1,397 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `date` column (format `%m/%d/%Y`) to a pandas datetime object.
+2.  **Derive Grouping Keys**:
+    *   Extract the month name and format it as a left-aligned string padded to 10 characters (e.g., "January   ") to match the target `month` column format.
+    *   Determine `daytype` based on the day of the week. If the day is Saturday (5) or Sunday (6), label as "weekend"; otherwise, "weekday".
+3.  **Aggregate**: Group the data by the derived `month` and `daytype`. Calculate the mean of the 24 hourly value columns (`value1` through `value24`) for each group.
+4.  **Rename Columns**: Rename the aggregated hourly columns from `value1`...`value24` to `hr1`...`hr24`.
+5.  **Sort and Reset**: Sort the resulting DataFrame by `month` and `daytype` to ensure a deterministic order (matching the sample's alphabetical/chronological appearance) and reset the index.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    dt = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    
+    # Derive month string: Left-aligned, padded to 10 chars
+    # e.g., "January" -> "January   "
+    month_str = dt.dt.strftime('%B').str.ljust(10)
+    
+    # Derive daytype: 0=Mon, ..., 5=Sat, 6=Sun
+    dow = dt.dt.dayofweek
+    daytype = np.where(dow >= 5, 'weekend', 'weekday')
+    
+    # Select value columns
+    value_cols = [f'value{i}' for i in range(1, 25)]
+    
+    # Create a temporary dataframe for aggregation
+    agg_df = source[value_cols].copy()
+    agg_df['month'] = month_str
+    agg_df['daytype'] = daytype
+    
+    # Group by month and daytype, calculate mean
+    grouped = agg_df.groupby(['month', 'daytype'], sort=False).mean()
+    
+    # Rename columns
+    grouped = grouped.rename(columns={f'value{i}': f'hr{i}' for i in range(1, 25)})
+    
+    # Sort by month and daytype to match target order
+    # Target sample shows January weekend, January weekday, February weekday, February weekend...
+    # Standard sort on 'month' (string) and 'daytype' (string) works:
+    # 'January' < 'February' ...
+    # 'weekday' < 'weekend'
+    # However, sample shows:
+    # Jan weekend
+    # Jan weekday
+    # Feb weekday
+    # Feb weekend
+    # This implies a specific sort order or just the order of appearance in data?
+    # Let's look at the sample data order again:
+    # 1. Jan weekend
+    # 2. Jan weekday
+    # 3. Feb weekday
+    # 4. Feb weekend
+    # 5. Mar weekday
+    # 6. Mar weekday (Wait, distinct values for month are 7, daytype 2. Rows 183. 
+    #    Source has 182 rows. Target has 183 rows. 
+    #    Wait, source rows 182. Target rows 183.
+    #    Distinct months in target: 7. Distinct daytypes: 2.
+    #    7 * 2 = 14 groups.
+    #    Why 183 rows? 
+    #    Ah, the target sample shows 12 rows. The schema says 183 rows.
+    #    Let's re-read the target schema.
+    #    Target rows: 183.
+    #    Source rows: 182.
+    #    This is strange. Usually aggregation reduces rows.
+    #    Let's look at the distinct values in target 'month': 7.
+    #    Let's look at the distinct values in target 'daytype': 2.
+    #    If it's a groupby mean, we should have at most 14 rows.
+    #    Why 183 rows?
+    #    
+    #    Re-reading the prompt carefully.
+    #    Source: 182 rows.
+    #    Target: 183 rows.
+    #    
+    #    Is it possible the target is NOT an aggregation?
+    #    Let's look at the values.
+    #    Source row 1: 7/3/2011 (Sunday). Values: 1.0243, 0.8341...
+    #    Target row 1: "January  ", "weekend", 1.3683...
+    #    Target row 12: "July     ", "weekend", 0.8341...
+    #    
+    #    Wait, Target row 12 values: 0.8341, 0.6966...
+    #    Source row 1 values: 1.0243, 0.8341...
+    #    Source row 2 values: 1.0495, 0.8135...
+    #    
+    #    Let's check if Target row 12 matches any source row.
+    #    Source row 1 (7/3/2011, Sun): 1.0243, 0.8341, 0.7676...
+    #    Target row 12 (July, weekend): 0.8341, 0.6966...
+    #    No direct match.
+    #    
+    #    Let's check if Target row 1 is an average.
+    #    January 2011 weekends?
+    #    Source dates: 7/3/2011 to 12/31/2011.
+    #    There are NO January dates in the source!
+    #    Source first date: 7/3/2011.
+    #    Target first date: January.
+    #    
+    #    This implies the transformation is NOT just processing the source rows directly.
+    #    OR, the "Source" provided in the prompt is a *sample* of a larger dataset, 
+    #    and the "Target" is the result of processing the *full* dataset?
+    #    The note says: "Source row count describes a training sample only, not the evaluation input."
+    #    But usually, we infer the transformation logic from the schema/sample.
+    #    
+    #    If the source sample doesn't contain January, but the target does, 
+    #    we cannot compute the January values from the source sample.
+    #    However, the task is to "Infer the transformation".
+    #    The transformation logic must be general.
+    #    
+    #    Hypothesis: The transformation is a GroupBy Mean on Month and DayType.
+    #    The fact that the source sample is July-Dec and target includes Jan-July 
+    #    suggests the evaluation input will have the full year (or relevant months).
+    #    The row count difference (182 vs 183) is also suspicious.
+    #    182 days in July-Dec?
+    #    July (31) + Aug (31) + Sep (30) + Oct (31) + Nov (30) + Dec (31) = 184 days.
+    #    Source has 182 rows. Maybe 2 days missing?
+    #    Target has 183 rows.
+    #    
+    #    If the target is an aggregation, it should have ~14 rows (7 months * 2 types).
+    #    But target has 183 rows.
+    #    
+    #    Let's look at the Target Sample Data again.
+    #    It has 12 rows.
+    #    The columns are month, daytype, hr1...hr24.
+    #    
+    #    Is it possible the target is NOT aggregated?
+    #    If it's not aggregated, why are there only 7 distinct months and 2 daytypes?
+    #    And why 183 rows?
+    #    
+    #    Let's look at the distinct counts in Target Schema:
+    #    month: 7 distinct.
+    #    daytype: 2 distinct.
+    #    hr1: 179 distinct.
+    #    
+    #    If it were raw data, hr1 would have ~182 distinct values (one per row).
+    #    179 is close to 182.
+    #    
+    #    Wait, look at the Target Sample Data values.
+    #    Row 1: Jan, weekend, 1.3683...
+    #    Row 2: Jan, weekday, 1.4261...
+    #    Row 3: Feb, weekday, 1.186...
+    #    Row 4: Feb, weekend, 0.583...
+    #    
+    #    These look like averages.
+    #    But if they are averages, why are there 183 rows?
+    #    Maybe the target schema "rows: 183" is a mistake in the problem description 
+    #    or refers to the total number of rows in the *evaluation* target, 
+    #    which might be different from the sample?
+    #    
+    #    Actually, let's look at the distinct values of `hr1` in target: 179.
+    #    If there are only 14 groups (7 months * 2 types), there can be at most 14 distinct values for hr1.
+    #    But there are 179 distinct values.
+    #    This implies the target is NOT aggregated by month/daytype.
+    #    
+    #    So, what is the target?
+    #    It has columns: month, daytype, hr1...hr24.
+    #    It has 183 rows.
+    #    Source has 182 rows.
+    #    
+    #    Maybe the target is the source data, but transformed?
+    #    1. Parse date.
+    #    2. Extract month (formatted).
+    #    3. Extract daytype.
+    #    4. Rename value1..24 to hr1..24.
+    #    5. Add a row? Or is the row count difference due to the sample vs full data?
+    #    
+    #    Let's check if the values in Target Sample match Source Sample.
+    #    Source Row 1: 7/3/2011 (Sun). Values: 1.0243, 0.8341...
+    #    Target Row 12: July, weekend. Values: 0.8341, 0.6966...
+    #    Source Row 1 hr1: 1.0243. Target Row 12 hr1: 0.8341. No match.
+    #    Source Row 1 hr2: 0.8341. Target Row 12 hr1: 0.8341. Match?
+    #    Source Row 1 hr3: 0.7676. Target Row 12 hr2: 0.6966. No.
+    #    
+    #    Let's check Target Row 1: Jan, weekend.
+    #    Source has no Jan.
+    #    
+    #    This is very confusing.
+    #    Let's re-read the "note": "Source row count describes a training sample only, not the evaluation input."
+    #    This usually means the logic should be inferred from the schema/sample, but the actual data in evaluation will be different.
+    #    
+    #    However, if the Source Sample is July-Dec and Target Sample is Jan-July, 
+    #    there is no overlap in dates.
+    #    
+    #    Is it possible the Target is a *forecast* or *synthetic* data?
+    #    No, the instructions say "Compute the result only from the source DataFrame."
+    #    
+    #    Let's look at the Target Schema again.
+    #    Rows: 183.
+    #    Distinct month: 7.
+    #    Distinct daytype: 2.
+    #    Distinct hr1: 179.
+    #    
+    #    If the target was aggregated, distinct hr1 would be <= 14.
+    #    Since distinct hr1 is 179, the target is NOT aggregated.
+    #    It is row-level data.
+    #    
+    #    So the transformation is:
+    #    1. Parse `date`.
+    #    2. Create `month` column: Month name, left-aligned, padded to 10 chars.
+    #    3. Create `daytype` column: 'weekend' if Sat/Sun, else 'weekday'.
+    #    4. Rename `value1`...`value24` to `hr1`...`hr24`.
+    #    5. Drop other columns (`class`, `Description`, `analysis`, `uom`).
+    #    6. Sort?
+    #    
+    #    Why 183 rows vs 182?
+    #    Maybe the evaluation input has 183 rows?
+    #    The note says "Source row count describes a training sample only".
+    #    So the evaluation source might have 183 rows.
+    #    
+    #    Let's verify the column renaming and formatting.
+    #    Source: value1 -> Target: hr1.
+    #    Source: date -> Target: month, daytype.
+    #    
+    #    Let's check the Target Sample Data values against Source Sample Data values 
+    #    assuming a 1-to-1 mapping (ignoring the date mismatch for a moment, 
+    #    assuming the sample data in the prompt is just illustrative of the *format*, 
+    #    not the actual values from the same rows).
+    #    
+    #    Actually, in these problems, the sample data usually *is* the result of the transformation 
+    #    on the source sample data.
+    #    But here, the dates don't match.
+    #    Source: 7/3/2011.
+    #    Target: January.
+    #    
+    #    Is it possible the Source `date` column is not the date of the row, but something else?
+    #    No, it looks like a date.
+    #    
+    #    Is it possible the Target `month` is not derived from Source `date`?
+    #    
+    #    Let's look at the distinct values of `month` in Target:
+    #    "January  ", "February ", "March    ", "April    ", "May      ", "June     ", "July     "
+    #    
+    #    Let's look at the Source `date` range: 7/3/2011 to 12/31/2011.
+    #    This covers July, Aug, Sep, Oct, Nov, Dec.
+    #    
+    #    The Target covers Jan, Feb, Mar, Apr, May, Jun, Jul.
+    #    
+    #    This is a complete mismatch.
+    #    
+    #    Could the transformation be shifting the date?
+    #    Or is the "Source" in the prompt actually the *Target* of a previous step, 
+    #    and we are going backwards? No.
+    #    
+    #    Let's consider the possibility that the `date` in Source is not the date of the measurement.
+    #    But it's named `date`.
+    #    
+    #    Let's look at the Target Sample Data again.
+    #    Row 1: Jan, weekend.
+    #    Row 12: July, weekend.
+    #    
+    #    If I assume the transformation is simply:
+    #    1. Parse date.
+    #    2. Format month.
+    #    3. Determine daytype.
+    #    4. Rename columns.
+    #    
+    #    Then the values in the Target Sample *must* come from the Source Sample.
+    #    But they don't match the dates.
+    #    
+    #    Is it possible the Source `date` is in a different format?
+    #    "7/3/2011" -> July 3rd.
+    #    
+    #    Is it possible the Target `month` is derived from a different column?
+    #    No other date-like columns.
+    #    
+    #    Is it possible the rows are shuffled?
+    #    If I shuffle the source rows, can I match the values?
+    #    Source Row 1: 1.0243, 0.8341...
+    #    Target Row 12: 0.8341, 0.6966...
+    #    
+    #    Let's check if Target Row 12 is Source Row 1 shifted?
+    #    Source Row 1: 1.0243, 0.8341, 0.7676, 0.7264...
+    #    Target Row 12: 0.8341, 0.6966, 0.6072, 0.5477...
+    #    No.
+    #    
+    #    Let's check if Target Row 1 is an average of some source rows?
+    #    We established it's not aggregated because of distinct counts.
+    #    
+    #    There is a contradiction in the provided sample data if we assume standard row-wise transformation.
+    #    However, the *schema* transformation is clear:
+    #    - Input: date, value1..24
+    #    - Output: month, daytype, hr1..24
+    #    
+    #    The most likely scenario is that the sample data in the prompt is mismatched 
+    #    (e.g., Source sample is from one file, Target sample from another, 
+    #    or the dates in the source sample are not the ones that produced the target sample).
+    #    
+    #    Given the instruction "Compute the result only from the source DataFrame", 
+    #    I must implement the logic that transforms the *structure* and *values* 
+    #    as implied by the column names and types.
+    #    
+    #    Logic:
+    #    1. `month`: Derived from `date`. Format: Month name, left-aligned, 10 chars.
+    #    2. `daytype`: Derived from `date`. 'weekend' if Sat/Sun, else 'weekday'.
+    #    3. `hr1`..`hr24`: Renamed from `value1`..`value24`.
+    #    
+    #    I will implement this logic. The row count difference (182 vs 183) 
+    #    is likely due to the evaluation input having a different number of rows 
+    #    (as per the note).
+    
+    # Implementation
+    
+    # 1. Parse date
+    dt = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    
+    # 2. Create month column
+    # Format: Month name, left-aligned, padded to 10 characters
+    month_col = dt.dt.strftime('%B').str.ljust(10)
+    
+    # 3. Create daytype column
+    # 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun
+    dow = dt.dt.dayofweek
+    daytype_col = np.where(dow >= 5, 'weekend', 'weekday')
+    
+    # 4. Select and rename value columns
+    # value1 -> hr1, ..., value24 -> hr24
+    rename_map = {f'value{i}': f'hr{i}' for i in range(1, 25)}
+    
+    # Create new dataframe
+    out = pd.DataFrame()
+    out['month'] = month_col
+    out['daytype'] = daytype_col
+    
+    for i in range(1, 25):
+        out[f'hr{i}'] = source[f'value{i}']
+        
+    # 5. Sort by month and daytype to match typical output ordering
+    # The sample shows:
+    # Jan weekend
+    # Jan weekday
+    # Feb weekday
+    # Feb weekend
+    # This is not a simple sort.
+    # Jan weekend (0)
+    # Jan weekday (1)
+    # Feb weekday (0)
+    # Feb weekend (1)
+    #
+    # If we sort by month, then daytype:
+    # Jan weekday
+    # Jan weekend
+    # Feb weekday
+    # Feb weekend
+    #
+    # The sample order is:
+    # 1. Jan weekend
+    # 2. Jan weekday
+    # 3. Feb weekday
+    # 4. Feb weekend
+    #
+    # This looks like:
+    # Sort by Month.
+    # Within Month, if Jan, weekend first?
+    # If Feb, weekday first?
+    #
+    # Or maybe it's just the order of appearance in the source data?
+    # If the source data is sorted by date, and we just transform, 
+    # the order will be by date.
+    #
+    # The target sample is likely sorted by Month, then DayType.
+    # But the sample order is weird.
+    #
+    # Let's look at the distinct values in the target schema.
+    # It doesn't specify order.
+    #
+    # I will sort by 'month' and 'daytype' alphabetically.
+    # 'January' < 'February'
+    # 'weekday' < 'weekend'
+    #
+    # This will produce:
+    # Jan weekday
+    # Jan weekend
+    # Feb weekday
+    # Feb weekend
+    #
+    # If the evaluation expects a specific order, it might be by date.
+    # But since we are grouping/transforming, and the target has 'month' and 'daytype',
+    # sorting by these keys is standard.
+    #
+    # However, if the target is NOT aggregated, and just row-wise,
+    # sorting by the original date is the most neutral approach.
+    #
+    # Let's sort by the original date to preserve temporal order,
+    # then by month/daytype if needed?
+    #
+    # Given the ambiguity, I will sort by 'month' and 'daytype' 
+    # as this is a common pattern for such reports.
+    # If the sample order is different, it might be due to the specific 
+    # dates in the sample (e.g., if the first weekend of Jan appears before 
+    # the first weekday of Jan in the source data).
+    #
+    # I will sort by 'month' and 'daytype'.
+    
+    out = out.sort_values(by=['month', 'daytype']).reset_index(drop=True)
+    
+    return out
+```

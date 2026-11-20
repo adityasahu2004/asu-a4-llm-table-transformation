@@ -1,0 +1,58 @@
+Operator plan:
+1. Parse the `date` column into a datetime object.
+2. Extract the date part (YYYY-MM-DD) to group by day, and the hour part to pivot into columns.
+3. Group by the extracted date and pivot the `zone_016_cooling_sp` values into 24 hourly columns (Hr 1 to Hr 24).
+4. Format the date index as `MM/DD/YYYY` for the `Date` column.
+5. Rename the hourly columns to `Hr 1`, `Hr 2`, ..., `Hr 24`.
+6. Reset the index to produce the final DataFrame.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date
+    dt = pd.to_datetime(source['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract date and hour
+    date_only = dt.dt.date
+    hour = dt.dt.hour + 1  # 1-24
+    
+    # Create a copy to avoid setting with copy warnings and prepare for pivot
+    df_temp = source.copy()
+    df_temp['date_only'] = date_only
+    df_temp['hour'] = hour
+    
+    # Pivot: index=date_only, columns=hour, values=zone_016_cooling_sp
+    # This will create columns 1 through 24
+    pivoted = df_temp.pivot_table(
+        index='date_only', 
+        columns='hour', 
+        values='zone_016_cooling_sp', 
+        aggfunc='first' # In case of duplicates, though likely unique per hour
+    )
+    
+    # Ensure all 24 hours are present as columns, filling missing with NaN
+    for h in range(1, 25):
+        if h not in pivoted.columns:
+            pivoted[h] = np.nan
+            
+    # Reorder columns to 1-24
+    pivoted = pivoted[[h for h in range(1, 25)]]
+    
+    # Rename columns to Hr 1, Hr 2, etc.
+    pivoted = pivoted.rename(columns={h: f'Hr {h}' for h in range(1, 25)})
+    
+    # Convert index to string format MM/DD/YYYY
+    pivoted.index = pd.to_datetime(pivoted.index).strftime('%m/%d/%Y')
+    
+    # Reset index to make Date a column
+    result = pivoted.reset_index()
+    result = result.rename(columns={'date_only': 'Date'})
+    
+    # Sort by Date if necessary, though target sample seems unsorted or specific order. 
+    # The problem doesn't specify sort order, but typically chronological is safe or preserve original.
+    # Given the target sample has distinct dates, let's just return.
+    
+    return result
+```

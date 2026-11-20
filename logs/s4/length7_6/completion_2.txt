@@ -1,0 +1,24 @@
+Operator plan: Parse the `Date` column into datetime objects. Derive `month` using the full month name and `daytype` by checking if the day of week is Saturday (5) or Sunday (6). Rename the 24 numeric hour columns (1-24) to `hr1` through `hr24`. Reset the index to match the target row count structure (note: target has 183 rows vs source 182, likely due to a missing first day of the period or similar boundary condition in the full dataset, but we process all source rows).
+
+```python
+import pandas as pd
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse dates
+    dates = pd.to_datetime(source['Date'], format='%m/%d/%Y')
+    
+    # Create output dataframe
+    out = pd.DataFrame(index=source.index)
+    
+    # Derive month name
+    out['month'] = dates.dt.strftime('%B')
+    
+    # Derive daytype: weekday vs weekend
+    # dayofweek: 0=Mon, ..., 5=Sat, 6=Sun
+    out['daytype'] = dates.dt.dayofweek.apply(lambda x: 'weekend' if x >= 5 else 'weekday')
+    
+    # Rename hour columns 1-24 to hr1-hr24
+    for h in range(1, 25):
+        out[f'hr{h}'] = source[str(h)]
+        
+    return out.reset_index(drop=True)
+```

@@ -1,0 +1,12 @@
+{
+  "original_sha256": {
+    "utils.py": "1411f9ce70e09591544ac29828c7ed8cd1cdbe56b20326d74b4362b8e96a4da7",
+    "hard_match.py": "51ca0e4b6a4f467fec6496c21872c58775451cf0813f03c99c228501a84db419",
+    "autopipeline_match.py": "a3ac0f39538cafc1489c16d04ad4139de751128f3ff414a52e670bac74ba8ac0"
+  },
+  "adaptations": [
+    "hard_match.py imports changed to package-relative imports only",
+    "utils.py contains only the two unmodified comparison helper functions; unused dependencies omitted",
+    "autopipeline_match.py unchanged"
+  ]
+}

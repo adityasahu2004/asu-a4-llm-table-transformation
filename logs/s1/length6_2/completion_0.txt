@@ -1,0 +1,205 @@
+### Operator Plan
+
+1.  **Parse Dates**: The source column `CST` contains dates in the format `"Day MM/DD/YYYY"` (e.g., `"Sat 12/01/2012"`). We need to extract the date part (`MM/DD/YYYY`) and parse it into a datetime object to handle the time shift.
+2.  **Time Shift**: The target data shows dates that are exactly 3 years prior to the source dates (e.g., Source `12/01/2012` -> Target `12/01/2009` is not quite right, let's look closer).
+    *   Source: `Sat 12/01/2012`
+    *   Target First Row: `04/01/2009`
+    *   Source Last Row: `Sun 07/31/2016`
+    *   Target Last Row: `11/30/2012`
+    
+    Let's check the offset more carefully.
+    Source `12/01/2012` is a Saturday.
+    Target `04/01/2009` is a Thursday.
+    
+    Let's look at the row counts. Source has 1339 rows. Target has 1340 rows.
+    The target sample starts with `04/01/2009` and ends with `11/30/2012`.
+    The source sample starts with `12/01/2012` and ends with `07/31/2016`.
+    
+    Let's look at the values.
+    Source Row 0 (`12/01/2012`): `1:00` = 0.9841
+    Target Row 0 (`04/01/2009`): `Hr 1` = 1.02
+    
+    Source Row 11 (`07/31/2016`): `1:00` = 1.305
+    Target Row 11 (`11/30/2012`): `Hr 1` = 0.9232
+    
+    There is no obvious direct value mapping between the provided source sample rows and target sample rows. The prompt states: "The evaluation source contains different rows; never copy target rows...". This implies the transformation is structural.
+    
+    Let's re-examine the date relationship.
+    Source: `12/01/2012`
+    Target: `04/01/2009`
+    
+    Is it possible the target is just the source dates shifted by -3 years?
+    `12/01/2012` - 3 years = `12/01/2009`.
+    But the target starts at `04/01/2009`.
+    
+    Let's look at the distinct counts.
+    Source `CST` has 1339 distinct values.
+    Target `Date` has 1340 distinct values.
+    
+    The target sample data provided in the JSON is likely from a *different* evaluation set or a historical baseline, but the schema transformation must be general.
+    
+    Let's look at the column names.
+    Source: `1:00`, `2:00`, ..., `24:00:00`
+    Target: `Hr 1`, `Hr 2`, ..., `Hr 24`
+    
+    This is a clear renaming operation.
+    `1:00` -> `Hr 1`
+    `2:00` -> `Hr 2`
+    ...
+    `24:00:00` -> `Hr 24`
+    
+    Now, what about the Date column?
+    Source `CST` -> Target `Date`.
+    Format change: `"Sat 12/01/2012"` -> `"12/01/2012"`?
+    Or is there a time shift?
+    
+    Let's look at the target sample dates again: `04/01/2009`, `07/31/2009`, `11/30/2009`...
+    These are quarterly end dates (April, July, November, March?).
+    April 1, July 31, November 30, March 31?
+    `04/01/2009`
+    `07/31/2009`
+    `11/30/2009`
+    `04/01/2010`
+    `07/31/2010`
+    `11/30/2010`
+    `04/01/2011`
+    `08/01/2011` (Wait, July 31 vs Aug 1? 2011 is not a leap year. July has 31 days. So July 31 is end of quarter? No, Q2 ends June 30. Q3 ends Sept 30.
+    
+    Actually, these look like specific reporting dates.
+    
+    However, the instruction says "Infer a general transformation from the source schema and target specification." and "Compute the result only from the source DataFrame."
+    
+    If the target dates are completely different from the source dates (e.g. source is 2012-2016, target is 2009-2012), and the row counts are different (1339 vs 1340), it is highly likely that the **Target Sample** provided in the prompt is **not** the result of transforming the **Source Sample** provided in the prompt. The prompt explicitly warns: "The evaluation source contains different rows".
+    
+    Therefore, I must infer the transformation logic based on the *schema* and *column names*, assuming the values in the target sample are just examples of the *format* and *structure*, not the actual output of the source sample.
+    
+    **Hypothesis 1: Simple Renaming and Formatting**
+    1.  Parse `CST` to extract the date string `MM/DD/YYYY`.
+    2.  Rename hour columns `H:MM` to `Hr H`.
+    3.  The date format in target is `MM/DD/YYYY`.
+    
+    Let's check if there's a time shift.
+    If I take `Sat 12/01/2012` and format it as `12/01/2012`, does it match the target style? Yes.
+    
+    Why are the row counts different?
+    Source: 1339 rows.
+    Target: 1340 rows.
+    
+    Maybe the source is missing a row? Or the target includes an extra row?
+    Or maybe the transformation involves expanding the data?
+    
+    Let's look at the distinct counts of the hour columns.
+    Source `1:00`: 1264 distinct.
+    Target `Hr 1`: 331 distinct.
+    
+    This suggests the values are not just copied. But the prompt says "Compute the result only from the source DataFrame". If the values change, there must be a calculation.
+    
+    However, usually in these "schema transformation" tasks, if the values in the sample don't match, it's because the samples are from different datasets. The key is the **structure**.
+    
+    Structure:
+    - Input: `CST` (str), `1:00`..`24:00:00` (float)
+    - Output: `Date` (str), `Hr 1`..`Hr 24` (float)
+    
+    Transformation steps:
+    1.  **Date Column**: Extract the date part from `CST`. The format `MM/DD/YYYY` is evident from the target sample (`04/01/2009`). The source `CST` is `Day MM/DD/YYYY`. We can split by space and take the last part, or parse and format.
+    2.  **Hour Columns**: Rename `1:00` to `Hr 1`, `2:00` to `Hr 2`, ..., `24:00:00` to `Hr 24`.
+    3.  **Values**: Keep the float values as is.
+    
+    What about the row count difference (1339 vs 1340)?
+    If the transformation is purely structural (rename/format), the row count should remain the same.
+    The fact that the target sample has 1340 rows and source has 1339 might be due to the specific evaluation data having an extra row, or the source sample provided in the prompt is truncated/representative.
+    
+    Wait, look at the target sample dates again.
+    `04/01/2009`
+    `07/31/2009`
+    `11/30/2009`
+    `04/01/2010`
+    ...
+    `11/30/2012`
+    
+    These are 12 rows in the sample.
+    Source sample has 12 rows.
+    
+    If the transformation was just "Shift date by -3 years", then:
+    Source `12/01/2012` -> `12/01/2009`.
+    Target `04/01/2009`.
+    These don't match.
+    
+    If the transformation was "Shift date by -3 years and some other logic", it's too complex.
+    
+    Let's reconsider the "Evaluation source contains different rows" note.
+    This strongly implies that the **Source Sample** and **Target Sample** in the JSON are **not** paired. They are just examples of the schema.
+    
+    Therefore, I should not try to map Source Row 0 to Target Row 0.
+    I should only map:
+    - Column `CST` -> Column `Date` (Format: `MM/DD/YYYY`)
+    - Column `1:00` -> Column `Hr 1`
+    - Column `2:00` -> Column `Hr 2`
+    - ...
+    - Column `24:00:00` -> Column `Hr 24`
+    
+    The values in the target columns `Hr 1` etc. are floats. The source values are floats. I will assume they are passed through unchanged.
+    
+    **Refining the Date Parsing:**
+    Source: `"Sat 12/01/2012"`
+    Target: `"12/01/2012"` (inferred from target sample `04/01/2009`)
+    
+    Operation:
+    1.  Split `CST` by space.
+    2.  Take the last element (the date string).
+    3.  Assign to `Date`.
+    
+    **Refining the Column Renaming:**
+    Map `1:00` -> `Hr 1`
+    Map `2:00` -> `Hr 2`
+    ...
+    Map `24:00:00` -> `Hr 24`
+    
+    Note: `24:00:00` is the only one with seconds. The others are `H:MM`.
+    The target is `Hr 24`.
+    
+    **Final Plan:**
+    1.  Create a new DataFrame.
+    2.  Extract `Date` from `CST` by splitting on space and taking the last part.
+    3.  Rename the hour columns.
+    4.  Select the columns in the order: `Date`, `Hr 1`, ..., `Hr 24`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Process the Date column
+    # Source CST format: "Day MM/DD/YYYY" (e.g., "Sat 12/01/2012")
+    # Target Date format: "MM/DD/YYYY" (e.g., "12/01/2012")
+    # We extract the date part by splitting on space and taking the last element.
+    source['Date'] = source['CST'].str.split().str[-1]
+    
+    # 2. Rename the hour columns
+    # Source columns: "1:00", "2:00", ..., "23:00", "24:00:00"
+    # Target columns: "Hr 1", "Hr 2", ..., "Hr 23", "Hr 24"
+    
+    rename_map = {}
+    for col in source.columns:
+        if col == 'CST':
+            continue
+        # Extract the hour number from the column name
+        # "1:00" -> 1
+        # "24:00:00" -> 24
+        hour_str = col.split(':')[0]
+        rename_map[col] = f'Hr {hour_str}'
+        
+    source = source.rename(columns=rename_map)
+    
+    # 3. Select and order the columns
+    # Target order: Date, Hr 1, Hr 2, ..., Hr 24
+    target_cols = ['Date'] + [f'Hr {i}' for i in range(1, 25)]
+    
+    result = source[target_cols]
+    
+    # Ensure numeric types for hour columns
+    for col in target_cols[1:]:
+        result[col] = pd.to_numeric(result[col], errors='coerce')
+        
+    return result
+```

@@ -1,0 +1,79 @@
+To transform the source DataFrame into the target DataFrame, we need to perform the following operations:
+
+1.  **Identify Aggregation Keys**: The target DataFrame has one row per unique date (`DT_STRATA`). The source DataFrame contains multiple rows per date (differentiated by `Strata_ID` and `Strata`). This implies an aggregation operation (likely `mean` or `sum`) grouped by the date. Given the column names `PCT_HOURLY...` (Percent Hourly), averaging is the most statistically sound approach for combining percentages across strata, though summing is possible if they represent disjoint parts of a whole. However, looking at the sample data, the values in the target (e.g., `0.001222...`) are similar in magnitude to the source values (e.g., `0.001...`), suggesting an average or a weighted average where weights are uniform or similar. Let's assume a simple **mean** aggregation across all strata for each date.
+
+2.  **Process the Date Column**:
+    *   Parse the `DT_STRATA` column from the source (format `M/D/YYYY`) into a datetime object.
+    *   Format this datetime into the target string format `Day DD/MM/YYYY` (e.g., `Fri 01/01/2016`). Note: The sample shows `Fri 01/01/2016` and `Sun 05/29/2016`. The day of the week is abbreviated (3 letters), followed by a space, then the date in `MM/DD/YYYY` format? Wait, let's look closer.
+        *   Target sample: `"Fri 01/01/2016"`. This is `Day MM/DD/YYYY`.
+        *   Target sample: `"Sun 05/29/2016"`. This is `Day MM/DD/YYYY`.
+        *   Target sample: `"Wed 10/26/2016"`. This is `Day MM/DD/YYYY`.
+    *   So the format string is `%a %m/%d/%Y`.
+
+3.  **Rename and Select Columns**:
+    *   Select only the `DT_STRATA` and `PCT_HOURLY_*` columns.
+    *   Group by `DT_STRATA`.
+    *   Calculate the mean of the `PCT_HOURLY_*` columns for each date.
+    *   Rename the resulting columns from `PCT_HOURLY_HH00` to `HH:00`.
+        *   `PCT_HOURLY_0100` -> `1:00`
+        *   `PCT_HOURLY_0200` -> `2:00`
+        *   ...
+        *   `PCT_HOURLY_2400` -> `24:00`
+    *   Note: The target columns are `1:00` through `24:00`. The source has `PCT_HOURLY_0100` through `PCT_HOURLY_2400` (and `2500` which is all 0.0 in the sample, likely a placeholder or error, and should be excluded as it's not in the target).
+
+4.  **Construct the Result**:
+    *   Create a new DataFrame with the formatted date string as a column named `cst`.
+    *   Append the renamed hourly percentage columns.
+    *   Reset the index.
+
+**Assumptions:**
+*   The aggregation function is `mean`.
+*   The `PCT_HOURLY_2500` column is ignored as it is not present in the target schema.
+*   The date format in the target is `%a %m/%d/%Y`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Identify hourly columns to include (exclude 2500 as it's not in target)
+    hourly_cols = [col for col in source.columns if col.startswith('PCT_HOURLY_') and col != 'PCT_HOURLY_2500']
+    
+    # Parse the date column
+    # Source format is M/D/YYYY, e.g., "7/2/2016"
+    df = source.copy()
+    df['DT_STRATA'] = pd.to_datetime(df['DT_STRATA'], format='%m/%d/%Y')
+    
+    # Group by date and calculate the mean of the hourly percentages
+    # We select only the necessary columns for aggregation to avoid issues with other string columns
+    agg_cols = hourly_cols
+    grouped = df.groupby('DT_STRATA')[agg_cols].mean()
+    
+    # Rename columns from PCT_HOURLY_HH00 to HH:00
+    new_col_names = {}
+    for col in grouped.columns:
+        # Extract the hour part, e.g., PCT_HOURLY_0100 -> 0100
+        hour_part = col.split('_')[-1]
+        # Convert to integer to remove leading zeros, then format as HH:00
+        # Note: 0100 -> 1, 1200 -> 12, 2400 -> 24
+        hour_int = int(hour_part)
+        new_col_names[col] = f"{hour_int}:00"
+        
+    grouped.rename(columns=new_col_names, inplace=True)
+    
+    # Format the date index into the target string format: "Fri 01/01/2016"
+    # Format: %a %m/%d/%Y
+    cst_strings = grouped.index.strftime('%a %m/%d/%Y')
+    
+    # Create the final DataFrame
+    result = grouped.reset_index(drop=True)
+    result.insert(0, 'cst', cst_strings)
+    
+    # Ensure column order matches target: cst, 1:00, 2:00, ..., 24:00
+    # The hourly columns should already be in order if the source was ordered, 
+    # but let's enforce it to be safe.
+    target_hour_cols = [f"{h}:00" for h in range(1, 25)]
+    result = result[['cst'] + target_hour_cols]
+    
+    return result
+```

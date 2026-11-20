@@ -1,0 +1,55 @@
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date to extract month
+    source = source.copy()
+    dt = pd.to_datetime(source['date'], format='%m/%d/%Y')
+    source['month'] = dt.month
+    
+    # Melt the dataframe
+    # Columns 'Hour 1' through 'Hour 24'
+    hour_cols = [f'Hour {h}' for h in range(1, 25)]
+    
+    # Create a mapping for hour numbers
+    hour_map = {f'Hour {h}': h for h in range(1, 25)}
+    
+    melted = source[['month'] + hour_cols].melt(id_vars=['month'], value_vars=hour_cols, var_name='hour_col', value_name='value')
+    
+    # Extract hour number
+    melted['hour'] = melted['hour_col'].map(hour_map).astype(int)
+    
+    # Group by hour and month, calculate mean
+    # Note: The target shows specific values that look like averages of the input data for that hour/month combination
+    # Since the input has 182 rows (approx 6 months of data, 2 per week?), we aggregate.
+    grouped = melted.groupby(['hour', 'month'])['value'].mean().reset_index()
+    
+    # Pivot to wide format
+    pivoted = grouped.pivot(index='hour', columns='month', values='value')
+    
+    # Rename month columns to month names
+    month_names = {
+        1: 'january', 2: 'february', 3: 'march', 4: 'april', 5: 'may', 6: 'june',
+        7: 'july', 8: 'august', 9: 'september', 10: 'october', 11: 'november', 12: 'december'
+    }
+    pivoted = pivoted.rename(columns=month_names)
+    
+    # Ensure all month columns exist (fill NaN for missing months in source)
+    for m in range(1, 13):
+        if month_names[m] not in pivoted.columns:
+            pivoted[month_names[m]] = np.nan
+            
+    # Sort by hour
+    pivoted = pivoted.sort_index()
+    
+    # Reset index to make hour a column
+    pivoted = pivoted.reset_index()
+    
+    # Rename hour column to match target
+    pivoted = pivoted.rename(columns={'hour': 'hour'})
+    
+    # Select columns in order
+    cols = ['hour'] + [month_names[m] for m in range(1, 13)]
+    result = pivoted[cols]
+    
+    return result

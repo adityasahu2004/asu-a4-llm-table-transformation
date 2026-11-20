@@ -1,0 +1,56 @@
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse date and extract components
+    # The input format is "M/D/YYYY H:MM"
+    source = source.copy()
+    source['parsed_date'] = pd.to_datetime(source['date'], format='%m/%d/%Y %H:%M', errors='coerce')
+    
+    # Handle potential parsing issues if format varies slightly, but strict format is observed
+    # Extract calendar date and hour
+    source['calendar_date'] = source['parsed_date'].dt.date
+    source['hour'] = source['parsed_date'].dt.hour
+    
+    # 2. Sort to ensure correct ordering for pivoting
+    # Primary sort: Calendar Date Descending (so most recent day is first in result if we just take unique)
+    # Secondary sort: Hour Ascending (so 0, 2, 4... comes first for each day)
+    source = source.sort_values(by=['calendar_date', 'hour'], ascending=[False, True])
+    
+    # 3. Pivot the data
+    # We want one row per calendar_date, with 24 columns for the values
+    # We assign a rank within each calendar_date group based on the sorted order
+    
+    source['rank'] = source.groupby('calendar_date').cumcount() + 1
+    
+    # Filter to only valid ranks 1-24
+    source = source[source['rank'] <= 24]
+    
+    # Pivot
+    pivot_df = source.pivot_table(
+        index='calendar_date',
+        columns='rank',
+        values='zone_016',
+        aggfunc='first' # In case of duplicates, though unique timestamp should prevent this
+    )
+    
+    # 4. Rename columns to value1, value2, ... value24
+    pivot_df.columns = [f'value{int(col)}' for col in pivot_df.columns]
+    
+    # Ensure all 24 columns exist, even if some days have less data
+    expected_cols = [f'value{i}' for i in range(1, 25)]
+    for col in expected_cols:
+        if col not in pivot_df.columns:
+            pivot_df[col] = np.nan
+            
+    # Select only the expected columns to ensure order and completeness
+    pivot_df = pivot_df[expected_cols]
+    
+    # 5. Format the index (date) and reset
+    pivot_df = pivot_df.reset_index()
+    pivot_df['date'] = pd.to_datetime(pivot_df['calendar_date']).dt.strftime('%m/%d/%Y')
+    
+    # Select final columns
+    result = pivot_df[['date'] + expected_cols]
+    
+    return result

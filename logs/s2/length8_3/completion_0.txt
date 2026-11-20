@@ -1,0 +1,125 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `date` column to datetime objects. Extract the `Hour` (0-23) and `Month` (1-12) components.
+2.  **Filter/Select**: Keep only the `Hour`, `Month`, and `zone_016_cooling_sp` columns.
+3.  **Pivot**: Reshape the data into a wide format where:
+    *   Rows are unique `Hour` values.
+    *   Columns are `Month` values (1-12).
+    *   Values are the `zone_016_cooling_sp` readings.
+    *   Since the target shows specific hours (0, 2, 4... 23) and implies a specific aggregation or selection logic, we must look closely at the target sample. The target has 24 rows, but the sample data shows only 12 rows with hours 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 23. Wait, the target schema says `distinct: 24` for `Hour` and `rows: 24`. The sample data provided in the prompt for the target only shows 12 rows, but the schema says 24 rows. Let's look at the source. The source has timestamps like "21:45", "16:15". The target `Hour` column is `int64`.
+    *   Actually, looking at the target sample data again: It lists hours 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 23. This is 12 rows. But the schema says `rows: 24` and `distinct: 24` for Hour. This is a contradiction in the provided sample vs schema description. However, usually, these problems imply a pivot. If the target has 24 rows, it likely contains all hours 0-23. The sample might just be truncated or representative. Let's assume we need to pivot on Hour and Month.
+    *   Wait, the source data has specific timestamps. The target `Hour` is an integer. The target months are named "January", "February", etc.
+    *   The values in the target for Sep, Oct, Nov are 73.0. The source has 73.0 for Nov, Dec, Jan.
+    *   Let's check the mapping. Source `11/6/2018` (Nov) -> 73.0. Target `November` column has 73.0.
+    *   Source `1/13/2019` (Jan) -> 84.0. Target `January` column is null in the sample? No, the sample shows `null` for January. Why?
+    *   Let's look at the source data again.
+        *   Nov 2018: 73.0
+        *   Dec 2018: 73.0
+        *   Jan 2019: 84.0 (one entry), 73.0 (one entry).
+    *   The target sample shows `January` as all nulls. `December` as all nulls. `September`, `October`, `November` as 73.0.
+    *   This implies a specific filtering or aggregation. Or perhaps the "distinct: 24" in the target schema refers to the *potential* hours, but the actual data might be sparse? No, `nulls: 0` for Hour.
+    *   Let's re-read the target schema carefully. `rows: 24`. `Hour` distinct: 24. This means there are 24 rows, one for each hour 0-23.
+    *   The sample data provided in the JSON for the target only has 12 rows. This is likely a truncated sample.
+    *   The values in the target columns `September`, `October`, `November` are 73.0.
+    *   The source has data for Nov, Dec, Jan.
+    *   Why are Sep and Oct 73.0 in the target if the source doesn't have Sep/Oct data?
+    *   Ah, look at the source `first_last_non_null`: "11/6/2018" to "1/18/2019". There is no Sep/Oct data in the source sample.
+    *   However, the target has 73.0 for Sep, Oct, Nov.
+    *   This suggests that the value 73.0 is a default or propagated value, OR the source data in the *evaluation* set will have more data, OR I am misinterpreting the pivot.
+    *   Let's look at the `zone_016_cooling_sp` values. They are mostly 73.0. One is 84.0.
+    *   If we pivot, we get a table of Hours x Months.
+    *   If the target has 24 rows (Hours 0-23), and 12 month columns.
+    *   The sample shows `Hour` 0, 2, 4... 23. It skips odd hours? No, 23 is odd. It skips 1, 3, 5... 21?
+    *   Actually, the sample rows are: 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 23.
+    *   This looks like every 2 hours, plus 23? Or maybe the sample is just weird.
+    *   Let's assume the standard operation: Parse date, extract Hour and Month. Pivot the data.
+    *   The column names in the target are "January", "February", etc.
+    *   The `Hour` column is integer.
+    *   The values are floats.
+    *   If there are multiple entries for the same Hour/Month, how are they aggregated? The source has distinct timestamps. It's unlikely to have exact same Hour and Month multiple times unless the data is dense. The source sample has 12 rows, all distinct dates.
+    *   If the target has 24 rows, it implies one row per hour.
+    *   If the source has data for specific hours, the pivot will have NaNs for hours with no data.
+    *   The target sample shows `null` for Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Dec. And 73.0 for Sep, Oct, Nov.
+    *   This is very strange because the source has Nov, Dec, Jan data.
+    *   Hypothesis: The target sample provided in the prompt might be from a different dataset or there's a specific logic I'm missing.
+    *   However, usually, these tasks are straightforward pivots.
+    *   Let's look at the `distinct_values` for `zone_016_cooling_sp`: 73.0, 84.0.
+    *   In the target, `September`, `October`, `November` have `distinct_values: [73.0]`.
+    *   `January` has `distinct_values: [null]`.
+    *   This implies that for the months Jan, Dec, the values are considered null or filtered out?
+    *   Or maybe the `date` parsing is different?
+    *   Let's look at the source dates again: "11/6/2018", "1/13/2019".
+    *   If I parse "1/13/2019", month is 1 (January).
+    *   If I parse "11/6/2018", month is 11 (November).
+    *   Why would November be 73.0 in the target, but January be null?
+    *   Maybe the target sample is just *wrong* or *incomplete* in the prompt description?
+    *   Or maybe the `Hour` extraction is different?
+    *   Let's assume the standard pivot:
+        1. Parse `date`.
+        2. Extract `Hour` and `Month`.
+        3. Pivot on `Hour` (index), `Month` (columns), `zone_016_cooling_sp` (values).
+        4. Rename month numbers to names.
+        5. Reset index to make `Hour` a column.
+        6. Sort by `Hour`.
+    *   This will produce a DataFrame with 24 rows (if all hours are present) or fewer. The schema says 24 rows.
+    *   If the source doesn't have data for all hours, the pivot will have NaNs.
+    *   The target schema says `nulls: 0` for `Hour`, but `nulls: 24` for `January` (meaning all 24 rows are null for January).
+    *   This matches the idea that if there's no data for a specific Hour/Month combo, it's null.
+    *   But why is November 73.0? Because there is data for November.
+    *   Why is January null? The source has January data (84.0 and 73.0).
+    *   Perhaps the 84.0 is an outlier or the 73.0 is the "normal" value?
+    *   Or maybe the sample target data is just illustrative of the *structure* and not the exact values from the source sample? The prompt says "Source row count describes a training sample only". The target sample might be from a different evaluation instance.
+    *   I will proceed with the standard pivot logic.
+
+**Steps:**
+1.  Parse `date` column to datetime.
+2.  Extract `Hour` and `Month` (1-12).
+3.  Create a pivot table: Index=`Hour`, Columns=`Month`, Values=`zone_016_cooling_sp`.
+4.  Rename month columns to full names (January, February, ...).
+5.  Reset index to bring `Hour` back as a column.
+6.  Ensure `Hour` is integer.
+7.  Sort by `Hour` to ensure 0-23 order.
+8.  Reindex columns to match the target order: `Hour`, then months Jan-Dec.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date column
+    df = source.copy()
+    df['datetime'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    
+    # Extract Hour and Month
+    df['Hour'] = df['datetime'].dt.hour
+    df['Month'] = df['datetime'].dt.month
+    
+    # Pivot the data
+    # Index: Hour, Columns: Month, Values: zone_016_cooling_sp
+    pivot_df = df.pivot_table(index='Hour', columns='Month', values='zone_016_cooling_sp', aggfunc='first')
+    
+    # Rename month columns to full names
+    month_names = {
+        1: 'January', 2: 'February', 3: 'March', 4: 'April',
+        5: 'May', 6: 'June', 7: 'July', 8: 'August',
+        9: 'September', 10: 'October', 11: 'November', 12: 'December'
+    }
+    pivot_df.rename(columns=month_names, inplace=True)
+    
+    # Reset index to make Hour a column
+    pivot_df = pivot_df.reset_index()
+    
+    # Ensure Hour is integer
+    pivot_df['Hour'] = pivot_df['Hour'].astype(int)
+    
+    # Sort by Hour to ensure 0-23 order
+    pivot_df = pivot_df.sort_values('Hour').reset_index(drop=True)
+    
+    # Define the expected column order
+    expected_cols = ['Hour', 'January', 'February', 'March', 'April', 'May', 'June', 
+                     'July', 'August', 'September', 'October', 'November', 'December']
+    
+    # Reindex to ensure all month columns are present, even if empty
+    pivot_df = pivot_df.reindex(columns=expected_cols)
+    
+    return pivot_df
+```

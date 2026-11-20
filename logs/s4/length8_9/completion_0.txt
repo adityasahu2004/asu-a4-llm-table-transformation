@@ -1,0 +1,173 @@
+**Operator Plan:**
+1.  **Filter and Prepare**: Filter the source DataFrame to include only rows where `Rate` is 'R4' (based on the distinct values in the sample and typical usage for this type of aggregation, though the prompt implies a general transformation, the target structure suggests aggregating the primary rate class. Looking at the source sample, `R4` is the first one and often the primary residential/commercial mix. However, looking at the target row count (24) and columns (months), it's a pivot/aggregate. Let's look at the data values. The target values are sums or averages. Let's assume we need to aggregate across all rates or a specific one? The source has 6 rates. The target has 12 month columns. The source has 365 dates. The target has 24 rows (hours 1-24). This implies grouping by Hour and Month.
+    *   Wait, the target has 24 rows. The source has 2190 rows.
+    *   The target columns are `hour` and months `january` through `december`.
+    *   This looks like a pivot table where we group by `Hour` (1-24) and `Month` (1-12).
+    *   Which rows to include? The sample target values are large (e.g., 721.41). The source values are small (e.g., 2.43). Summing 365 days of ~2.4 gives ~876. Summing a subset gives less.
+    *   Let's check the `Rate` column. The source has `R4`, `S1`, `S2`, `S3`, `T1`, `T2`.
+    *   Usually, in these datasets, `R4` is the primary rate. Let's assume we filter for `Rate == 'R4'`.
+    *   Actually, let's look at the distinct counts. Source `R4` has 365 days * 24 hours = 8760 rows? No, source rows = 2190. 2190 / 6 rates = 365 rows per rate. So each rate has exactly one day per year? No, 365 days in 2014. 2190 / 365 = 6. So there is exactly one row per day for each rate? No, 2190 rows total. 365 days * 6 rates = 2190. Yes.
+    *   So for `R4`, we have 365 rows (one for each day). Each row has 24 hourly columns.
+    *   The target has 24 rows. This implies we are aggregating the 365 days into monthly buckets for each hour.
+    *   So, for each Hour (1-24), we calculate the sum (or mean?) of the values for that hour across all days in each month.
+    *   Let's check the math. January 2014 has 31 days. If we sum `Hr 1` for `R4` over Jan 2014, do we get 721.41?
+    *   Average `Hr 1` for `R4` in Jan is approx 721.41 / 31 = 23.27? No, source `Hr 1` is ~2.4. 2.4 * 31 = 74.4.
+    *   Wait, the target value is 721.41. 721.41 / 31 = 23.27. This is much higher than 2.4.
+    *   Maybe it's summing ALL rates? 2.4 * 6 rates * 31 days = 446. Still not 721.
+    *   Maybe the target is `R4` + `T1` + `T2`? Or maybe I'm misinterpreting the aggregation.
+    *   Let's look at `Hr 24` for `R4` in Jan. Target `december` row? No, `hour` 24, `january` col.
+    *   Let's re-read the target sample.
+        *   Row `hour` 1, `january` 721.41.
+        *   Row `hour` 3, `january` 712.21.
+    *   Let's check the source `R4` `Hr 1` values.
+        *   `1/1/2014`: 2.43675
+        *   `7/19/2014`: 1.15144
+    *   If we sum all `R4` `Hr 1` for Jan (31 days), assuming avg ~2.4, sum ~74.
+    *   If we sum all 6 rates for `Hr 1` for Jan (31 days * 6 rates), sum ~446.
+    *   Is it possible the target is summing `R4`, `T1`, `T2`? Or maybe the values in the target are multiplied by something?
+    *   Let's look at `T2` values. `6/15/2014` `Hr 1` is 110.9. `12/31/2014` `Hr 1` is 120.6.
+    *   If we include `T2`, the sums will be much larger.
+    *   Let's try summing `R4` + `T1` + `T2`?
+    *   Or maybe just `T2`? `T2` has 31 days in Jan. Avg ~115. 115 * 31 = 3565. Too big.
+    *   Maybe the target is the sum of `R4` for the *entire year*? No, columns are months.
+    *   Let's look at the distinct values in `Rate`. `R4`, `S1`, `S2`, `S3`, `T1`, `T2`.
+    *   Maybe the transformation filters for `Rate == 'R4'` and sums? But the magnitude doesn't match.
+    *   Let's check if the target values are sums of *all* rates for that hour/month.
+    *   Jan 2014. 31 days.
+    *   `Hr 1`.
+    *   `R4` ~ 2.4. `S1` ~ 16. `S2` ~ 4.6. `S3` ~ 0.8. `T1` ~ 1.3. `T2` ~ 115.
+    *   Sum per day ~ 140.
+    *   Sum for 31 days ~ 4340.
+    *   Target is 721.
+    *   This doesn't match simple sums.
+
+    *   Alternative hypothesis: The target is not a sum. Is it a mean?
+    *   Mean of `R4` `Hr 1` in Jan: ~2.4. Target 721. No.
+    *   Mean of all rates `Hr 1` in Jan: ~23. Target 721. No.
+
+    *   Let's look at the target `hour` column. It has values 1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 24.
+    *   Wait, the sample shows rows for hours 1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 24.
+    *   The schema says `distinct`: 24 for `hour`.
+    *   The sample data only shows 12 rows.
+    *   Are the even hours missing in the sample? Or is the target only odd hours + 24?
+    *   The schema says `distinct`: 24. So all hours 1-24 are present. The sample just shows a subset.
+
+    *   Let's re-examine the magnitude.
+    *   Target `january` `hour` 1: 721.41.
+    *   Source `R4` `Hr 1` `1/1/2014`: 2.43.
+    *   Source `T2` `Hr 1` `6/15/2014`: 110.9.
+    *   Source `T2` `Hr 1` `12/31/2014`: 120.6.
+    *   Maybe the target is the sum of `R4` and `T1`?
+    *   `R4` ~ 2.4. `T1` ~ 1.3. Sum ~ 3.7. 3.7 * 31 = 114. No.
+    *   Maybe the target is the sum of `R4`, `S1`, `S2`, `S3`, `T1`, `T2`?
+    *   We estimated ~4340.
+    *   What if the target is the sum of `R4` for *all* months? No, columns are months.
+
+    *   Let's look at `S1`. `2/3/2014` `Hr 1`: 16.6. `8/21/2014` `Hr 1`: 15.3.
+    *   `S2`. `3/8/2014` `Hr 1`: 4.6. `9/23/2014` `Hr 1`: 4.8.
+    *   `S3`. `4/10/2014` `Hr 1`: 0.8. `10/26/2014` `Hr 1`: 0.86.
+    *   `T1`. `5/13/2014` `Hr 1`: 1.27. `11/28/2014` `Hr 1`: 1.27.
+    *   `R4`. `1/1/2014` `Hr 1`: 2.43. `7/19/2014` `Hr 1`: 1.15.
+    *   `T2`. `6/15/2014` `Hr 1`: 110.9. `12/31/2014` `Hr 1`: 120.6.
+
+    *   Is it possible the target is summing `R4` + `T1` + `S1` + `S2` + `S3`?
+    *   Sum per day ~ 2.4 + 1.3 + 16 + 4.6 + 0.8 = 25.1.
+    *   25.1 * 31 = 778. Close to 721.
+    *   If we exclude `T2`, the sum is ~778.
+    *   If we assume the average is slightly lower (e.g., 23.2), then 23.2 * 31 = 719. Very close to 721.
+    *   So, the transformation likely **excludes T2** (which is likely a large industrial/commercial rate) and sums the other 5 rates (`R4`, `S1`, `S2`, `S3`, `T1`).
+    *   Let's verify with `Hr 24` `January`.
+    *   Target: 732.19.
+    *   Source `Hr 24` for `1/1/2014`:
+        *   `R4`: 2.60
+        *   `S1`: 16.64
+        *   `S2`: 4.64
+        *   `S3`: 0.80
+        *   `T1`: 1.39
+        *   Sum: 26.07.
+    *   26.07 * 31 = 808. A bit high.
+    *   Let's check `7/19/2014` `Hr 24`:
+        *   `R4`: 1.41
+        *   `S1`: 15.32
+        *   `S2`: 4.85
+        *   `S3`: 0.86
+        *   `T1`: 1.28
+        *   Sum: 23.72.
+    *   Average of 26.07 and 23.72 is ~24.9. 24.9 * 31 = 771.
+    *   Target is 732.
+    *   This is reasonably close, considering we only looked at 2 days. The variation in `S1` (16.6 vs 15.3) and others might bring the average down to ~23.6. 23.6 * 31 = 731.6.
+    *   Conclusion: **Filter out `Rate == 'T2'`. Sum the remaining rates for each Hour and Month.**
+
+2.  **Steps**:
+    *   Filter source: `source[source['Rate'] != 'T2']`.
+    *   Parse `Date` to datetime.
+    *   Extract `Month` (1-12) and `Year` (not needed for grouping, but good for context).
+    *   Melt the dataframe to have columns: `Rate`, `Date`, `Hour`, `Value`.
+        *   Hours are `Hr 1` to `Hr 24`. Convert to int 1-24.
+    *   Group by `Hour` and `Month`.
+    *   Sum the `Value`.
+    *   Pivot the result so `Hour` is the index (1-24), and `Month` (1-12) becomes columns named `january`...`december`.
+    *   Sort by `Hour`.
+    *   Reset index and rename index to `hour`.
+
+3.  **Refinement**:
+    *   Month names: `january`, `february`, ..., `december`.
+    *   Hour column name: `hour`.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Filter out T2 rate
+    df = source[source['Rate'] != 'T2'].copy()
+    
+    # 2. Parse Date and extract Month
+    df['Date'] = pd.to_datetime(df['Date'], format='%m/%d/%Y')
+    df['Month'] = df['Date'].dt.month
+    
+    # 3. Melt the hourly columns
+    # Columns are 'Hr 1' to 'Hr 24'
+    hour_cols = [f'Hr {i}' for i in range(1, 25)]
+    df_melted = df.melt(
+        id_vars=['Month'], 
+        value_vars=hour_cols, 
+        var_name='Hour_Str', 
+        value_name='Value'
+    )
+    
+    # 4. Extract Hour number
+    df_melted['Hour'] = df_melted['Hour_Str'].str.extract('(\d+)').astype(int)
+    
+    # 5. Group by Hour and Month, sum the values
+    grouped = df_melted.groupby(['Hour', 'Month'])['Value'].sum().reset_index()
+    
+    # 6. Pivot to get Months as columns
+    # Map month numbers to names
+    month_names = {
+        1: 'january', 2: 'february', 3: 'march', 4: 'april', 5: 'may', 6: 'june',
+        7: 'july', 8: 'august', 9: 'september', 10: 'october', 11: 'november', 12: 'december'
+    }
+    
+    pivoted = grouped.pivot(index='Hour', columns='Month', values='Value')
+    
+    # 7. Rename columns to month names
+    pivoted = pivoted.rename(columns=month_names)
+    
+    # 8. Ensure all 12 months are present and ordered
+    expected_months = [month_names[i] for i in range(1, 13)]
+    for col in expected_months:
+        if col not in pivoted.columns:
+            pivoted[col] = 0.0
+            
+    pivoted = pivoted[expected_months]
+    
+    # 9. Reset index and rename
+    pivoted = pivoted.reset_index()
+    pivoted = pivoted.rename(columns={'Hour': 'hour'})
+    
+    # 10. Sort by hour
+    pivoted = pivoted.sort_values('hour').reset_index(drop=True)
+    
+    return pivoted
+```

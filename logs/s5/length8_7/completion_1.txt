@@ -1,0 +1,62 @@
+**Operator Plan:**
+1.  **Parse Dates**: Convert the `Date` column to datetime objects to extract the month.
+2.  **Melt/Unpivot**: Transform the wide table (columns 1-24) into a long format with columns `Date`, `hour` (integer 1-24), and `value`.
+3.  **Group and Aggregate**: Group by `hour` and `month` (numeric 1-12). Calculate the mean of `value` for each group. This handles the reduction from daily data to monthly averages per hour.
+4.  **Pivot**: Pivot the aggregated data so that `hour` becomes the index, months become columns, and the values are the calculated means.
+5.  **Format Output**:
+    *   Rename month columns to lowercase full month names (e.g., 1 -> 'january').
+    *   Reset the index to make `hour` a column.
+    *   Sort by `hour` to ensure deterministic row order (though the target sample shows a specific order, standard numeric sort is the most robust general transformation unless specific reordering is implied; however, looking at the target sample, it is *not* sorted numerically 1-24, but rather seemingly random or specific. Wait, the target sample rows are: 1, 11, 13, 15, 17, 19, 20, 22, 24, 4, 6, 9. This is not sorted. However, the prompt says "Source row count describes a training sample only". The target schema has `distinct: 24` for hour. The target sample is just a sample. I should output all 24 hours. The order in the final dataframe usually doesn't matter for equality checks unless specified, but standard practice is to sort by the primary key `hour`. I will sort by `hour` ascending).
+    *   Ensure `hour` is integer type.
+
+**Assumptions:**
+*   The aggregation function for combining daily values into monthly values is the arithmetic mean (`mean`), as is standard for "load profiles" or "average hourly demand" unless specified otherwise. The distinct counts in the target (e.g., `january` has 18 distinct values) vs source (hour 1 has 45 distinct values across all months) supports aggregation.
+*   Months not present in the source data (Aug-Dec in this specific sample range) will result in NaNs, which matches the target schema.
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse dates to extract month
+    source = source.copy()
+    source['dt'] = pd.to_datetime(source['Date'])
+    source['month'] = source['dt'].dt.month
+    
+    # 2. Melt the hourly columns
+    # Columns are named "1" through "24"
+    hour_cols = [str(h) for h in range(1, 25)]
+    melted = source.melt(
+        id_vars=['dt', 'month'], 
+        value_vars=hour_cols, 
+        var_name='hour_str', 
+        value_name='value'
+    )
+    
+    # 3. Convert hour string to integer
+    melted['hour'] = melted['hour_str'].astype(int)
+    
+    # 4. Group by hour and month, calculate mean
+    aggregated = melted.groupby(['hour', 'month'])['value'].mean().reset_index()
+    
+    # 5. Pivot to wide format: index=hour, columns=month, values=value
+    pivoted = aggregated.pivot(index='hour', columns='month', values='value')
+    
+    # 6. Rename month columns to lowercase full names
+    month_names = {
+        1: 'january', 2: 'february', 3: 'march', 4: 'april', 5: 'may', 6: 'june',
+        7: 'july', 8: 'august', 9: 'september', 10: 'october', 11: 'november', 12: 'december'
+    }
+    pivoted.rename(columns=month_names, inplace=True)
+    
+    # 7. Reset index to make hour a column
+    result = pivoted.reset_index()
+    
+    # 8. Ensure hour is int64
+    result['hour'] = result['hour'].astype('int64')
+    
+    # 9. Sort by hour to ensure deterministic order
+    result = result.sort_values('hour').reset_index(drop=True)
+    
+    return result
+```

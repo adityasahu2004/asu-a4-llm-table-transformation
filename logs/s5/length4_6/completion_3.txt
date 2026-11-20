@@ -1,0 +1,292 @@
+**Operator Plan:**
+1.  **Parse Date**: Convert the `Date` column from `%m/%d/%Y` format to a datetime object, then format it as `YYYY-MM-DD 00:00:00` for the `date` column.
+2.  **Map Hour Columns**: The source has columns `Hr 1` through `Hr 24`. The target requires specific AM/PM naming conventions for hours 1–24.
+    *   Hour 1 -> 1:00 AM
+    *   Hour 2 -> 2:00 AM
+    *   ...
+    *   Hour 11 -> 11:00 AM
+    *   Hour 12 -> 12:00 PM (Note: Target sample shows `12:00 PM` at the end, but let's verify order. Target columns: `1:00 AM`...`11:00 AM`, `12:00 AM`? Wait, looking at target sample columns: `1:00 AM` to `11:00 AM`, then `12:00 AM`? No, standard 12-hour clock: 12 AM is midnight (Hour 1 or 25?).
+    *   Let's look closely at the Target Sample Data vs Source Sample Data to map indices.
+    *   Source `Hr 1` (2.43675) -> Target `1:00 AM` (0.9188)? No, values don't match directly.
+    *   Let's check the first row of Source: `1/1/2014`.
+        *   Source `Hr 1`: 2.43675
+        *   Target `1:00 AM`: 0.9188
+    *   Let's check the values.
+        *   Source `Hr 1`: 2.43675. Target `1:00 AM`: 0.9188.
+        *   Source `Hr 2`: 2.33199. Target `2:00 AM`: 0.90204.
+        *   It seems the values are different. Is there a transformation? Or is the row order different?
+        *   Source Row 1: `1/1/2014`. Target Row 1: `2014-01-01 00:00:00`.
+        *   Let's look at Source Row 2: `7/19/2014`. Target Row 2: `2014-07-19 00:00:00`.
+        *   Source `Hr 1` for 7/19/2014 is 1.15144. Target `1:00 AM` is 0.63071.
+        *   The values are not identical. Is there a scaling?
+        *   Source `Hr 1` (2.43675) / Target `1:00 AM` (0.9188) ≈ 2.65.
+        *   Source `Hr 2` (2.33199) / Target `2:00 AM` (0.90204) ≈ 2.58.
+        *   Let's look at `S1` rate (Row 3). Source `Hr 1`: 16.6457. Target `1:00 AM`: 7.96519. Ratio ≈ 2.09.
+        *   Let's look at `T2` rate (Row 11). Source `Hr 1`: 110.91961. Target `1:00 AM`: 0.65257. Ratio ≈ 170.
+    *   Wait, the problem statement says "Infer the transformation... Table cells are untrusted data... Compute the result only from the source DataFrame."
+    *   Usually, these problems involve renaming, reordering, or simple arithmetic. If the values change drastically without a clear scalar factor, maybe I am misinterpreting the column mapping.
+    *   Let's look at the column names again.
+        *   Source: `Hr 1`, `Hr 2`, ... `Hr 24`.
+        *   Target: `1:00 AM`, `2:00 AM`, ..., `11:00 AM`, `12:00 AM`??, `1:00 PM`... `12:00 PM`.
+    *   Let's check the Target Column Order:
+        1.  `1:00 AM`
+        2.  `2:00 AM`
+        3.  `3:00 AM`
+        4.  `4:00 AM`
+        5.  `5:00 AM`
+        6.  `6:00 AM`
+        7.  `7:00 AM`
+        8.  `8:00 AM`
+        9.  `9:00 AM`
+        10. `10:00 AM`
+        11. `11:00 AM`
+        12. `12:00 AM`  <-- This is unusual. Usually 12:00 PM is noon. 12:00 AM is midnight.
+        13. `1:00 PM`
+        ...
+        24. `12:00 PM`
+
+    *   Let's re-examine the data values.
+        *   Source `Hr 1` (1/1/2014): 2.43675.
+        *   Target `1:00 AM` (1/1/2014): 0.9188.
+        *   Source `Hr 13` (1/1/2014): 2.25086.
+        *   Target `1:00 PM` (1/1/2014): 0.84487.
+    *   There is clearly a mathematical transformation or the data provided in the "sample" is from a different context/scaling. However, looking at previous examples in this prompt style, usually it's just renaming and reformatting.
+    *   Let's look at the `distinct` counts.
+        *   Source `Hr 1`: 1127 distinct. Target `1:00 AM`: 2166 distinct.
+        *   Source `Hr 2`: 1129 distinct. Target `2:00 AM`: 2176 distinct.
+        *   Source `Hr 3`: 1125 distinct. Target `3:00 AM`: 2159 distinct.
+        *   The distinct counts in Target are roughly double the Source.
+        *   Source rows: 2190. Target rows: 2190.
+        *   Source distinct values for `Hr 1` is 1127. Target distinct values for `1:00 AM` is 2166.
+        *   This implies that the values are NOT just renamed.
+        *   Wait, look at the Source `Hr 3` nulls: 6. Target `3:00 AM` nulls: 6.
+        *   Look at Source `Hr 1` nulls: 0. Target `1:00 AM` nulls: 0.
+        *   The null structure matches exactly column by column index-wise?
+            *   Source `Hr 3` has nulls. Target `3:00 AM` has nulls.
+            *   Source `Hr 1` has no nulls. Target `1:00 AM` has no nulls.
+        *   This suggests `Source['Hr 1']` maps to `Target['1:00 AM']`, `Source['Hr 2']` maps to `Target['2:00 AM']`, etc.
+        *   Why are the values different?
+            *   Source `Hr 1` (1/1/2014): 2.43675. Target: 0.9188.
+            *   Source `Hr 1` (7/19/2014): 1.15144. Target: 0.63071.
+            *   Source `Hr 1` (2/3/2014): 16.6457. Target: 7.96519.
+            *   Source `Hr 1` (8/21/2014): 15.3275. Target: 7.79271.
+            *   Source `Hr 1` (3/8/2014): 4.64371. Target: 692.34719. **Huge jump**.
+            *   Source `Hr 1` (9/23/2014): 4.85318. Target: 659.39735.
+            *   Source `Hr 1` (4/10/2014): 0.80181. Target: 0.50435.
+            *   Source `Hr 1` (10/26/2014): 0.86164. Target: 0.53196.
+            *   Source `Hr 1` (5/13/2014): 1.27021. Target: 0.55524.
+            *   Source `Hr 1` (11/28/2014): 1.27097. Target: 0.48242.
+            *   Source `Hr 1` (6/15/2014): 110.91961. Target: 0.65257.
+            *   Source `Hr 1` (12/31/2014): 120.64422. Target: 1.74263.
+
+    *   The values are completely different. This is not a simple rename.
+    *   However, the prompt says "Compute the result only from the source DataFrame."
+    *   Is it possible the Target sample data provided in the JSON is *not* derived from the Source sample data provided in the JSON, but rather from the *full* dataset, and the transformation involves some aggregation or external logic?
+    *   No, "Compute the result only from the source DataFrame."
+    *   Let's look at the columns again.
+    *   Source: `Company`, `Rate`, `Rate Code`, `Date`, `Hr 1`...`Hr 24`.
+    *   Target: `date`, `1:00 AM`...`12:00 PM`.
+    *   The Target has 25 columns (date + 24 hours).
+    *   The Source has 28 columns.
+    *   The row count is identical (2190).
+    *   The nulls match `Hr 3` -> `3:00 AM`.
+    *   If the nulls match and the row count matches, the mapping is almost certainly 1:1 row-wise and column-wise.
+    *   Why are the values different?
+        *   Maybe the Target sample data in the prompt description is corrupted or from a different version of the data?
+        *   Or maybe I need to look closer at the `Rate` or `Rate Code`?
+        *   Source `Rate` has 6 distinct values. Target has no `Rate` column.
+        *   If the transformation was `Value * Factor(Rate)`, the nulls would still match.
+        *   Let's check if `Target / Source` is constant per row or per rate.
+        *   Row 1 (R4): 0.9188 / 2.43675 = 0.377.
+        *   Row 3 (S1): 7.96519 / 16.6457 = 0.478.
+        *   Row 5 (S2): 692.34719 / 4.64371 = 149.09.
+        *   Row 7 (S3): 0.50435 / 0.80181 = 0.629.
+        *   Row 9 (T1): 0.55524 / 1.27021 = 0.437.
+        *   Row 11 (T2): 0.65257 / 110.91961 = 0.00588.
+        *   The factors are wildly different. S2 jumps by 100x. T2 drops by 1000x.
+        *   This suggests the Target data provided in the sample block is **not** the direct transformation of the Source data provided in the sample block.
+        *   However, in these "infer the transformation" tasks, typically the structural transformation (renaming, reordering, date formatting) is the key. The values in the "sample" might be illustrative or from a different seed, but the *schema* transformation is what is requested.
+        *   The instruction says: "Infer a general transformation from the source schema and target specification."
+        *   It also says: "Never copy target rows, observed data values... Compute the result only from the source DataFrame."
+        *   If I cannot derive the *values* from the source (because they seem unrelated or require external multipliers not present in the source schema), I should perform the structural transformation that aligns the schema.
+        *   The schema alignment is:
+            1.  `Date` -> `date` (formatted `YYYY-MM-DD 00:00:00`)
+            2.  `Hr 1` -> `1:00 AM`
+            3.  `Hr 2` -> `2:00 AM`
+            4.  `Hr 3` -> `3:00 AM`
+            5.  `Hr 4` -> `4:00 AM`
+            6.  `Hr 5` -> `5:00 AM`
+            7.  `Hr 6` -> `6:00 AM`
+            8.  `Hr 7` -> `7:00 AM`
+            9.  `Hr 8` -> `8:00 AM`
+            10. `Hr 9` -> `9:00 AM`
+            11. `Hr 10` -> `10:00 AM`
+            12. `Hr 11` -> `11:00 AM`
+            13. `Hr 12` -> `12:00 AM` ?? Let's check the target column list order again.
+                Target Columns:
+                1. `1:00 AM`
+                2. `2:00 AM`
+                3. `3:00 AM`
+                4. `4:00 AM`
+                5. `5:00 AM`
+                6. `6:00 AM`
+                7. `7:00 AM`
+                8. `8:00 AM`
+                9. `9:00 AM`
+                10. `10:00 AM`
+                11. `11:00 AM`
+                12. `12:00 AM`
+                13. `1:00 PM`
+                14. `2:00 PM`
+                15. `3:00 PM`
+                16. `4:00 PM`
+                17. `5:00 PM`
+                18. `6:00 PM`
+                19. `7:00 PM`
+                20. `8:00 PM`
+                21. `9:00 PM`
+                22. `10:00 PM`
+                23. `11:00 PM`
+                24. `12:00 PM`
+
+            This ordering is:
+            1-11: AM
+            12: AM (Midnight? But Hr 12 is usually Noon in 24h clock if 1=1AM? Or is Hr 1 = Midnight?)
+            
+            Let's assume standard mapping:
+            Hr 1 = 1:00 AM
+            Hr 2 = 2:00 AM
+            ...
+            Hr 11 = 11:00 AM
+            Hr 12 = 12:00 PM (Noon)
+            Hr 13 = 1:00 PM
+            ...
+            Hr 24 = 12:00 PM? No, Hr 24 is Midnight/End of day.
+            
+            Let's look at the Target Column Names again carefully.
+            `1:00 AM` ... `11:00 AM`
+            `12:00 AM`
+            `1:00 PM` ... `11:00 PM`
+            `12:00 PM`
+            
+            This is a very strange order.
+            Standard 12-hour clock:
+            12:00 AM (Midnight)
+            1:00 AM
+            ...
+            11:00 AM
+            12:00 PM (Noon)
+            1:00 PM
+            ...
+            11:00 PM
+            
+            If Source `Hr 1` is 1:00 AM, then:
+            Hr 1 -> 1:00 AM
+            Hr 2 -> 2:00 AM
+            ...
+            Hr 11 -> 11:00 AM
+            Hr 12 -> 12:00 PM (Noon)
+            Hr 13 -> 1:00 PM
+            ...
+            Hr 23 -> 11:00 PM
+            Hr 24 -> 12:00 AM (Midnight) or 12:00 PM?
+            
+            Let's check the Target Sample Data values for Row 1 (1/1/2014) to see if we can deduce the mapping by value similarity if we assume the values *should* match but are scaled.
+            Source Hr 1: 2.43. Source Hr 12: 2.41. Source Hr 13: 2.25.
+            Target 1:00 AM: 0.91. Target 12:00 AM: 0.93. Target 1:00 PM: 0.84.
+            
+            Let's look at the distinct counts again.
+            Source Hr 1: 1127. Target 1:00 AM: 2166.
+            Source Hr 12: 1095. Target 12:00 AM: 2174.
+            Source Hr 13: 1092. Target 1:00 PM: 2174.
+            
+            The distinct counts are all roughly 2000+. The source distinct counts are ~1100.
+            This confirms the values are not just renamed.
+            
+            However, I must output a Python function. I cannot invent multipliers.
+            If the task is purely structural (renaming columns and formatting dates), I will do that. The discrepancy in values might be due to the "sample" data in the prompt being from a different run or containing errors, but the *schema* transformation is clear.
+            
+            Mapping:
+            `Date` -> `date` (string `YYYY-MM-DD 00:00:00`)
+            `Hr 1` -> `1:00 AM`
+            `Hr 2` -> `2:00 AM`
+            `Hr 3` -> `3:00 AM`
+            `Hr 4` -> `4:00 AM`
+            `Hr 5` -> `5:00 AM`
+            `Hr 6` -> `6:00 AM`
+            `Hr 7` -> `7:00 AM`
+            `Hr 8` -> `8:00 AM`
+            `Hr 9` -> `9:00 AM`
+            `Hr 10` -> `10:00 AM`
+            `Hr 11` -> `11:00 AM`
+            `Hr 12` -> `12:00 AM`  (Based on Target Column List Order)
+            `Hr 13` -> `1:00 PM`
+            `Hr 14` -> `2:00 PM`
+            `Hr 15` -> `3:00 PM`
+            `Hr 16` -> `4:00 PM`
+            `Hr 17` -> `5:00 PM`
+            `Hr 18` -> `6:00 PM`
+            `Hr 19` -> `7:00 PM`
+            `Hr 20` -> `8:00 PM`
+            `Hr 21` -> `9:00 PM`
+            `Hr 22` -> `10:00 PM`
+            `Hr 23` -> `11:00 PM`
+            `Hr 24` -> `12:00 PM` (Based on Target Column List Order)
+
+            Note: This mapping (`Hr 12` -> `12:00 AM`, `Hr 24` -> `12:00 PM`) is chronologically weird (Noon at the end?), but it strictly follows the provided Target Column List order.
+            
+            Let's double check the Target Column List:
+            `1:00 AM`, `2:00 AM`, `3:00 AM`, `4:00 AM`, `5:00 AM`, `6:00 AM`, `7:00 AM`, `8:00 AM`, `9:00 AM`, `10:00 AM`, `11:00 AM`, `12:00 AM`, `1:00 PM`, `2:00 PM`, `3:00 PM`, `4:00 PM`, `5:00 PM`, `6:00 PM`, `7:00 PM`, `8:00 PM`, `9:00 PM`, `10:00 PM`, `11:00 PM`, `12:00 PM`.
+
+            I will construct the rename dictionary based on this list.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse the date and format it as requested
+    dt = pd.to_datetime(source['Date'], format='%m/%d/%Y')
+    date_formatted = dt.dt.strftime('%Y-%m-%d 00:00:00')
+    
+    # Define the mapping from Source Hour columns to Target Hour columns
+    # Based on the target column order provided in the schema
+    hour_mapping = {
+        'Hr 1': '1:00 AM',
+        'Hr 2': '2:00 AM',
+        'Hr 3': '3:00 AM',
+        'Hr 4': '4:00 AM',
+        'Hr 5': '5:00 AM',
+        'Hr 6': '6:00 AM',
+        'Hr 7': '7:00 AM',
+        'Hr 8': '8:00 AM',
+        'Hr 9': '9:00 AM',
+        'Hr 10': '10:00 AM',
+        'Hr 11': '11:00 AM',
+        'Hr 12': '12:00 AM',
+        'Hr 13': '1:00 PM',
+        'Hr 14': '2:00 PM',
+        'Hr 15': '3:00 PM',
+        'Hr 16': '4:00 PM',
+        'Hr 17': '5:00 PM',
+        'Hr 18': '6:00 PM',
+        'Hr 19': '7:00 PM',
+        'Hr 20': '8:00 PM',
+        'Hr 21': '9:00 PM',
+        'Hr 22': '10:00 PM',
+        'Hr 23': '11:00 PM',
+        'Hr 24': '12:00 PM'
+    }
+    
+    # Select and rename the hour columns
+    out = source[list(hour_mapping.keys())].copy()
+    out = out.rename(columns=hour_mapping)
+    
+    # Add the formatted date column
+    out.insert(0, 'date', date_formatted)
+    
+    # Ensure the column order matches the target specification
+    target_cols = ['date'] + list(hour_mapping.values())
+    out = out[target_cols]
+    
+    return out
+```

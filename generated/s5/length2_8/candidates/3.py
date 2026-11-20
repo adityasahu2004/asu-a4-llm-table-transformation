@@ -1,0 +1,38 @@
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    df = source.copy()
+    df['datetime'] = pd.to_datetime(df['date'], format='%m/%d/%Y %H:%M')
+    df['date_only'] = df['datetime'].dt.date
+    df['hour'] = df['datetime'].dt.hour
+    # Map hour 0 to 24 for the 24-hour cycle 1..24
+    df['hour_label'] = df['hour'].replace(0, 24)
+    
+    # Group by date and hour_label, take mean (or sum if only one obs, but mean is safer for aggregation)
+    # Since the target seems to be daily profiles, we aggregate per day per hour.
+    # If multiple readings exist in an hour, we average them. If none, we get NaN which we'll fill with 0.
+    agg = df.groupby(['date_only', 'hour_label'])['cerc_logger_1'].mean().reset_index()
+    
+    # Pivot to get hours as columns
+    pivot = agg.pivot_table(index='date_only', columns='hour_label', values='cerc_logger_1', fill_value=0.0)
+    
+    # Ensure all 24 hours are present
+    for h in range(1, 25):
+        if h not in pivot.columns:
+            pivot[h] = 0.0
+            
+    # Sort by date
+    pivot = pivot.sort_index()
+    
+    # Construct the output dataframe
+    out = pd.DataFrame(index=pivot.index)
+    out['dt_strata'] = out.index.strftime('%m/%d/%y')
+    out['dow'] = out.index.dayofweek + 1  # Monday=1, Sunday=7
+    
+    for h in range(1, 25):
+        out[f'pct_hourly_{h:02d}00'] = pivot[h].values
+        
+    out['pct_hourly_2500'] = 0
+    
+    return out.reset_index(drop=True)

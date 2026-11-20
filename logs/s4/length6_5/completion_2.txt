@@ -1,0 +1,33 @@
+**Operator Plan:**
+1.  **Select Columns**: Extract the `Date` column and the 24 hourly numeric columns (named "1" through "24"). Discard the `Class` column.
+2.  **Rename Columns**:
+    *   Keep `Date` as is.
+    *   Rename the hourly columns from their integer string names ("1", "2", ...) to "Hr 1", "Hr 2", ..., "Hr 24".
+3.  **Construct DataFrame**: Create the resulting DataFrame with the specified column order.
+4.  **Reset Index**: Ensure the output has a clean integer index.
+
+*Note: The target row count (183) differs from the source sample (182), and the date ranges differ, implying the evaluation data contains additional rows not shown in the sample. The transformation logic is applied row-wise, so it generalizes to any number of rows. The `Date` format in the target matches the source (`M/D/YYYY` or `MM/DD/YYYY`), so no date parsing/reformatting is required.*
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Identify the hourly columns from the source.
+    # Source columns are "1" through "24".
+    hour_cols = [str(i) for i in range(1, 25)]
+    
+    # Create a mapping for renaming hourly columns to "Hr X"
+    rename_map = {str(i): f"Hr {i}" for i in range(1, 25)}
+    
+    # Select the Date column and the hourly columns
+    result = source[["Date"] + hour_cols].copy()
+    
+    # Rename the hourly columns
+    result = result.rename(columns=rename_map)
+    
+    # Reset index to ensure a clean 0-based integer index
+    result = result.reset_index(drop=True)
+    
+    return result
+```

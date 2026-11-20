@@ -1,0 +1,104 @@
+{
+  "case": "length15_1",
+  "length": 15,
+  "strategy": "s1",
+  "model": "qwen36-27b",
+  "is_demo": false,
+  "parameters": {
+    "output": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment",
+    "model": "qwen36-27b",
+    "base_url": "https://openai.rc.asu.edu/v1",
+    "max_tokens": 6000,
+    "reasoning_effort": "none",
+    "k": 5,
+    "sample_rows": 12,
+    "timeout": 120,
+    "api_timeout": 3600,
+    "replay_only": true,
+    "strategy": "s1",
+    "python": "3.14.4 (main, Apr  7 2026, 13:13:20) [Clang 21.0.0 (clang-2100.0.123.102)]",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "pandas": "3.1.1",
+    "held_out": [
+      "length1_1",
+      "length1_2",
+      "length1_3",
+      "length2_1",
+      "length3_1"
+    ],
+    "benchmark": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split"
+  },
+  "prompt_path": "logs/s1/length15_1/prompt.json",
+  "completion_path": "logs/s1/length15_1/response.json",
+  "execution": {
+    "status": "ok",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": "/Users/adityaprakashsahu/Downloads/smartbuilding-pipelines-v2-split/assignment/worker.py:16: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.\n  source = pd.read_csv('source.csv', float_precision='round_trip')\n",
+    "seconds": 0.9806292909997865,
+    "shape": [
+      72,
+      8
+    ],
+    "fingerprint": "a3f39744a2e195b25458bc5da4f5875079b690b56dbbdf6c7e6d5d019293eb4b"
+  },
+  "autopipeline": {
+    "accuracy": 0.0,
+    "is_correct": false,
+    "similarities": {},
+    "info": []
+  },
+  "hard_match": {
+    "accuracy": 0.5833333333333334,
+    "is_correct": false,
+    "similarities": [
+      0.6666666666666666,
+      1.0,
+      0.0,
+      1.0,
+      0.0,
+      1.0,
+      0.0,
+      1.0
+    ],
+    "info": [
+      "hour",
+      "domestic_water_heating",
+      "lighting",
+      "total"
+    ]
+  },
+  "hard_match_provenance": "course-provided hard_match.py and utils.py",
+  "exact_schema": true,
+  "generation": {
+    "request_hash": "a49a4f13a0ef5b8fe4990f17d407501cf3846cfceb524b1f3175f50f86ed11e8",
+    "usage": {
+      "completion_tokens": 5846,
+      "prompt_tokens": 11740,
+      "total_tokens": 17586,
+      "completion_tokens_details": null,
+      "prompt_tokens_details": {
+        "audio_tokens": null,
+        "cache_write_tokens": null,
+        "cached_tokens": 8960,
+        "image_tokens": null,
+        "text_tokens": null,
+        "created_cache_tokens": 2688,
+        "multimodal_tokens": null
+      },
+      "co2_g": 1.11856,
+      "energy_wh": 3.319168
+    },
+    "latency_seconds": 125.52302249999775,
+    "api_attempts": 2,
+    "cached": true,
+    "candidate_count": 1,
+    "api_timeout_seconds": 3600,
+    "reasoning_effort_header": "none",
+    "selected_index": 0,
+    "clusters": {}
+  },
+  "wall_seconds": 290.1258075420046,
+  "replay_wall_seconds": 1.0228971670003375,
+  "transport_recovery_seconds": 163.36955487500381
+}

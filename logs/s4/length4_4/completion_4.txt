@@ -1,0 +1,52 @@
+Operator plan:
+1. Parse the `Date` column into datetime objects to allow formatting.
+2. Create the `date` column by formatting the parsed dates as `MM/DD/YYYY`.
+3. Map the source integer hour columns (`1` through `24`) to the target column names (`1:00 AM` through `12:00 PM` etc.) using the specific 12-hour clock naming convention observed in the target schema.
+   - Source `1` -> `1:00 AM`
+   - Source `2` -> `2:00 AM`
+   - ...
+   - Source `11` -> `11:00 AM`
+   - Source `12` -> `12:00 AM` (Noon)
+   - Source `13` -> `1:00 PM`
+   - ...
+   - Source `23` -> `11:00 PM`
+   - Source `24` -> `12:00 PM` (Midnight)
+4. Construct the output DataFrame with the new columns in the specified order.
+5. Reset the index to ensure a clean 0-based integer index.
+
+```python
+import pandas as pd
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse dates
+    dt = pd.to_datetime(source['Date'], format='%m/%d/%Y')
+    
+    # Format date column
+    out = pd.DataFrame(index=source.index)
+    out['date'] = dt.dt.strftime('%m/%d/%Y')
+    
+    # Define mapping from source hour (int) to target column name
+    # Source 1-11 -> 1 AM - 11 AM
+    # Source 12 -> 12 AM (Noon)
+    # Source 13-23 -> 1 PM - 11 PM
+    # Source 24 -> 12 PM (Midnight)
+    
+    for h in range(1, 12):
+        out[f'{h}:00 AM'] = source[str(h)]
+        
+    out['12:00 AM'] = source['12']
+    
+    for h in range(13, 24):
+        pm_h = h - 12
+        out[f'{pm_h}:00 PM'] = source[str(h)]
+        
+    out['12:00 PM'] = source['24']
+    
+    # Select columns in the exact order specified by target schema
+    cols = ['date']
+    cols += [f'{h}:00 AM' for h in range(1, 12)]
+    cols.append('12:00 AM')
+    cols += [f'{h}:00 PM' for h in range(1, 12)]
+    cols.append('12:00 PM')
+    
+    return out[cols].reset_index(drop=True)
+```

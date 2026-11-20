@@ -1,0 +1,310 @@
+### Operator Plan
+
+1.  **Filter Data**:
+    *   The target schema implies a specific aggregation of energy end-uses. We need to identify which source rows contribute to which target columns.
+    *   Target columns: `hvac`, `domestic_water_heating`, `major_appliances`, `lighting`, `miscellaneous_plug_loads`.
+    *   Source `End Use Category` and `End Use` need to be mapped to these target categories.
+    *   Looking at the source distinct values for `End Use Category`: "Kitchen", "Laundry", "Miscellaneous", "Lighting", "Remaining Load".
+    *   Looking at the target sample, `lighting` is always 0 and `total` is always 0. This suggests that either these categories are excluded from the sum or the aggregation logic results in 0 (unlikely for lighting given source data). However, `hvac`, `domestic_water_heating`, `major_appliances`, and `miscellaneous_plug_loads` have non-zero values.
+    *   Let's infer the mapping based on standard energy end-use categories:
+        *   `hvac`: Likely "Remaining Load" (often contains HVAC in some datasets) or specific HVAC end uses. Wait, "Remaining Load" is a category. Let's look at `End Use`. The source doesn't list distinct `End Use` values fully, but we see "Freezer", "Clothes Dryer", "Clothes Washer", "Primary TV", "Primary Desktop", "Misc Metered", "Pool Pump", "Lighting", "Remaining Load".
+        *   Standard mapping:
+            *   `major_appliances`: Kitchen (Freezer, etc.), Laundry (Washer, Dryer).
+            *   `miscellaneous_plug_loads`: Miscellaneous (TV, Computer, Pool Pump, Misc Metered).
+            *   `lighting`: Lighting.
+            *   `hvac`: "Remaining Load" is often the residual, but in many disaggregation datasets, "Remaining Load" *is* the HVAC + other unmeasured loads. However, there is no explicit "HVAC" category in the source `End Use Category`. Let's look at the target `hvac` values. They are large.
+            *   `domestic_water_heating`: This is tricky. There is no explicit "Water Heating" category in the source `End Use Category` list provided in the schema summary. However, "Remaining Load" might contain it, or it might be part of "Kitchen" or "Laundry"? No, usually separate.
+            *   Let's re-read the source `End Use` distinct count: 15. The categories are 5.
+            *   Let's look at the target `season` column. It has 4 distinct values: Fall, Spring, Summer, Winter, plus nulls. The source has `Time Period` (Months) and `Day Type`.
+            *   The target has 120 rows. 120 = 5 seasons (including null?) * 24 hours? Or 4 seasons * 24 hours + 24 nulls?
+            *   Target `season` distinct values: Fall, Spring, Summer, Winter, null.
+            *   Target `hour` distinct values: 24.
+            *   Total rows 120. If we have 4 seasons * 24 hours = 96 rows. Plus 24 rows with null season? That equals 120.
+            *   How do we get "null" season? The source `Time Period` has 14 distinct values (Months).
+            *   Standard Season mapping:
+                *   Winter: Dec, Jan, Feb
+                *   Spring: Mar, Apr, May
+                *   Summer: Jun, Jul, Aug
+                *   Fall: Sep, Oct, Nov
+            *   What about the nulls? The source `Time Period` has 14 distinct values. The months are 12. What are the other 2? Or maybe "All" is a time period? No, `Day Type` has "All". `Time Period` sample shows "March", "December".
+            *   Wait, the target has `null` for season. This likely corresponds to a specific `Time Period` or `Day Type` that doesn't map to a season, or perhaps the aggregation is done differently.
+            *   Let's look at the target sample again.
+                *   Rows with "Fall", "Spring", "Summer", "Winter".
+                *   Rows with `null` season.
+            *   Hypothesis: The `Time Period` column in the source might contain values that don't map to seasons, or the aggregation groups by `Hour Ending` and `Season`.
+            *   Let's look at the source `Time Period` distinct count: 14. Months are 12. What are the other 2? Maybe "Annual" or "All"? If `Time Period` is "All", it might map to null season? Or maybe `Day Type` "All" maps to null season?
+            *   Let's check the target row count logic again. 120 rows.
+            *   If we group by `Season` and `Hour`, we expect 4 * 24 = 96 rows.
+            *   The remaining 24 rows have `null` season. This suggests there is a 5th group in the source that maps to `null` season.
+            *   Source `Time Period` has 14 distinct values. Source `Day Type` has 3.
+            *   Maybe the `Time Period` includes "All"? If `Time Period` == "All", season is null?
+            *   Or maybe `Day Type` == "All" results in null season?
+            *   Let's look at the source sample: `Time Period` values are months. `Day Type` values are "Weekend", "Weekday", "All".
+            *   If we aggregate by `Time Period` (mapped to Season) and `Hour Ending`, we get 4 seasons * 24 hours = 96 rows.
+            *   Where do the other 24 rows come from?
+            *   Perhaps the source contains a `Time Period` value that is not a month? The distinct count is 14. 12 months + 2 others?
+            *   Or perhaps the aggregation is by `Day Type`? No, target has `season`.
+            *   Let's assume the 14 distinct `Time Period` values are: 12 Months + "All" + "Annual"? Or just "All" and something else?
+            *   If `Time Period` is "All", it might be mapped to `null` season.
+            *   Let's assume the mapping:
+                *   Months -> Seasons.
+                *   Non-month `Time Period` (e.g., "All") -> `null` Season.
+            *   This would give us 4 seasons + 1 "null" season group.
+            *   5 groups * 24 hours = 120 rows. This matches the target row count exactly.
+
+2.  **Map End Uses to Target Columns**:
+    *   We need to sum `Average Demand Per Home With This End Use [kW]` for specific end uses.
+    *   We need to determine the mapping from `End Use Category` / `End Use` to `hvac`, `domestic_water_heating`, `major_appliances`, `lighting`, `miscellaneous_plug_loads`.
+    *   Common mappings in residential energy data:
+        *   `major_appliances`: Kitchen, Laundry.
+        *   `miscellaneous_plug_loads`: Miscellaneous.
+        *   `lighting`: Lighting.
+        *   `hvac`: Remaining Load? (Often HVAC is the largest load).
+        *   `domestic_water_heating`: Where is this? It's not in the category list.
+        *   Wait, look at the source `End Use` distinct count: 15.
+        *   Categories: Kitchen, Laundry, Miscellaneous, Lighting, Remaining Load.
+        *   If `Remaining Load` is HVAC, where is Water Heating?
+        *   Maybe `Remaining Load` contains both? Or maybe one of the other categories contains it?
+        *   Let's look at the target values. `hvac` is large (2000-12000). `domestic_water_heating` is medium (600-2000). `major_appliances` is medium (800-1700). `miscellaneous_plug_loads` is small (100-600).
+        *   In the source sample:
+            *   Kitchen/Freezer: 0.031 kW.
+            *   Laundry/Dryer: 0.083 kW.
+            *   Laundry/Washer: 0.0025 kW.
+            *   Misc/TV: 0.057 kW.
+            *   Misc/Computer: 0.043 kW.
+            *   Misc/Pool Pump: 0.62 kW.
+            *   Lighting: 0.094 kW.
+            *   Remaining Load: null in sample, but distinct count 341 for demand.
+        *   The values in the target are sums.
+        *   If `Remaining Load` is HVAC, what is Water Heating?
+        *   Is it possible that `Remaining Load` is split? No, it's a single category.
+        *   Is it possible that `domestic_water_heating` is part of `Kitchen` or `Laundry`? Unlikely to be separated out if not explicitly listed.
+        *   Let's reconsider the `End Use` distinct values. 15 distinct end uses.
+        *   Maybe "Water Heater" is an `End Use` under a category?
+        *   If "Water Heater" is an `End Use`, which category is it in?
+        *   Often, Water Heating is its own category. But the source only has 5 categories.
+        *   Could "Remaining Load" be *only* HVAC, and Water Heating is elsewhere?
+        *   Or is "Remaining Load" the sum of HVAC + Water Heating + Other?
+        *   If the target separates them, the source must have them separated.
+        *   Let's guess the 15 End Uses:
+            *   Kitchen: Freezer, Refrigerator, Dishwasher, Microwave, Oven?
+            *   Laundry: Washer, Dryer?
+            *   Lighting: Lighting?
+            *   Miscellaneous: TV, Computer, Pool Pump, Misc Metered, Electronics?
+            *   Remaining Load: HVAC, Water Heater?
+        *   If `Remaining Load` contains both, we can't separate them without more info.
+        *   However, if `Remaining Load` is *just* HVAC, where is Water Heating?
+        *   Maybe `domestic_water_heating` is 0? No, target has non-zero values.
+        *   Maybe `domestic_water_heating` is derived from `Kitchen` or `Laundry`? No.
+        *   Let's look at the `Number of Homes in Bin With This End Use Metered` column. It has strings like "0 (Modeled)".
+        *   This suggests some data is modeled.
+        *   Let's assume the standard CA-ISO or similar dataset structure.
+        *   In many such datasets, "Remaining Load" is indeed HVAC.
+        *   Is it possible `domestic_water_heating` is part of `Miscellaneous`? No.
+        *   Let's look at the target `lighting` column. It is always 0.
+        *   Source has `Lighting` category. Why is target `lighting` 0?
+        *   Maybe the target `lighting` column is *not* the sum of the `Lighting` category?
+        *   Or maybe the `Lighting` category in the source is excluded?
+        *   If `lighting` is 0, and `total` is 0, maybe `total` is just a placeholder?
+        *   Let's look at the sum of the other columns in the target sample:
+            *   Row 1: 2900 + 738 + 1408 + 0 + 505 = 5551.
+            *   If `lighting` was included, it would be higher.
+        *   Why is `lighting` 0?
+        *   Maybe the transformation *excludes* the `Lighting` category from the aggregation?
+        *   And `total` is 0 because it's not calculated?
+        *   Let's assume the following mapping based on typical end-use disaggregation:
+            *   `major_appliances`: `End Use Category` in ['Kitchen', 'Laundry']
+            *   `miscellaneous_plug_loads`: `End Use Category` == 'Miscellaneous'
+            *   `hvac`: `End Use Category` == 'Remaining Load' (Assuming Remaining Load is primarily HVAC)
+            *   `domestic_water_heating`: ???
+            *   `lighting`: `End Use Category` == 'Lighting' -> But target is 0.
+        *   Contradiction: If `Lighting` category exists in source, why is target `lighting` 0?
+        *   Possibility A: The target `lighting` column is intentionally zeroed out or not populated.
+        *   Possibility B: The `Lighting` category in the source is mapped to `null` or excluded.
+        *   Possibility C: `domestic_water_heating` is actually the `Lighting` category? No, names don't match.
+        *   Possibility D: `domestic_water_heating` is part of `Remaining Load`?
+        *   Let's look at the distinct values of `End Use` again. 15.
+        *   If `Remaining Load` is one end use, and `Lighting` is one, `Kitchen` has several, `Laundry` has several, `Misc` has several.
+        *   If `domestic_water_heating` is a specific `End Use`, it must be in one of the categories.
+        *   Could `domestic_water_heating` be in `Kitchen`? (Water heater is often in kitchen/utility).
+        *   Could it be in `Remaining Load`?
+        *   If `Remaining Load` is split into `hvac` and `domestic_water_heating`, how?
+        *   Maybe `End Use` == "Remaining Load" is HVAC, and there is another `End Use` like "Water Heater" in a different category?
+        *   Let's assume the following standard mapping for this specific dataset (likely CA-ISO or similar):
+            *   `hvac`: `End Use Category` == 'Remaining Load'
+            *   `domestic_water_heating`: `End Use` == 'Water Heater' (if it exists) OR `End Use Category` == 'Remaining Load' is wrong.
+        *   Let's try a different angle. Look at the target `hvac` values. They are very high.
+        *   Look at `domestic_water_heating`. Medium.
+        *   Look at `major_appliances`. Medium.
+        *   Look at `miscellaneous_plug_loads`. Low.
+        *   In the source sample:
+            *   `Remaining Load` demand is null in the sample, but distinct count is 341.
+            *   `Kitchen` demand is low (0.031).
+            *   `Laundry` demand is low (0.083).
+            *   `Misc` demand is low (0.057).
+            *   `Lighting` demand is low (0.094).
+        *   The target values are sums.
+        *   If `hvac` is `Remaining Load`, and `Remaining Load` is the only category with high demand, that fits.
+        *   Where does `domestic_water_heating` come from?
+        *   If `domestic_water_heating` is not in the source categories explicitly, maybe it's part of `Remaining Load`?
+        *   But we can't split `Remaining Load` without more info.
+        *   Wait, is it possible that `domestic_water_heating` is `0` in the source? No, target is non-zero.
+        *   Is it possible that `domestic_water_heating` is mapped from `Kitchen`? No.
+        *   Let's look at the `End Use` distinct values again. 15.
+        *   If `Remaining Load` is one, `Lighting` is one.
+        *   Kitchen: Freezer, Refrigerator, Dishwasher, Microwave, Oven, Toaster? (6)
+        *   Laundry: Washer, Dryer (2)
+        *   Misc: TV, Computer, Pool Pump, Misc Metered, Electronics, Phone? (6)
+        *   Total: 1 + 1 + 6 + 2 + 6 = 16. Close to 15.
+        *   Maybe "Water Heater" is one of the 15?
+        *   If "Water Heater" is an `End Use`, which category is it in?
+        *   If it's in `Remaining Load`, then `Remaining Load` has multiple end uses.
+        *   If `Remaining Load` category has `End Use` == "HVAC" and `End Use` == "Water Heater", then we can split them.
+        *   This is a very plausible scenario. `Remaining Load` is a category containing the unmeasured or residual loads, which are often modeled as HVAC and Water Heating.
+        *   So:
+            *   `hvac`: `End Use Category` == 'Remaining Load' AND `End Use` == 'HVAC' (or similar)
+            *   `domestic_water_heating`: `End Use Category` == 'Remaining Load' AND `End Use` == 'Water Heater' (or similar)
+        *   But we don't know the exact `End Use` strings.
+        *   However, we can infer from the target that `hvac` and `domestic_water_heating` are separate.
+        *   If we assume `Remaining Load` category is split, we need to know how.
+        *   Alternative: `domestic_water_heating` is in `Kitchen`? No.
+        *   Let's look at the target `lighting` = 0.
+        *   If `Lighting` category is in the source, and target `lighting` is 0, maybe the `Lighting` category is mapped to `null` or excluded?
+        *   Or maybe `lighting` in target is `int64` and always 0, implying it's not used.
+        *   Let's assume the mapping:
+            *   `major_appliances`: `End Use Category` in ['Kitchen', 'Laundry']
+            *   `miscellaneous_plug_loads`: `End Use Category` == 'Miscellaneous'
+            *   `hvac`: `End Use Category` == 'Remaining Load' (Assuming all Remaining Load is HVAC for now, or split)
+            *   `domestic_water_heating`: ???
+        *   If `domestic_water_heating` is non-zero, it must come from somewhere.
+        *   If `Remaining Load` is split, we need the `End Use` names.
+        *   Since we don't have the distinct `End Use` values, we have to guess or assume a standard.
+        *   Standard CA-ISO end uses:
+            *   HVAC
+            *   Water Heater
+            *   Refrigerator
+            *   Freezer
+            *   Dishwasher
+            *   Clothes Washer
+            *   Clothes Dryer
+            *   Lighting
+            *   TV
+            *   Computer
+            *   Pool Pump
+            *   Misc
+        *   If `Remaining Load` category contains "HVAC" and "Water Heater", then:
+            *   `hvac` = sum where `End Use` == 'HVAC'
+            *   `domestic_water_heating` = sum where `End Use` == 'Water Heater'
+        *   And `lighting` = sum where `End Use` == 'Lighting' -> But target is 0.
+        *   Why is target `lighting` 0?
+        *   Maybe the `Lighting` category in the source is *not* mapped to the `lighting` column in the target?
+        *   Or maybe the `lighting` column in the target is just a placeholder?
+        *   Given `total` is also 0, it seems `lighting` and `total` are not calculated.
+        *   So, we ignore `Lighting` category for the sum?
+        *   But wait, if we ignore `Lighting`, where does it go?
+        *   Maybe `lighting` in target is 0 because the source `Lighting` data is excluded from the aggregation?
+        *   Let's proceed with this assumption:
+            *   Filter out `Lighting` category?
+            *   Map `Kitchen` + `Laundry` -> `major_appliances`
+            *   Map `Miscellaneous` -> `miscellaneous_plug_loads`
+            *   Map `Remaining Load` -> Split into `hvac` and `domestic_water_heating` based on `End Use`.
+            *   Since we don't know the exact `End Use` strings for HVAC and Water Heater, we might have to assume `Remaining Load` is *only* HVAC and `domestic_water_heating` is 0? But target `domestic_water_heating` is non-zero.
+            *   This implies `domestic_water_heating` is present.
+            *   If `Remaining Load` is the only category left, it must contain both.
+            *   We will assume `End Use` == 'HVAC' maps to `hvac` and `End Use` == 'Water Heater' maps to `domestic_water_heating`.
+            *   What if the `End Use` strings are different? e.g., "Central AC", "Heat Pump"?
+            *   Without the distinct values, this is risky.
+            *   However, looking at the target `hvac` and `domestic_water_heating` values, they are distinct.
+            *   Let's check if `domestic_water_heating` could be from `Kitchen`? No.
+            *   Let's assume the `End Use` strings are "HVAC" and "Water Heater".
+
+3.  **Aggregation**:
+    *   Group by `Season` (derived from `Time Period`) and `Hour Ending`.
+    *   Sum the `Average Demand Per Home With This End Use [kW]` for each category.
+    *   Handle `null` season for non-month `Time Period` values.
+
+4.  **Season Mapping**:
+    *   Winter: Dec, Jan, Feb
+    *   Spring: Mar, Apr, May
+    *   Summer: Jun, Jul, Aug
+    *   Fall: Sep, Oct, Nov
+    *   Other (e.g., "All"): null
+
+5.  **Final Columns**:
+    *   `season`: str
+    *   `hour`: int64
+    *   `hvac`: float64
+    *   `domestic_water_heating`: float64
+    *   `major_appliances`: float64
+    *   `lighting`: int64 (0)
+    *   `miscellaneous_plug_loads`: float64
+    *   `total`: int64 (0)
+
+```python
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Create a copy to avoid modifying the original
+    df = source.copy()
+    
+    # Map Time Period to Season
+    def get_season(time_period):
+        if pd.isna(time_period):
+            return None
+        tp = str(time_period).strip()
+        if tp in ['December', 'January', 'February']:
+            return 'Winter'
+        elif tp in ['March', 'April', 'May']:
+            return 'Spring'
+        elif tp in ['June', 'July', 'August']:
+            return 'Summer'
+        elif tp in ['September', 'October', 'November']:
+            return 'Fall'
+        else:
+            # Non-month values map to null season
+            return None
+            
+    df['season'] = df['Time Period'].apply(get_season)
+    
+    # Map End Use Category and End Use to target columns
+    # We assume the following mapping based on typical energy end-use categories:
+    # major_appliances: Kitchen, Laundry
+    # miscellaneous_plug_loads: Miscellaneous
+    # hvac: Remaining Load with End Use 'HVAC' (or similar)
+    # domestic_water_heating: Remaining Load with End Use 'Water Heater' (or similar)
+    # lighting: Lighting (but target is 0, so we might exclude or set to 0)
+    
+    # Initialize target columns with 0
+    df['hvac'] = 0.0
+    df['domestic_water_heating'] = 0.0
+    df['major_appliances'] = 0.0
+    df['miscellaneous_plug_loads'] = 0.0
+    
+    # Map major_appliances
+    mask_major = df['End Use Category'].isin(['Kitchen', 'Laundry'])
+    df.loc[mask_major, 'major_appliances'] = df.loc[mask_major, 'Average Demand Per Home With This End Use [kW]']
+    
+    # Map miscellaneous_plug_loads
+    mask_misc = df['End Use Category'] == 'Miscellaneous'
+    df.loc[mask_misc, 'miscellaneous_plug_loads'] = df.loc[mask_misc, 'Average Demand Per Home With This End Use [kW]']
+    
+    # Map hvac and domestic_water_heating from Remaining Load
+    # We need to distinguish between HVAC and Water Heater within Remaining Load
+    # Assuming End Use strings are 'HVAC' and 'Water Heater'
+    mask_remaining = df['End Use Category'] == 'Remaining Load'
+    
+    # Check for HVAC
+    mask_hvac = mask_remaining & (df['End Use'] == 'HVAC')
+    df.loc[mask_hvac, 'hvac'] = df.loc[mask_hvac, 'Average Demand Per Home With This End Use [kW]']
+    
+    # Check for Water Heater
+    mask_wh = mask_remaining & (df['End Use'] == 'Water Heater')
+    df.loc[mask_wh, 'domestic_water_heating'] = df.loc[mask_wh, 'Average Demand Per Home With This End Use [kW]']
+    
+    # If there are other End Uses in Remaining Load, they are ignored for now
+    # If the mapping is incorrect, the values will be 0.
+    
+    # Group by season and hour
+    # Note: season can be null
+    grouped = df.groupby(['season', 'Hour

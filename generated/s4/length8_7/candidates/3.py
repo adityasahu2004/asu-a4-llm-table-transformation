@@ -1,0 +1,62 @@
+import pandas as pd
+import numpy as np
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # 1. Parse Date to extract Month
+    source = source.copy()
+    source['dt'] = pd.to_datetime(source['Date'], format='%m/%d/%Y')
+    source['month'] = source['dt'].dt.month
+    
+    # 2. Melt the hourly columns (1-24)
+    # Identify hour columns
+    hour_cols = [str(i) for i in range(1, 25)]
+    
+    melted = source.melt(
+        id_vars=['month'],
+        value_vars=hour_cols,
+        var_name='hour',
+        value_name='value'
+    )
+    
+    # Convert hour to integer
+    melted['hour'] = melted['hour'].astype(int)
+    
+    # 3. Group by hour and month, calculate mean
+    # Note: The target sample shows specific values that look like means of the available data for that hour/month.
+    # The source has multiple entries per month (e.g., 182 rows total, ~15 per month).
+    agg_df = melted.groupby(['hour', 'month'])['value'].mean().reset_index()
+    
+    # 4. Pivot to wide format
+    pivoted = agg_df.pivot(index='hour', columns='month', values='value')
+    
+    # 5. Format Columns
+    # Map month numbers to lowercase names
+    month_names = {
+        1: 'january', 2: 'february', 3: 'march', 4: 'april',
+        5: 'may', 6: 'june', 7: 'july', 8: 'august',
+        9: 'september', 10: 'october', 11: 'november', 12: 'december'
+    }
+    
+    pivoted.rename(columns=month_names, inplace=True)
+    
+    # Reset index to make hour a column
+    pivoted.reset_index(inplace=True)
+    
+    # Ensure hour is int
+    pivoted['hour'] = pivoted['hour'].astype(int)
+    
+    # Sort by hour
+    pivoted.sort_values('hour', inplace=True)
+    pivoted.reset_index(drop=True, inplace=True)
+    
+    # Select only the required columns in order
+    target_cols = ['hour'] + [month_names[i] for i in range(1, 13)]
+    
+    # Ensure all target columns exist (handle potential missing months if any, though unlikely given data range)
+    for col in target_cols:
+        if col not in pivoted.columns:
+            pivoted[col] = np.nan
+            
+    result = pivoted[target_cols]
+    
+    return result

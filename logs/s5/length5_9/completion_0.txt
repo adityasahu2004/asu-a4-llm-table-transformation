@@ -1,0 +1,21 @@
+**Operator Plan:**
+1.  **Date Formatting**: Parse the `Date` column (format `%m/%d/%Y`) and convert it to the target format `YYYY-MM-DD 00:00:00`.
+2.  **Column Renaming**: Rename the 24 hourly columns (`Hr 1` through `Hr 24`) to `value1` through `value24`.
+3.  **Projection**: Select only the `date` and the renamed value columns, discarding `Company`, `Rate`, and `Rate Code`.
+4.  **Preservation**: Maintain the original row order and index (resetting to default integer index as is standard for such transformations unless specified otherwise, though the target sample implies a clean dataframe).
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date and format to ISO-like string with time
+    dt_series = pd.to_datetime(source['Date'], format='%m/%d/%Y')
+    out = pd.DataFrame()
+    out['date'] = dt_series.dt.strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Rename hourly columns Hr 1..24 to value1..value24
+    for i in range(1, 25):
+        out[f'value{i}'] = source[f'Hr {i}']
+        
+    return out.reset_index(drop=True)
+```

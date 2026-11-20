@@ -1,0 +1,27 @@
+Operator plan: Parse the `Date` column (format `%a %m/%d/%Y`) and keep it as a string in the same format for the `date` column. Rename the 24 hourly columns (`1:00` through `24:00:00`) to `value1` through `value24`. Drop the `Segment` column.
+
+```python
+import pandas as pd
+
+def transform(source: pd.DataFrame) -> pd.DataFrame:
+    # Parse date to ensure validity, then format back to string
+    # The input format is "Thu 10/01/2009" -> %a %m/%d/%Y
+    # The output format is "Wed 01/01/2003" -> %a %m/%d/%Y
+    # We preserve the string representation as requested by the target schema dtype 'str'
+    # and the sample data showing the same format.
+    
+    out = pd.DataFrame()
+    out['date'] = pd.to_datetime(source['Date'], format='%a %m/%d/%Y').dt.strftime('%a %m/%d/%Y')
+    
+    # Map source hour columns to target value columns
+    # Source: "1:00", "2:00", ..., "23:00", "24:00:00"
+    # Target: "value1", "value2", ..., "value23", "value24"
+    
+    for h in range(1, 24):
+        out[f'value{h}'] = source[f'{h}:00']
+    
+    # Handle the 24th hour specifically as it has a different source name "24:00:00"
+    out['value24'] = source['24:00:00']
+    
+    return out
+```
